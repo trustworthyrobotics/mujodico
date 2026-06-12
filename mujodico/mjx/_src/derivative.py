@@ -54,6 +54,18 @@ def deriv_smooth_vel(m: Model, d: Data) -> Optional[jax.Array]:
         d._impl.actuator_moment, vel
     )
 
+  # qDeriv += d qfrc_actuator / d qpos * timestep
+  if not m.opt.disableflags & DisableBit.ACTUATION:
+    affine_bias = m.actuator_biastype == BiasType.AFFINE
+    bias_pos = m.actuator_biasprm[:, 1] * affine_bias
+    affine_gain = m.actuator_gaintype == GainType.AFFINE
+    gain_pos = m.actuator_gainprm[:, 1] * affine_gain
+    ctrl = d.ctrl.at[m.actuator_dyntype != DynType.NONE].set(d.act)
+    pos = bias_pos + gain_pos * ctrl
+    qderiv += d._impl.actuator_moment.T @ jax.vmap(jp.multiply)(
+        d._impl.actuator_moment, pos
+    ) * m.opt.timestep
+
   # qDeriv += d qfrc_passive / d qvel
   if not m.opt.disableflags & DisableBit.DAMPER:
     if qderiv is None:
@@ -62,6 +74,21 @@ def deriv_smooth_vel(m: Model, d: Data) -> Optional[jax.Array]:
       qderiv -= jp.diag(m.dof_damping)
     if m.ntendon:
       qderiv -= d._impl.ten_J.T @ jp.diag(m.tendon_damping) @ d._impl.ten_J
+
+  # qDeriv += d qfrc_passive / d qpos * timestep
+  if not m.opt.disableflags & DisableBit.SPRING:
+    adrs = m.jnt_dofadr
+    ends = jp.concatenate([adrs[1:], jp.array([m.nv])])
+    diff = jp.zeros(m.nv + 1)
+    diff = diff.at[adrs].add(m.jnt_stiffness)
+    diff = diff.at[ends].add(-m.jnt_stiffness)
+    dof_stiffness = jp.cumsum(diff)[:-1]
+    if qderiv is None:
+      qderiv = -jp.diag(dof_stiffness) * m.opt.timestep
+    else:
+      qderiv -= jp.diag(dof_stiffness) * m.opt.timestep
+    if m.ntendon:
+      qderiv -= d._impl.ten_J.T @ jp.diag(m.tendon_stiffness) @ d._impl.ten_J * m.opt.timestep
 
   if not m.opt.disableflags & (DisableBit.DAMPER | DisableBit.SPRING):
     # TODO(robotics-simulation): fluid drag model
