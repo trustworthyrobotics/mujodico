@@ -336,6 +336,18 @@ class ConstraintType(enum.IntEnum):
   CONTACT_ELLIPTIC = mujoco.mjtConstraint.mjCNSTR_CONTACT_ELLIPTIC
 
 
+class ContactApproxType(enum.Enum):
+  """Type of contact approximation.
+
+  Attributes:
+    MUJOCO: original mujoco contact approximation
+    LOG_BARRIER: log-barrier contact approximation
+  """
+
+  MUJOCO = "mujoco"
+  LOG_BARRIER = "logbarrier"
+
+
 class CamLightType(enum.IntEnum):
   """Type of camera light.
 
@@ -478,6 +490,8 @@ class OptionJAX(PyTreeNode):
   disableactuator: int
   sdf_initpoints: int
   has_fluid_params: bool
+  contact_approx: ContactApproxType
+  contact_smoothing: float
 
 
 

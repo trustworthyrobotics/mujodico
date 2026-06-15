@@ -56,6 +56,11 @@ _RK4_A = np.array([
 ])
 _RK4_B = np.array([1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0])
 
+# Constraint solvers
+_SOLVE_FUNC = {
+  ContactApproxType.MUJOCO: solver.solve,
+}
+
 
 def named_scope(fn, name: str = ''):
   @functools.wraps(fn)
@@ -449,7 +454,11 @@ def forward(m: Model, d: Data) -> Data:
     d = d.replace(qacc=d.qacc_smooth)
     return d
 
-  d = named_scope(solver.solve)(m, d)
+  if m.opt._impl.contact_approx not in _SOLVE_FUNC:
+    raise NotImplementedError(f'solver for {m.opt._impl.contact_approx.value} contact '
+                              f'approximation not implemented.')
+  solve_func = _SOLVE_FUNC[m.opt._impl.contact_approx]
+  d = named_scope(solve_func)(m, d)
   d = sensor.sensor_acc(m, d)
 
   return d

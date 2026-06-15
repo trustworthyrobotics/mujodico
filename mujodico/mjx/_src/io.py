@@ -288,6 +288,8 @@ def _put_statistic(
 def _put_model_jax(
     m: mujoco.MjModel,
     device: Optional[jax.Device] = None,
+    contact_approx: Optional[Union[str, types.ContactApproxType]] = None,
+    contact_smoothing: Optional[float] = None,
 ) -> types.Model:
   """Puts mujoco.MjModel onto a device, resulting in mjx.Model."""
   if m.nflex:
@@ -364,10 +366,35 @@ def _put_model_jax(
           f'{[mj_type(m) for m in missing]} not supported'
       )
 
+
+  # Contact approximation and contact smoothing
+  contact_approx = contact_approx or types.ContactApproxType.MUJOCO
+  if not isinstance(contact_approx, types.ContactApproxType):
+    contact_approx_str = \
+      contact_approx.lower().strip().replace(' ', '').replace('-', '').replace('_', '')
+    for type in types.ContactApproxType:
+      if contact_approx_str == type.value:
+        contact_approx = type
+        break
+  if not isinstance(contact_approx, types.ContactApproxType):
+    raise ValueError('contact_approximation must be one of ' +
+                     ', '.join([f'"{t.value}"' for t in types.ContactApproxType]))
+
+  contact_smoothing = contact_smoothing or 0
+  if isinstance(contact_smoothing, int):
+    contact_smoothing = float(contact_smoothing)
+  if not (isinstance(contact_smoothing, float) and contact_smoothing >= 0):
+    raise ValueError('contact_smoothing must be a nonnegative float"')
+
+  opt_impl = {
+    'contact_approx': contact_approx,
+    'contact_smoothing': contact_smoothing,
+  }
+
   mj_field_names = {f.name for f in types.Model.fields() if f.name != '_impl'}
   fields = {f: getattr(m, f) for f in mj_field_names}
   fields['cam_mat0'] = fields['cam_mat0'].reshape((-1, 3, 3))
-  fields['opt'] = _put_option(m.opt, types.Impl.JAX)
+  fields['opt'] = _put_option(m.opt, types.Impl.JAX, opt_impl)
   fields['stat'] = _put_statistic(m.stat, types.Impl.JAX)
 
   fields_jax = {}
@@ -459,6 +486,8 @@ def put_model(
     device: Optional[jax.Device] = None,
     impl: Optional[Union[str, types.Impl]] = None,
     keepalive_refs: Optional[Dict[int, Any]] = None,
+    contact_approximation: Optional[Union[str, types.ContactApproxType]] = None,
+    contact_smoothing: Optional[float] = None,
 ) -> types.Model:
   """Puts mujoco.MjModel onto a device, resulting in mjx.Model.
 
@@ -469,6 +498,10 @@ def put_model(
     keepalive_refs: optional dict to store references to underlying MuJoCo
       objects, preventing them from being garbage collected. Required for CPP
       impl to keep the model alive.
+    contact_approximation: contact approximation (for JAX only). Options are "mujoco",
+      "logbarrier". Defaults to original mujoco contact formulation.
+    contact_smoothing: amount of contact smoothing (for JAX only). Defaults to 0
+      effectively disabling contact smoothing.
 
   Returns:
     an mjx.Model placed on device
@@ -480,7 +513,7 @@ def put_model(
 
   impl, device = _resolve_impl_and_device(impl, device)
   if impl == types.Impl.JAX:
-    return _put_model_jax(m, device)
+    return _put_model_jax(m, device, contact_approximation, contact_smoothing)
   elif impl == types.Impl.WARP:
     _check_warp_installed()
     graph_mode = graph_mode or getattr(mjxw.types.GraphMode, 'WARP')
