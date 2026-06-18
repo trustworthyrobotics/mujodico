@@ -59,6 +59,7 @@ _RK4_B = np.array([1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0])
 # Constraint solvers
 _SOLVE_FUNC = {
   ContactApproxType.MUJOCO: solver.solve,
+  ContactApproxType.LOG_BARRIER: solver_logbarrier.solve,
 }
 
 
