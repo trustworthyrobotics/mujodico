@@ -423,7 +423,7 @@ def implicit(m: Model, d: Data) -> Data:
   qderiv = derivative.deriv_smooth_vel(m, d)
 
   qacc = d.qacc
-  if qderiv is not None:
+  if qderiv is not None and m.opt._impl.contact_approx == ContactApproxType.MUJOCO:
     # TODO(robotics-simulation): use smooth.factor_m / solve_m here:
     qm = support.full_m(m, d) if support.is_sparse(m) else d._impl.qM
     qm -= m.opt.timestep * qderiv

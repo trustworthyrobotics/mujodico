@@ -22,45 +22,49 @@ import numpy as np
 from scipy import sparse
 
 
+def _effective_m(m: Model, d: Data) -> tuple[jax.Array, jax.Array]:
+  """Computes the effective mass matrix and qacc_smooth for the integrator type."""
+  qm = support.full_m(m, d) if support.is_sparse(m) else d._impl.qM
+  qacc_smooth = d.qacc_smooth
+  if m.opt.integrator == IntegratorType.IMPLICITFAST:
+    qderiv = derivative.deriv_smooth_vel(m, d)
+    qm -= m.opt.timestep * qderiv
+
+    qh, _ = jax.scipy.linalg.cho_factor(qm)
+    qacc_smooth = jax.scipy.linalg.cho_solve((qh, False), d.qfrc_smooth)
+
+  return qm, qacc_smooth
+
+
 def solve(m: Model, d: Data) -> Data:
   if not isinstance(m.opt._impl, OptionJAX):
     raise ValueError('solve requires JAX backend implementation.')
 
-  dt = m.opt.timestep
+  qm, qacc_smooth = _effective_m(m, d)
 
-  qderiv = derivative.deriv_smooth_vel(m, d)
-
-  qm = support.full_m(m, d) if support.is_sparse(m) else d._impl.qM
-  qm -= dt * qderiv
-
-  qh, _ = jax.scipy.linalg.cho_factor(qm)
-  qacc_smooth = jax.scipy.linalg.cho_solve((qh, False), d.qfrc_smooth)
-
-  qvel_smooth = d.qvel + qacc_smooth * dt
-
-  qvel, efc_force = jax.pure_callback(
+  qacc, efc_force = jax.pure_callback(
       clarabel_solve,
       (
         jax.ShapeDtypeStruct((m.nv,), jp.float32),
         jax.ShapeDtypeStruct((d._impl.nefc,), jp.float32),
       ),
-      qm, qvel_smooth, d, dt,
+      qm, qacc_smooth, d, m.opt.timestep,
   )
 
   qfrc_constraint = d._impl.efc_J.T @ efc_force
 
   d = d.tree_replace({
       'qfrc_constraint': qfrc_constraint,
-      'qacc': (qvel - d.qvel) / dt,
+      'qacc': qacc,
       '_impl.efc_force': efc_force,
   })
 
   return d
 
 
-def clarabel_solve(qm: jax.Array, qvel_smooth: jax.Array, d: Data, dt) -> tuple[np.ndarray, np.ndarray]:
+def clarabel_solve(qm: jax.Array, qacc_smooth: jax.Array, d: Data, dt) -> tuple[np.ndarray, np.ndarray]:
   qm = np.asarray(qm)
-  qvel_smooth = np.asarray(qvel_smooth)
+  qacc_smooth = np.asarray(qacc_smooth)
   efc_J = np.array(d._impl.efc_J)
   efc_pos = np.array(d._impl.efc_pos)
 
@@ -98,19 +102,18 @@ def clarabel_solve(qm: jax.Array, qvel_smooth: jax.Array, d: Data, dt) -> tuple[
 
   # solve using clarabel
   P = sparse.csc_matrix(qm)
-  q = -qm @ qvel_smooth
+  q = -qm @ qacc_smooth
   A = sparse.csc_matrix(-efc_J)
-  b = -efc_J @ d.qvel + efc_pos / dt
+  b = efc_pos / (dt * dt)
 
   settings = clarabel.DefaultSettings()
   settings.verbose = False
-  settings.time_limit = 5.
+  settings.time_limit = 5.0
 
   solver = clarabel.DefaultSolver(P, q, A, b, cones, settings)
   solution = solver.solve()
 
-  qvel = np.array(solution.x)
-  efc_impulse = np.array(solution.z)
-  efc_force = efc_impulse / dt
+  qacc = np.array(solution.x)
+  efc_force = np.array(solution.z)
 
-  return qvel, efc_force
+  return qacc, efc_force
