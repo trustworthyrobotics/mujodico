@@ -654,6 +654,8 @@ def _make_data_jax(
       'efc_D': (nefc, float_),
       'efc_aref': (nefc, float_),
       'efc_force': (nefc, float_),
+      'efc_k': (nefc, float_),
+      'efc_b': (nefc, float_),
   }
   zero_impl_fields = {
       k: np.zeros(v[:-1], dtype=v[-1]) for k, v in zero_impl_fields.items()
@@ -1011,6 +1013,9 @@ def _put_data_jax(
       ]
 
     impl_fields[fname] = value
+
+  impl_fields['efc_k'] = np.zeros(nefc)
+  impl_fields['efc_b'] = np.zeros(nefc)
 
   # convert qM and qLD if jacobian is dense
   if not support.is_sparse(m):

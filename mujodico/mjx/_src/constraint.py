@@ -725,6 +725,8 @@ def make_constraint(m: Model, d: Data) -> Data:
     z = jp.empty(0)
     d = d.tree_replace({'_impl.efc_J': jp.empty((0, m.nv))})
     d = d.tree_replace({
+        '_impl.efc_k': z,
+        '_impl.efc_b': z,
         '_impl.efc_D': z,
         '_impl.efc_aref': z,
         '_impl.efc_frictionloss': z,
@@ -740,11 +742,13 @@ def make_constraint(m: Model, d: Data) -> Data:
     k, b, imp = _kbi(m, efc.solref, efc.solimp, efc.pos_imp)
     r = jp.maximum(efc.invweight * (1 - imp) / imp, mujoco.mjMINVAL)
     aref = -b * (efc.J @ d.qvel) - k * imp * efc.pos_aref
-    return aref, r, efc.pos_aref + efc.margin, efc.margin, efc.frictionloss
+    return aref, k, b, r, efc.pos_aref + efc.margin, efc.margin, efc.frictionloss
 
-  aref, r, pos, margin, frictionloss = fn(efc)
+  aref, k, b, r, pos, margin, frictionloss = fn(efc)
   d = d.tree_replace({
       '_impl.efc_J': efc.J,
+      '_impl.efc_k': k,
+      '_impl.efc_b': b,
       '_impl.efc_D': 1 / r,
       '_impl.efc_aref': aref,
       '_impl.efc_pos': pos,

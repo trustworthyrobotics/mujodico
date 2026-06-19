@@ -1014,6 +1014,8 @@ class DataJAX(PyTreeNode):
   efc_D: jax.Array  # pylint:disable=invalid-name
   efc_aref: jax.Array
   efc_force: jax.Array
+  efc_k: jax.Array
+  efc_b: jax.Array
 
 
 class Data(PyTreeNode):

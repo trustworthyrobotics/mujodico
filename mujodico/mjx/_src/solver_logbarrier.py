@@ -100,11 +100,14 @@ def clarabel_solve(qm: jax.Array, qacc_smooth: jax.Array, d: Data, dt) -> tuple[
       efc_pos[efc_address+1 : efc_address+dim] *= friction[:dim-1]
       efc_address += dim
 
+  # time constant
+  tau = d._impl.efc_b / d._impl.efc_k
+
   # solve using clarabel
   P = sparse.csc_matrix(qm)
   q = -qm @ qacc_smooth
   A = sparse.csc_matrix(-efc_J)
-  b = efc_pos / (dt * dt)
+  b = (efc_J @ d.qvel + efc_pos / (dt + tau)) / dt
 
   settings = clarabel.DefaultSettings()
   settings.verbose = False
