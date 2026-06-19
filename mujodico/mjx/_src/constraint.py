@@ -470,10 +470,12 @@ def _efc_contact_frictionless(m: Model, d: Data) -> Optional[_Efc]:
   if con_id.size == 0:
     return None
 
+  smoothing_enabled = m.opt._impl.contact_smoothing > 0
+
   @jax.vmap
   def rows(c: Contact):
     pos = c.dist - c.includemargin
-    active = pos < 0
+    active = (pos < 0) | smoothing_enabled
     body1, body2 = jp.array(m.geom_bodyid)[c.geom]
     jac1p, _ = support.jac(m, d, c.pos, body1)
     jac2p, _ = support.jac(m, d, c.pos, body2)
@@ -512,10 +514,12 @@ def _efc_contact_pyramidal(m: Model, d: Data, condim: int) -> Optional[_Efc]:
   if con_id.size == 0:
     return None
 
+  smoothing_enabled = m.opt._impl.contact_smoothing > 0
+
   @jax.vmap
   def rows(c: Contact):
     pos = c.dist - c.includemargin
-    active = pos < 0
+    active = (pos < 0) | smoothing_enabled
     body1, body2 = jp.array(m.geom_bodyid)[c.geom]
     jac1p, jac1r = support.jac(m, d, c.pos, body1)
     jac2p, jac2r = support.jac(m, d, c.pos, body2)
@@ -565,10 +569,12 @@ def _efc_contact_elliptic(m: Model, d: Data, condim: int) -> Optional[_Efc]:
   if con_id.size == 0:
     return None
 
+  smoothing_enabled = m.opt._impl.contact_smoothing > 0
+
   @jax.vmap
   def rows(c: Contact):
     pos = c.dist - c.includemargin
-    active = pos < 0
+    active = (pos < 0) | smoothing_enabled
     obj1id, obj2id = jp.array(m.geom_bodyid)[c.geom]
     jac1p, jac1r = support.jac(m, d, c.pos, obj1id)
     jac2p, jac2r = support.jac(m, d, c.pos, obj2id)
