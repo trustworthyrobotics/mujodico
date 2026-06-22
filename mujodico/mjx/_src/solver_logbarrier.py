@@ -1,25 +1,18 @@
 import jax
 from jax import numpy as jp
+from mujodico.mjx._src import conic_solver as conic
 from mujodico.mjx._src import constraint
 from mujodico.mjx._src import derivative
-from mujodico.mjx._src import math
-from mujodico.mjx._src import smooth
 from mujodico.mjx._src import support
 # pylint: disable=g-importing-member
-from mujodico.mjx._src.dataclasses import PyTreeNode
-from mujodico.mjx._src.types import ConeType
 from mujodico.mjx._src.types import ConstraintType
 from mujodico.mjx._src.types import Data
-from mujodico.mjx._src.types import DataJAX
 from mujodico.mjx._src.types import DisableBit
+from mujodico.mjx._src.types import IntegratorType
 from mujodico.mjx._src.types import Model
-from mujodico.mjx._src.types import ModelJAX
 from mujodico.mjx._src.types import OptionJAX
 # pylint: enable=g-importing-member
-
-import clarabel
 import numpy as np
-from scipy import sparse
 
 
 def _effective_m(m: Model, d: Data) -> tuple[jax.Array, jax.Array]:
@@ -42,81 +35,69 @@ def solve(m: Model, d: Data) -> Data:
 
   qm, qacc_smooth = _effective_m(m, d)
 
-  qacc, efc_force = jax.pure_callback(
-      clarabel_solve,
-      (
-        jax.ShapeDtypeStruct((m.nv,), jp.float32),
-        jax.ShapeDtypeStruct((d._impl.nefc,), jp.float32),
-      ),
-      qm, qacc_smooth, d, m.opt.timestep,
-  )
+  efc_J = d._impl.efc_J
+  efc_pos = d._impl.efc_pos
+
+  cones, friction_scale = build_cones(d, m.opt._impl.contact_smoothing)
+
+  dt = m.opt.timestep
+  tau = d._impl.efc_b / d._impl.efc_k
+
+  P = qm
+  q = -qm @ qacc_smooth
+  A = -efc_J * friction_scale[:, None]
+  b = (efc_J @ d.qvel + efc_pos / (dt + tau)) / dt * friction_scale
+
+  x, z, s = conic.solve(P=P, q=q, A=A, b=b, cones=tuple(cones))
+
+  qacc = x
+  efc_force = z
 
   qfrc_constraint = d._impl.efc_J.T @ efc_force
 
   d = d.tree_replace({
-      'qfrc_constraint': qfrc_constraint,
-      'qacc': qacc,
-      '_impl.efc_force': efc_force,
+    'qfrc_constraint': qfrc_constraint,
+    'qacc': qacc,
+    '_impl.efc_force': efc_force,
   })
 
   return d
 
 
-def clarabel_solve(qm: jax.Array, qacc_smooth: jax.Array, d: Data, dt) -> tuple[np.ndarray, np.ndarray]:
-  qm = np.asarray(qm)
-  qacc_smooth = np.asarray(qacc_smooth)
-  efc_J = np.array(d._impl.efc_J)
-  efc_pos = np.array(d._impl.efc_pos)
+def build_cones(d, contact_smoothing):
+    contact = d._impl.contact
 
-  contact = d._impl.contact
-  contact_dim_friction = {}
-  for i in range(len(contact.efc_address)):
-    contact_dim_friction[contact.efc_address[i]] = (contact.dim[i], contact.friction[i])
+    contact_dim_friction = {
+        contact.efc_address[i]: (contact.dim[i], contact.friction[i])
+        for i in range(len(contact.efc_address))
+    }
 
-  cones = []
-  efc_address = 0
-  while efc_address < d.nefc:
-    efc_type = d._impl.efc_type[efc_address]
-    if efc_type == ConstraintType.EQUALITY:
-      cones.append(clarabel.ZeroConeT(1))
-      efc_address += 1
-    elif efc_type in (
-      ConstraintType.FRICTION_DOF,
-      ConstraintType.FRICTION_TENDON,
-    ):
-      raise RuntimeError("Solver logbarrier does not support frictionloss")
-    elif efc_type in (
-      ConstraintType.LIMIT_JOINT,
-      ConstraintType.LIMIT_TENDON,
-      ConstraintType.CONTACT_FRICTIONLESS,
-      ConstraintType.CONTACT_PYRAMIDAL
-    ):
-      cones.append(clarabel.NonnegativeConeT(1))
-      efc_address += 1
-    elif efc_type == ConstraintType.CONTACT_ELLIPTIC:
-      dim, friction = contact_dim_friction[efc_address]
-      cones.append(clarabel.SecondOrderConeT(dim))
-      efc_J[efc_address+1 : efc_address+dim] *= friction[:dim-1]
-      efc_pos[efc_address+1 : efc_address+dim] *= friction[:dim-1]
-      efc_address += dim
+    cones = []
+    friction_scale = np.ones(d.nefc)
 
-  # time constant
-  tau = d._impl.efc_b / d._impl.efc_k
+    i = 0
+    while i < d.nefc:
+      t = d._impl.efc_type[i]
 
-  # solve using clarabel
-  P = sparse.csc_matrix(qm)
-  q = -qm @ qacc_smooth
-  A = sparse.csc_matrix(-efc_J)
-  b = (efc_J @ d.qvel + efc_pos / (dt + tau)) / dt
+      if t == ConstraintType.EQUALITY:
+        cones.append(conic.ZeroCone(dim=1))
+        i += 1
 
-  settings = clarabel.DefaultSettings()
-  settings.verbose = False
-  settings.time_limit = 5.0
+      elif t in (ConstraintType.LIMIT_JOINT, ConstraintType.LIMIT_TENDON):
+        cones.append(conic.NonNegativeCone(dim=1))
+        i += 1
 
-  solver = clarabel.DefaultSolver(P, q, A, b, cones, settings)
-  solution = solver.solve()
+      elif t in (ConstraintType.CONTACT_FRICTIONLESS, ConstraintType.CONTACT_PYRAMIDAL):
+        cones.append(conic.NonNegativeCone(dim=1, complementarity=contact_smoothing))
+        i += 1
 
-  qacc = np.array(solution.x)
-  efc_force = np.array(solution.z)
+      elif t == ConstraintType.CONTACT_ELLIPTIC:
+        dim, friction = contact_dim_friction[i]
+        cones.append(conic.SecondOrderCone(dim=dim, complementarity=contact_smoothing))
+        friction_scale[i+1:i+dim] = friction[:dim-1]
+        i += dim
 
-  return qacc, efc_force
+      else:
+        raise RuntimeError(f"Unsupported constraint type {t}")
+
+    return tuple(cones), friction_scale
