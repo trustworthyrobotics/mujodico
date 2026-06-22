@@ -553,8 +553,8 @@ def solve(
           nonzero_cones.append(cone)
       i = end
 
-  eq_idx = jp.array(eq_idx)
-  ineq_idx = jp.array(ineq_idx)
+  eq_idx = jp.array(eq_idx, dtype=jp.int32)
+  ineq_idx = jp.array(ineq_idx, dtype=jp.int32)
 
   Aeq = A[eq_idx]
   beq = b[eq_idx]
