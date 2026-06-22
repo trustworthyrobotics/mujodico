@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from functools import partial
 
 import jax
 import jax.numpy as jp
@@ -168,6 +169,8 @@ def _initialize(**kwargs) -> Context:
   ctx.z = jp.maximum(ctx.z, 0.01)
   ctx.s = jp.maximum(ctx.s, 0.01)
 
+  _compute_scaling(ctx)
+
   return ctx
 
 
@@ -327,7 +330,7 @@ def _corrector_mu_e(
   return result
 
 
-def _solve(
+def _solve_impl(
   P: jax.Array,
   q: jax.Array,
   A: jax.Array,
@@ -342,18 +345,7 @@ def _solve(
   s_init: jax.Array | None = None,
   iterations: int = 100,
   tolerance: float = 1e-8,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-  """
-  Solves the conic program
-    minimize    ½ xᵀ P x + qᵀ x
-    subject to  A x = b
-                G x + s = h
-                s ∈ 𝒦
-  cones are either non-negative cone or second-order cone.
-  Returns x, y, z, s
-  where y is the dual of (A x = b), and z is the dual of (G x + s = h).
-  """
-
+) -> Context:
   ctx = _initialize(
     P=P, q=q, A=A, b=b, G=G, h=h, cones=cones,
     x=x_init, y=y_init, z=z_init, s=s_init,
@@ -375,7 +367,6 @@ def _solve(
   def body_fun(val):
     ctx, rx, ry, rz, rs, iter = val
 
-    _compute_scaling(ctx)
     dx, dy, dz, ds = _solve_newton(ctx, -rx, -ry, -rz, -rs)
     alpha = _line_search(ctx, dz, ds)
 
@@ -391,6 +382,7 @@ def _solve(
     ctx.y = ctx.y + alpha * dy
     ctx.z = ctx.z + alpha * dz
     ctx.s = ctx.s + alpha * ds
+    _compute_scaling(ctx)
 
     rx, ry, rz, rs = _residual(ctx)
 
@@ -399,7 +391,97 @@ def _solve(
   val = jax.lax.while_loop(cond_fun, body_fun, init_val)
   ctx = val[0]
 
+  return ctx
+
+
+@partial(
+  jax.custom_vjp,
+  nondiff_argnames=('cones',
+                    'x_init', 'y_init', 'z_init', 's_init',
+                    'iterations', 'tolerance')
+)
+def _solve(
+  P: jax.Array,
+  q: jax.Array,
+  A: jax.Array,
+  b: jax.Array,
+  G: jax.Array,
+  h: jax.Array,
+  cones: tuple[NonNegativeCone | SecondOrderCone],
+  x_init: jax.Array | None = None,
+  y_init: jax.Array | None = None,
+  z_init: jax.Array | None = None,
+  s_init: jax.Array | None = None,
+  iterations: int = 100,
+  tolerance: float = 1e-8,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+  """
+  Solves the conic program
+    minimize    ½ xᵀ P x + qᵀ x
+    subject to  A x = b
+                G x + s = h
+                s ∈ 𝒦
+  cones are either non-negative cone or second-order cone.
+  Returns x, y, z, s
+  where y is the dual of (A x = b), and z is the dual of (G x + s = h).
+  """
+
+  ctx = _solve_impl(P, q, A, b, G, h, cones,
+                    x_init=x_init, y_init=y_init, z_init=z_init, s_init=s_init,
+                    iterations=iterations, tolerance=tolerance)
+
   return ctx.x, ctx.y, ctx.z, ctx.s
+
+
+def _solve_fwd(
+  P: jax.Array,
+  q: jax.Array,
+  A: jax.Array,
+  b: jax.Array,
+  G: jax.Array,
+  h: jax.Array,
+  cones: tuple[NonNegativeCone | SecondOrderCone],
+  x_init: jax.Array | None = None,
+  y_init: jax.Array | None = None,
+  z_init: jax.Array | None = None,
+  s_init: jax.Array | None = None,
+  iterations: int = 100,
+  tolerance: float = 1e-8,
+) -> tuple[tuple[jax.Array, jax.Array, jax.Array, jax.Array], Context]:
+
+  ctx = _solve_impl(P, q, A, b, G, h, cones,
+                    x_init=x_init, y_init=y_init, z_init=z_init, s_init=s_init,
+                    iterations=iterations, tolerance=tolerance)
+
+  return (ctx.x, ctx.y, ctx.z, ctx.s), ctx
+
+
+def _solve_bwd(
+  cones, x_init, y_init, z_init, s_init, iterations, tolerance,
+  ctx: Context,
+  g: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+
+  gx, gy, gz, gs = g
+
+  W = ctx.W
+  lx, ly, lz = _solve_kkt(ctx, gx, gy, gz - W.T @ W @ gs)
+
+  x, y, z, s = ctx.x, ctx.y, ctx.z, ctx.s
+
+  def f(P, q, A, b, G, h):
+    return (
+      P @ x + A.T @ y + G.T @ z + q,
+      A @ x                     - b,
+      G @ x                 + s - h,
+    )
+
+  _, f_vjp = jax.vjp(f, ctx.P, ctx.q, ctx.A, ctx.b, ctx.G, ctx.h)
+
+  return f_vjp((-lx, -ly, -lz))
+
+
+_solve.defvjp(_solve_fwd, _solve_bwd)
 
 
 def solve(
