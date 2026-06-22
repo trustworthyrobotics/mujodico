@@ -96,7 +96,7 @@ class Context:
   s: jax.Array
   W: jax.Array
   Winv: jax.Array
-  lam: jax.Array
+  lmbda: jax.Array
   dim: int
   iterations: int
   tolerance: float
@@ -106,7 +106,7 @@ class Context:
   def tree_flatten(self):
     children = (
       self.x, self.y, self.z, self.s,
-      self.W, self.Winv, self.lam,
+      self.W, self.Winv, self.lmbda,
       self.chol_Q, self.chol_S,
     )
     aux = (
@@ -122,12 +122,12 @@ class Context:
   @classmethod
   def tree_unflatten(cls, aux, children):
       P, q, A, b, G, h, cones, dim, iterations, tolerance = aux
-      x, y, z, s, W, Winv, lam, chol_Q, chol_S = children
+      x, y, z, s, W, Winv, lmbda, chol_Q, chol_S = children
 
       return cls(
           P, q, A, b, G, h, cones,
           x, y, z, s,
-          W, Winv, lam,
+          W, Winv, lmbda,
           dim, iterations, tolerance,
           chol_Q, chol_S,
       )
@@ -152,7 +152,7 @@ def _initialize(**kwargs) -> Context:
     s=kwargs['s'],
     W=W,
     Winv=Winv,
-    lam=jp.zeros(dim),
+    lmbda=jp.zeros(dim),
     dim=dim,
     iterations=kwargs['iterations'],
     tolerance=kwargs['tolerance'],
@@ -178,17 +178,48 @@ def _compute_scaling(ctx: Context):
   i = 0
   for cone in ctx.cones:
     end = i + cone.dim
+
+    sk = ctx.s[i:end]
+    zk = ctx.z[i:end]
+
     if isinstance(cone, NonNegativeCone):
-      w = jp.sqrt(ctx.s[i:end] / jp.maximum(ctx.z[i:end], 1e-6))
+      w = jp.sqrt(sk / zk)
       ctx.W = ctx.W.at[i:end, i:end].set(jp.diag(w))
       ctx.Winv = ctx.Winv.at[i:end, i:end].set(jp.diag(1.0 / w))
+      lmbda = jp.sqrt(sk * zk)
+      ctx.lmbda = ctx.lmbda.at[i:end].set(lmbda)
 
     elif isinstance(cone, SecondOrderCone):
       raise NotImplementedError()
 
     i = end
 
-  ctx.lam = ctx.W @ ctx.z
+  ctx.chol_Q = None
+  ctx.chol_S = None
+
+
+def _update_scaling(ctx: Context, dz: jax.Array, ds: jax.Array, alpha: jax.Array):
+  i = 0
+  for cone in ctx.cones:
+    end = i + cone.dim
+
+    W = ctx.W[i:end, i:end]
+    Winv = ctx.Winv[i:end, i:end]
+
+    if isinstance(cone, NonNegativeCone):
+      s_scaled = ctx.lmbda[i:end] + alpha * (Winv.T @ ds[i:end])
+      z_scaled = ctx.lmbda[i:end] + alpha * (W @ dz[i:end])
+      w = jp.sqrt(s_scaled) / jp.sqrt(z_scaled) * jp.diag(W)
+      ctx.W = ctx.W.at[i:end, i:end].set(jp.diag(w))
+      ctx.Winv = ctx.Winv.at[i:end, i:end].set(jp.diag(1.0 / w))
+      lmbda = jp.sqrt(s_scaled) * jp.sqrt(z_scaled)
+      ctx.lmbda = ctx.lmbda.at[i:end].set(lmbda)
+
+    elif isinstance(cone, SecondOrderCone):
+      raise NotImplementedError()
+
+    i = end
+
   ctx.chol_Q = None
   ctx.chol_S = None
 
@@ -246,7 +277,7 @@ def _residual(ctx: Context) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]
   rx = ctx.P @ ctx.x + ctx.A.T @ ctx.y + ctx.G.T @ ctx.z + ctx.q
   ry = ctx.A @ ctx.x - ctx.b
   rz = ctx.s + ctx.G @ ctx.x - ctx.h
-  rs = _jordan_product(ctx, ctx.s, ctx.z) - _mu_e(ctx)
+  rs = _jordan_product(ctx, ctx.lmbda, ctx.lmbda) - _mu_e(ctx)
 
   return rx, ry, rz, rs
 
@@ -301,9 +332,10 @@ def _solve_newton(
     G x           + s = bz
     λ ∘ (W z + W⁻ᵀ s) = bs
   """
-  WT_laminv_bs = ctx.W.T @ _inverse_jordan_product(ctx, ctx.lam, bs)
-  x, y, z = _solve_kkt(ctx, bx, by, bz - WT_laminv_bs)
-  s = WT_laminv_bs - ctx.W.T @ ctx.W @ ctx.z
+
+  WT_lmbdainv_bs = ctx.W.T @ _inverse_jordan_product(ctx, ctx.lmbda, bs)
+  x, y, z = _solve_kkt(ctx, bx, by, bz - WT_lmbdainv_bs)
+  s = WT_lmbdainv_bs - ctx.W.T @ ctx.W @ z
   return x, y, z, s
 
 
@@ -382,7 +414,7 @@ def _solve_impl(
     ctx.y = ctx.y + alpha * dy
     ctx.z = ctx.z + alpha * dz
     ctx.s = ctx.s + alpha * ds
-    _compute_scaling(ctx)
+    _update_scaling(ctx, dz, ds, alpha)
 
     rx, ry, rz, rs = _residual(ctx)
 
