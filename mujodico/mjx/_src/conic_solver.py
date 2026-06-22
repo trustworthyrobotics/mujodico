@@ -1,0 +1,475 @@
+from dataclasses import dataclass, field
+
+import jax
+import jax.numpy as jp
+
+
+@dataclass(frozen=True)
+class ZeroCone:
+  dim: int
+
+  def __post_init__(self):
+    if self.dim <= 0:
+      raise ValueError("ZeroCone requires dim >= 1")
+
+
+@dataclass(frozen=True)
+class NonNegativeCone:
+  dim: int
+  complementarity: float = 0.0
+  deg: int = field(init=False)
+
+  def __post_init__(self):
+    if self.dim <= 0:
+      raise ValueError("NonNegativeCone requires dim >= 1")
+    if self.complementarity < 0.0:
+      raise ValueError("Cone complementarity must be non-negative")
+
+    object.__setattr__(self, "deg", self.dim)
+
+  def _jordan_identity(self):
+    return jp.ones(self.dim)
+
+  def _jordan_product(self, s: jax.Array, z: jax.Array) -> jax.Array:
+    assert s.size == self.dim
+    assert z.size == self.dim
+    return s * z
+
+  def _inverse_jordan_product(self, u: jax.Array, v: jax.Array) -> jax.Array:
+    assert u.size == self.dim
+    assert v.size == self.dim
+    return v / u
+
+  def _line_search(self, s: jax.Array, ds: jax.Array) -> jax.Array:
+    assert s.size == self.dim
+    assert ds.size == self.dim
+    return 1.0 / jp.maximum(jp.max(-ds / s), 0.0)
+
+
+@dataclass(frozen=True)
+class SecondOrderCone:
+  dim: int
+  complementarity: float = 0.0
+  deg: int = field(init=False)
+
+  def __post_init__(self):
+    if self.dim < 2:
+      raise ValueError("SecondOrderCone requires dim >= 2")
+    if self.complementarity < 0.0:
+      raise ValueError("Cone complementarity must be non-negative")
+
+    object.__setattr__(self, "deg", 1)
+
+  def _jordan_identity(self):
+    return jp.zeros(self.dim).at[0].set(1.0)
+
+  def _jordan_product(self, s: jax.Array, z: jax.Array) -> jax.Array:
+    assert s.size == self.dim
+    assert z.size == self.dim
+    raise NotImplementedError()
+
+  def _inverse_jordan_product(self, u: jax.Array, v: jax.Array) -> jax.Array:
+    assert u.size == self.dim
+    assert v.size == self.dim
+    raise NotImplementedError()
+
+  def _line_search(self, s: jax.Array, ds: jax.Array) -> jax.Array:
+    assert s.size == self.dim
+    assert ds.size == self.dim
+    raise NotImplementedError()
+
+
+@jax.tree_util.register_pytree_node_class
+@dataclass
+class Context:
+  P: jax.Array
+  q: jax.Array
+  A: jax.Array
+  b: jax.Array
+  G: jax.Array
+  h: jax.Array
+  cones: tuple[NonNegativeCone | SecondOrderCone]
+  x: jax.Array
+  y: jax.Array
+  z: jax.Array
+  s: jax.Array
+  W: jax.Array
+  Winv: jax.Array
+  lam: jax.Array
+  dim: int
+  iterations: int
+  tolerance: float
+  chol_Q: tuple[jax.Array, bool] | None = None
+  chol_S: tuple[jax.Array, bool] | None = None
+
+  def tree_flatten(self):
+    children = (
+      self.x, self.y, self.z, self.s,
+      self.W, self.Winv, self.lam,
+      self.chol_Q, self.chol_S,
+    )
+    aux = (
+      self.P, self.q, self.A, self.b,
+      self.G, self.h,
+      self.cones,
+      self.dim,
+      self.iterations,
+      self.tolerance,
+    )
+    return children, aux
+
+  @classmethod
+  def tree_unflatten(cls, aux, children):
+      P, q, A, b, G, h, cones, dim, iterations, tolerance = aux
+      x, y, z, s, W, Winv, lam, chol_Q, chol_S = children
+
+      return cls(
+          P, q, A, b, G, h, cones,
+          x, y, z, s,
+          W, Winv, lam,
+          dim, iterations, tolerance,
+          chol_Q, chol_S,
+      )
+
+
+def _initialize(**kwargs) -> Context:
+  dim = sum([cone.dim for cone in kwargs['cones']])
+  W = jp.eye(dim)
+  Winv= jp.eye(dim)
+
+  ctx = Context(
+    P=kwargs['P'],
+    q=kwargs['q'],
+    A=kwargs['A'],
+    b=kwargs['b'],
+    G=kwargs['G'],
+    h=kwargs['h'],
+    cones=kwargs['cones'],
+    x=kwargs['x'],
+    y=kwargs['y'],
+    z=kwargs['z'],
+    s=kwargs['s'],
+    W=W,
+    Winv=Winv,
+    lam=jp.zeros(dim),
+    dim=dim,
+    iterations=kwargs['iterations'],
+    tolerance=kwargs['tolerance'],
+  )
+
+  if any([var is None for var in (ctx.x, ctx.y, ctx.z, ctx.s)]):
+    x, y, z = _solve_kkt(ctx=ctx, bx=-ctx.q, by=ctx.b, bz=ctx.h)
+    s = ctx.h - ctx.G @ x
+    ctx.x = ctx.x or x
+    ctx.y = ctx.y or y
+    ctx.z = ctx.z or z
+    ctx.s = ctx.s or s
+
+  ctx.z = jp.maximum(ctx.z, 0.01)
+  ctx.s = jp.maximum(ctx.s, 0.01)
+
+  return ctx
+
+
+def _compute_scaling(ctx: Context):
+  i = 0
+  for cone in ctx.cones:
+    end = i + cone.dim
+    if isinstance(cone, NonNegativeCone):
+      w = jp.sqrt(ctx.s[i:end] / jp.maximum(ctx.z[i:end], 1e-6))
+      ctx.W = ctx.W.at[i:end, i:end].set(jp.diag(w))
+      ctx.Winv = ctx.Winv.at[i:end, i:end].set(jp.diag(1.0 / w))
+
+    elif isinstance(cone, SecondOrderCone):
+      raise NotImplementedError()
+
+    i = end
+
+  ctx.lam = ctx.W @ ctx.z
+  ctx.chol_Q = None
+  ctx.chol_S = None
+
+
+def _mu_e(ctx: Context) -> jax.Array:
+  result = jp.zeros(ctx.dim)
+
+  i = 0
+  for cone in ctx.cones:
+    end = i + cone.dim
+    result = result.at[i:end].set(cone.complementarity * cone._jordan_identity())
+    i = end
+
+  return result
+
+
+def _jordan_product(ctx: Context, s: jax.Array, z: jax.Array) -> jax.Array:
+  result = jp.zeros(ctx.dim)
+
+  i = 0
+  for cone in ctx.cones:
+    end = i + cone.dim
+    result = result.at[i:end].set(cone._jordan_product(s[i:end], z[i:end]))
+    i = end
+
+  return result
+
+
+def _inverse_jordan_product(ctx: Context, u: jax.Array, v: jax.Array) -> jax.Array:
+  result = jp.zeros(ctx.dim)
+
+  i = 0
+  for cone in ctx.cones:
+    end = i + cone.dim
+    result = result.at[i:end].set(cone._inverse_jordan_product(u[i:end], v[i:end]))
+    i = end
+
+  return result
+
+
+def _line_search(ctx: Context, dz: jax.Array, ds: jax.Array) -> jax.Array:
+  alpha = jp.ones(1)
+
+  i = 0
+  for cone in ctx.cones:
+    end = i + cone.dim
+    alpha = jp.minimum(alpha, cone._line_search(ctx.z[i:end], dz[i:end]))
+    alpha = jp.minimum(alpha, cone._line_search(ctx.s[i:end], ds[i:end]))
+    i = end
+
+  return alpha
+
+
+def _residual(ctx: Context) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+  rx = ctx.P @ ctx.x + ctx.A.T @ ctx.y + ctx.G.T @ ctx.z + ctx.q
+  ry = ctx.A @ ctx.x - ctx.b
+  rz = ctx.s + ctx.G @ ctx.x - ctx.h
+  rs = _jordan_product(ctx, ctx.s, ctx.z) - _mu_e(ctx)
+
+  return rx, ry, rz, rs
+
+
+def _solve_kkt(
+    ctx: Context, bx: jax.Array, by: jax.Array, bz: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+  """
+  Solves the KKT system:
+    P x + Aᵀ y + Gᵀ z = bx
+    A x               = by
+    G x        -WᵀW x = bz
+  """
+
+  P = ctx.P
+  A = ctx.A
+  G = ctx.G
+  Winv = ctx.Winv
+
+  WTW_inv = Winv @ Winv.T
+
+  if ctx.chol_Q is None:
+    Q = P + G.T @ WTW_inv @ G
+    ctx.chol_Q = jax.scipy.linalg.cho_factor(Q)
+
+  def Q_solve(rhs):
+      return jax.scipy.linalg.cho_solve(ctx.chol_Q, rhs)
+
+  rhs_x = bx + G.T @ WTW_inv @ bz
+
+  if ctx.chol_S is None:
+    S = A @ Q_solve(A.T)
+    ctx.chol_S = jax.scipy.linalg.cho_factor(S)
+
+  rhs_y = A @ Q_solve(rhs_x) - by
+  y = jax.scipy.linalg.cho_solve(ctx.chol_S, rhs_y)
+
+  x = Q_solve(rhs_x - A.T @ y)
+
+  z = WTW_inv @ (G @ x - bz)
+
+  return x, y, z
+
+
+def _solve_newton(
+    ctx: Context, bx: jax.Array, by: jax.Array, bz: jax.Array, bs: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+  """
+  Solves the newton step:
+    P x + Aᵀ y + Gᵀ z = bx
+    A x               = by
+    G x           + s = bz
+    λ ∘ (W z + W⁻ᵀ s) = bs
+  """
+  WT_laminv_bs = ctx.W.T @ _inverse_jordan_product(ctx, ctx.lam, bs)
+  x, y, z = _solve_kkt(ctx, bx, by, bz - WT_laminv_bs)
+  s = WT_laminv_bs - ctx.W.T @ ctx.W @ ctx.z
+  return x, y, z, s
+
+
+def _corrector_mu_e(
+    ctx: Context, ds: jax.Array, dz: jax.Array, alpha: jax.Array
+) -> jax.Array:
+  result = jp.zeros(ctx.dim)
+
+  i = 0
+  for cone in ctx.cones:
+    end = i + cone.dim
+
+    mu0 = jp.dot(ctx.s[i:end], ctx.z[i:end]) / cone.deg
+    mu1 = jp.dot(ctx.s[i:end] + alpha * ds[i:end], ctx.z[i:end] + alpha * dz[i:end]) / cone.deg
+    mu_target = cone.complementarity
+
+    rho = jp.abs(mu1 - mu_target) / jp.abs(mu0 - mu_target)
+    sigma = jp.clip(rho, 0.0, 1.0)**3
+
+    result = result.at[i:end].set(sigma * (mu1 - mu_target) * cone._jordan_identity())
+
+    i = end
+
+  return result
+
+
+def _solve(
+  P: jax.Array,
+  q: jax.Array,
+  A: jax.Array,
+  b: jax.Array,
+  G: jax.Array,
+  h: jax.Array,
+  cones: tuple[NonNegativeCone | SecondOrderCone],
+  *,
+  x_init: jax.Array | None = None,
+  y_init: jax.Array | None = None,
+  z_init: jax.Array | None = None,
+  s_init: jax.Array | None = None,
+  iterations: int = 100,
+  tolerance: float = 1e-8,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+  """
+  Solves the conic program
+    minimize    ½ xᵀ P x + qᵀ x
+    subject to  A x = b
+                G x + s = h
+                s ∈ 𝒦
+  cones are either non-negative cone or second-order cone.
+  Returns x, y, z, s
+  where y is the dual of (A x = b), and z is the dual of (G x + s = h).
+  """
+
+  ctx = _initialize(
+    P=P, q=q, A=A, b=b, G=G, h=h, cones=cones,
+    x=x_init, y=y_init, z=z_init, s=s_init,
+    iterations=iterations, tolerance=tolerance
+  )
+
+  rx, ry, rz, rs = _residual(ctx)
+  init_val = (ctx, rx, ry, rz, rs, 0)
+
+  def cond_fun(val):
+    ctx, rx, ry, rz, rs, iter = val
+    return (
+      (iter < ctx.iterations) &
+      ((jp.linalg.norm(rx, jp.inf) > ctx.tolerance) |
+       (jp.linalg.norm(ry, jp.inf) > ctx.tolerance) |
+       (jp.linalg.norm(rz, jp.inf) > ctx.tolerance) |
+       (jp.linalg.norm(rs, jp.inf) > ctx.tolerance)))
+
+  def body_fun(val):
+    ctx, rx, ry, rz, rs, iter = val
+
+    _compute_scaling(ctx)
+    dx, dy, dz, ds = _solve_newton(ctx, -rx, -ry, -rz, -rs)
+    alpha = _line_search(ctx, dz, ds)
+
+    bs = (-rs
+      - _jordan_product(ctx, ctx.Winv.T @ ds, ctx.W @ dz)
+      + _corrector_mu_e(ctx, ds, dz, alpha)
+    )
+
+    dx, dy, dz, ds = _solve_newton(ctx, -rx, -ry, -rz, bs)
+    alpha = _line_search(ctx, dz, ds) * 0.99
+
+    ctx.x = ctx.x + alpha * dx
+    ctx.y = ctx.y + alpha * dy
+    ctx.z = ctx.z + alpha * dz
+    ctx.s = ctx.s + alpha * ds
+
+    rx, ry, rz, rs = _residual(ctx)
+
+    return (ctx, rx, ry, rz, rs, iter + 1)
+
+  val = jax.lax.while_loop(cond_fun, body_fun, init_val)
+  ctx = val[0]
+
+  return ctx.x, ctx.y, ctx.z, ctx.s
+
+
+def solve(
+  P: jax.Array,
+  q: jax.Array,
+  A: jax.Array,
+  b: jax.Array,
+  cones: tuple[ZeroCone | NonNegativeCone | SecondOrderCone],
+  *,
+  x_init: jax.Array | None = None,
+  z_init: jax.Array | None = None,
+  s_init: jax.Array | None = None,
+  iterations: int = 100,
+  tolerance: float = 1e-8,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+  """
+  Solves the conic program
+    minimize    ½ xᵀ P x + qᵀ x
+    subject to  A x + s = b
+                s ∈ 𝒦
+  cones are either zero cone, non-negative cone or second-order cone.
+  Returns x, z, s
+  where z is the dual of (A x + s = b).
+  """
+
+  eq_idx = []
+  ineq_idx = []
+  nonzero_cones = []
+
+  i = 0
+  for cone in cones:
+      end = i + cone.dim
+      if isinstance(cone, ZeroCone):
+          eq_idx.extend(range(i, end))
+      else:
+          ineq_idx.extend(range(i, end))
+          nonzero_cones.append(cone)
+      i = end
+
+  eq_idx = jp.array(eq_idx)
+  ineq_idx = jp.array(ineq_idx)
+
+  Aeq = A[eq_idx]
+  beq = b[eq_idx]
+  zeq_init = z_init[eq_idx] if z_init is not None else None
+
+  Aineq = A[ineq_idx]
+  bineq = b[ineq_idx]
+  zineq_init = z_init[ineq_idx] if z_init is not None else None
+  sineq_init = s_init[ineq_idx] if s_init is not None else None
+
+  x, zeq, zineq, sineq = _solve(
+    P=P, q=q,
+    A=Aeq, b=beq,
+    G=Aineq, h=bineq,
+    cones=tuple(nonzero_cones),
+    x_init=x_init,
+    y_init=zeq_init,
+    z_init=zineq_init,
+    s_init=sineq_init,
+    iterations=iterations,
+    tolerance=tolerance,
+  )
+
+  z = jp.zeros(A.shape[0], dtype=A.dtype)
+  z = z.at[eq_idx].set(zeq)
+  z = z.at[ineq_idx].set(zineq)
+
+  s = jp.zeros(A.shape[0], dtype=A.dtype)
+  s = s.at[eq_idx].set(beq - Aeq @ x)
+  s = s.at[ineq_idx].set(sineq)
+
+  return x, z, s
