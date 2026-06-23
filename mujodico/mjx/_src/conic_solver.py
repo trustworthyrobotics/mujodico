@@ -100,8 +100,9 @@ class Context:
   dim: int
   iterations: int
   tolerance: float
-  chol_Q: tuple[jax.Array, bool] | None = None
-  chol_S: tuple[jax.Array, bool] | None = None
+  chol_Q: tuple[jax.Array, jax.Array] | None = None
+  chol_S: tuple[jax.Array, jax.Array] | None = None
+  _EPS: float = 1e-8  # numerical noise floor
 
   def tree_flatten(self):
     children = (
@@ -116,12 +117,13 @@ class Context:
       self.dim,
       self.iterations,
       self.tolerance,
+      self._EPS,
     )
     return children, aux
 
   @classmethod
   def tree_unflatten(cls, aux, children):
-      P, q, A, b, G, h, cones, dim, iterations, tolerance = aux
+      P, q, A, b, G, h, cones, dim, iterations, tolerance, eps = aux
       x, y, z, s, W, Winv, lmbda, chol_Q, chol_S = children
 
       return cls(
@@ -129,7 +131,7 @@ class Context:
           x, y, z, s,
           W, Winv, lmbda,
           dim, iterations, tolerance,
-          chol_Q, chol_S,
+          chol_Q, chol_S, eps,
       )
 
 
@@ -158,16 +160,19 @@ def _initialize(**kwargs) -> Context:
     tolerance=kwargs['tolerance'],
   )
 
-  if any([var is None for var in (ctx.x, ctx.y, ctx.z, ctx.s)]):
+  if any([var is None for var in (ctx.x, ctx.y, ctx.z)]):
     x, y, z = _solve_kkt(ctx=ctx, bx=-ctx.q, by=ctx.b, bz=ctx.h)
-    s = ctx.h - ctx.G @ x
     ctx.x = ctx.x or x
     ctx.y = ctx.y or y
     ctx.z = ctx.z or z
-    ctx.s = ctx.s or s
 
-  ctx.z = jp.maximum(ctx.z, 0.01)
-  ctx.s = jp.maximum(ctx.s, 0.01)
+  if ctx.s is None:
+    ctx.s = ctx.h - ctx.G @ ctx.x
+
+  if dim:
+    # TODO(wei-chen): Implement for second-order cone
+    ctx.z += jp.maximum(0, -jp.min(ctx.z) + 1)
+    ctx.s += jp.maximum(0, -jp.min(ctx.s) + 1)
 
   _compute_scaling(ctx)
 
@@ -209,10 +214,12 @@ def _update_scaling(ctx: Context, dz: jax.Array, ds: jax.Array, alpha: jax.Array
     if isinstance(cone, NonNegativeCone):
       s_scaled = ctx.lmbda[i:end] + alpha * (Winv.T @ ds[i:end])
       z_scaled = ctx.lmbda[i:end] + alpha * (W @ dz[i:end])
-      w = jp.sqrt(s_scaled) / jp.sqrt(z_scaled) * jp.diag(W)
+      s_scaled_sqrt = jp.sqrt(jp.maximum(s_scaled, ctx._EPS))
+      z_scaled_sqrt = jp.sqrt(jp.maximum(z_scaled, ctx._EPS))
+      w = s_scaled_sqrt / z_scaled_sqrt * jp.diag(W)
       ctx.W = ctx.W.at[i:end, i:end].set(jp.diag(w))
       ctx.Winv = ctx.Winv.at[i:end, i:end].set(jp.diag(1.0 / w))
-      lmbda = jp.sqrt(s_scaled) * jp.sqrt(z_scaled)
+      lmbda = s_scaled_sqrt * z_scaled_sqrt
       ctx.lmbda = ctx.lmbda.at[i:end].set(lmbda)
 
     elif isinstance(cone, SecondOrderCone):
@@ -292,6 +299,23 @@ def _solve_kkt(
     G x        -WᵀW x = bz
   """
 
+  def _robust_cho_factor(Q, reg=ctx._EPS * 100):
+    diag = jp.diag(Q)
+    d = 1.0 / jp.sqrt(jp.maximum(diag, ctx._EPS))
+    Q = d[:, None] * Q * d[None, :]
+    delta = reg * jp.max(jp.diag(Q)) if Q.size else 0.0
+    Q = Q + delta * jp.eye(Q.shape[0], dtype=Q.dtype)
+    chol, _ = jax.scipy.linalg.cho_factor(Q)
+    return chol, d
+
+  def _robust_cho_solve(chol_d, r):
+    chol, d = chol_d
+    d = d.reshape((-1,) + (1,) * (r.ndim - d.ndim))
+    r = d * r
+    y = jax.scipy.linalg.cho_solve((chol, False), r)
+    x = d * y
+    return x
+
   P = ctx.P
   A = ctx.A
   G = ctx.G
@@ -301,19 +325,19 @@ def _solve_kkt(
 
   if ctx.chol_Q is None:
     Q = P + G.T @ WTW_inv @ G
-    ctx.chol_Q = jax.scipy.linalg.cho_factor(Q)
+    ctx.chol_Q = _robust_cho_factor(Q)
 
   def Q_solve(rhs):
-      return jax.scipy.linalg.cho_solve(ctx.chol_Q, rhs)
+      return _robust_cho_solve(ctx.chol_Q, rhs)
 
   rhs_x = bx + G.T @ WTW_inv @ bz
 
   if ctx.chol_S is None:
     S = A @ Q_solve(A.T)
-    ctx.chol_S = jax.scipy.linalg.cho_factor(S)
+    ctx.chol_S = _robust_cho_factor(S)
 
   rhs_y = A @ Q_solve(rhs_x) - by
-  y = jax.scipy.linalg.cho_solve(ctx.chol_S, rhs_y)
+  y = _robust_cho_solve(ctx.chol_S, rhs_y)
 
   x = Q_solve(rhs_x - A.T @ y)
 
@@ -352,7 +376,7 @@ def _corrector_mu_e(
     mu1 = jp.dot(ctx.s[i:end] + alpha * ds[i:end], ctx.z[i:end] + alpha * dz[i:end]) / cone.deg
     mu_target = cone.complementarity
 
-    rho = jp.abs(mu1 - mu_target) / jp.abs(mu0 - mu_target)
+    rho = jp.abs(mu1 - mu_target) / jp.maximum(jp.abs(mu0 - mu_target), ctx._EPS)
     sigma = jp.clip(rho, 0.0, 1.0)**3
 
     result = result.at[i:end].set(sigma * (mu1 - mu_target) * cone._jordan_identity())
@@ -378,10 +402,11 @@ def _solve_impl(
   iterations: int = 100,
   tolerance: float = 1e-8,
 ) -> Context:
+
   ctx = _initialize(
     P=P, q=q, A=A, b=b, G=G, h=h, cones=cones,
     x=x_init, y=y_init, z=z_init, s=s_init,
-    iterations=iterations, tolerance=tolerance
+    iterations=iterations, tolerance=tolerance,
   )
 
   rx, ry, rz, rs = _residual(ctx)

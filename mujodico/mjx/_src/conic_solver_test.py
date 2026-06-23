@@ -72,7 +72,7 @@ class ConicSolverTest(parameterized.TestCase):
 
     _check_solve_vjp(P, q, A, b, cones)
 
-  @parameterized.parameters((0.0, 0.0), (0.1, 0.1))
+  @parameterized.parameters((0.0, 0.0), (0.0, 0.1), (0.1, 0.1))
   def test_inequality_constrained_qp(self, mu1, mu2):
     P = self.P
     q = self.q
@@ -93,26 +93,26 @@ class ConicSolverTest(parameterized.TestCase):
 
     _check_solve_vjp(P, q, A, b, cones)
 
-  @parameterized.parameters((0.0, 0.0), (0.1, 0.1))
-  def test_equality_inequality_constrained_qp(self, mu1, mu2):
+  @parameterized.parameters((0.0, 0.0), (0.0, 0.1), (0.1, 0.1))
+  def test_inequality_equality_constrained_qp(self, mu1, mu2):
     P = self.P
     q = self.q
-    A = jp.vstack((self.Aeq, self.Aineq))
-    b = jp.concatenate((self.beq, self.bineq))
+    A = jp.vstack((self.Aineq, self.Aeq))
+    b = jp.concatenate((self.bineq, self.beq))
     cones = (
-      conic_solver.ZeroCone(1),
       conic_solver.NonNegativeCone(1, mu1),
       conic_solver.NonNegativeCone(1, mu2),
+      conic_solver.ZeroCone(1),
     )
 
     x, z, s = self.solve(P=P, q=q, A=A, b=b, cones=cones)
 
     _assert_zero(P @ x + q + A.T @ z, "stationarity")
     _assert_zero(A @ x + s - b, "primal feasibility")
-    _assert_zero(s[0], "primal feasibility")
-    self.assertTrue(np.all(s >= 0), "primal feasibility")
-    self.assertTrue(np.all(z[1:] >= 0), "dual feasibility")
-    _assert_eq((s * z)[1:], jp.array([mu1, mu2]), "complementarity")
+    _assert_zero(s[2], "primal feasibility")
+    self.assertTrue(np.all(s[:2] >= 0), "primal feasibility")
+    self.assertTrue(np.all(z[:2] >= 0), "dual feasibility")
+    _assert_eq((s * z)[:2], jp.array([mu1, mu2]), "complementarity")
 
     _check_solve_vjp(P, q, A, b, cones)
 
