@@ -38,17 +38,27 @@ def solve(m: Model, d: Data) -> Data:
   efc_J = d._impl.efc_J
   efc_pos = d._impl.efc_pos
 
-  cones, friction_scale = build_cones(d, m.opt._impl.contact_smoothing)
+  cones, friction_scale = _build_cones(m, d)
 
   dt = m.opt.timestep
-  tau = d._impl.efc_b / d._impl.efc_k
+  tau = d._impl.efc_b / jp.maximum(d._impl.efc_k, 1e-8)
 
   P = qm
   q = -qm @ qacc_smooth
   A = -efc_J * friction_scale[:, None]
   b = (efc_J @ d.qvel + efc_pos / (dt + tau)) / dt * friction_scale
 
-  x, z, s = conic.solve(P=P, q=q, A=A, b=b, cones=tuple(cones))
+  warm_start = not m.opt.disableflags & DisableBit.WARMSTART
+
+  x_init = d.qacc if warm_start else None
+  z_init = d._impl.efc_force if warm_start else None
+
+  x, z, s = conic.solve(
+    P=P, q=q, A=A, b=b, cones=tuple(cones),
+    x_init=x_init, z_init=z_init,
+    iterations=m.opt.iterations,
+    tolerance=m.opt.tolerance,
+  )
 
   qacc = x
   efc_force = z
@@ -64,7 +74,7 @@ def solve(m: Model, d: Data) -> Data:
   return d
 
 
-def build_cones(d, contact_smoothing):
+def _build_cones(m: Model, d: Data):
     contact = d._impl.contact
 
     contact_dim_friction = {
@@ -72,12 +82,17 @@ def build_cones(d, contact_smoothing):
         for i in range(len(contact.efc_address))
     }
 
+    efc_type = constraint.make_efc_type(m)
+    nefc = efc_type.size
+
+    contact_smoothing = m.opt._impl.contact_smoothing
+
     cones = []
-    friction_scale = np.ones(d.nefc)
+    friction_scale = jp.ones(nefc)
 
     i = 0
-    while i < d.nefc:
-      t = d._impl.efc_type[i]
+    while i < nefc:
+      t = efc_type[i]
 
       if t == ConstraintType.EQUALITY:
         cones.append(conic.ZeroCone(dim=1))
@@ -94,7 +109,7 @@ def build_cones(d, contact_smoothing):
       elif t == ConstraintType.CONTACT_ELLIPTIC:
         dim, friction = contact_dim_friction[i]
         cones.append(conic.SecondOrderCone(dim=dim, complementarity=contact_smoothing))
-        friction_scale[i+1:i+dim] = friction[:dim-1]
+        friction_scale = friction_scale.at[i+1:i+dim].set(friction[:dim-1])
         i += dim
 
       else:

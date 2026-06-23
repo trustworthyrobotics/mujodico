@@ -451,12 +451,7 @@ def _solve_impl(
   return ctx
 
 
-@partial(
-  jax.custom_vjp,
-  nondiff_argnames=('cones',
-                    'x_init', 'y_init', 'z_init', 's_init',
-                    'iterations', 'tolerance')
-)
+@partial(jax.custom_vjp, nondiff_argnames=('cones', 'iterations', 'tolerance'))
 def _solve(
   P: jax.Array,
   q: jax.Array,
@@ -514,7 +509,7 @@ def _solve_fwd(
 
 
 def _solve_bwd(
-  cones, x_init, y_init, z_init, s_init, iterations, tolerance,
+  cones, iterations, tolerance,
   ctx: Context,
   g: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
@@ -535,7 +530,7 @@ def _solve_bwd(
 
   _, f_vjp = jax.vjp(f, ctx.P, ctx.q, ctx.A, ctx.b, ctx.G, ctx.h)
 
-  return f_vjp((-lx, -ly, -lz))
+  return f_vjp((-lx, -ly, -lz)) + (None, None, None, None)
 
 
 _solve.defvjp(_solve_fwd, _solve_bwd)
