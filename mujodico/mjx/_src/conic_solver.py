@@ -106,13 +106,12 @@ class Context:
 
   def tree_flatten(self):
     children = (
+      self.P, self.q, self.A, self.b, self.G, self.h,
       self.x, self.y, self.z, self.s,
       self.W, self.Winv, self.lmbda,
       self.chol_Q, self.chol_S,
     )
     aux = (
-      self.P, self.q, self.A, self.b,
-      self.G, self.h,
       self.cones,
       self.dim,
       self.iterations,
@@ -123,8 +122,8 @@ class Context:
 
   @classmethod
   def tree_unflatten(cls, aux, children):
-      P, q, A, b, G, h, cones, dim, iterations, tolerance, eps = aux
-      x, y, z, s, W, Winv, lmbda, chol_Q, chol_S = children
+      cones, dim, iterations, tolerance, eps = aux
+      P, q, A, b, G, h, x, y, z, s, W, Winv, lmbda, chol_Q, chol_S = children
 
       return cls(
           P, q, A, b, G, h, cones,
