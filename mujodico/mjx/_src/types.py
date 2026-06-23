@@ -45,6 +45,36 @@ class Impl(enum.Enum):
     return None
 
 
+class ContactApproxType(enum.Enum):
+  """Type of contact approximation.
+
+  Attributes:
+    MUJOCO: original mujoco contact approximation
+    LOG_BARRIER: log-barrier contact approximation
+  """
+
+  MUJOCO = "mujoco"
+  LOG_BARRIER = "logbarrier"
+
+  @classmethod
+  def _resolve(cls, value: str | None):
+    if isinstance(value, cls):
+      return value
+
+    if value is None:
+      return cls.MUJOCO
+
+    name = value.lower().strip().translate(str.maketrans('', '', ' -_'))
+    for member in cls:
+      if member.value.lower() == name:
+        return member
+
+    raise ValueError(
+        'unknown contact approximation: value should be one of '
+        f'<{"|".join([member.value for member in cls])}>'
+    )
+
+
 class DisableBit(enum.IntFlag):
   """Disable default feature bitflags.
 
@@ -334,18 +364,6 @@ class ConstraintType(enum.IntEnum):
   CONTACT_FRICTIONLESS = mujoco.mjtConstraint.mjCNSTR_CONTACT_FRICTIONLESS
   CONTACT_PYRAMIDAL = mujoco.mjtConstraint.mjCNSTR_CONTACT_PYRAMIDAL
   CONTACT_ELLIPTIC = mujoco.mjtConstraint.mjCNSTR_CONTACT_ELLIPTIC
-
-
-class ContactApproxType(enum.Enum):
-  """Type of contact approximation.
-
-  Attributes:
-    MUJOCO: original mujoco contact approximation
-    LOG_BARRIER: log-barrier contact approximation
-  """
-
-  MUJOCO = "mujoco"
-  LOG_BARRIER = "logbarrier"
 
 
 class CamLightType(enum.IntEnum):

@@ -366,25 +366,14 @@ def _put_model_jax(
           f'{[mj_type(m) for m in missing]} not supported'
       )
 
-
   # Contact approximation and contact smoothing
-  contact_approx = contact_approx or types.ContactApproxType.MUJOCO
-  if not isinstance(contact_approx, types.ContactApproxType):
-    contact_approx_str = \
-      contact_approx.lower().strip().replace(' ', '').replace('-', '').replace('_', '')
-    for type in types.ContactApproxType:
-      if contact_approx_str == type.value:
-        contact_approx = type
-        break
-  if not isinstance(contact_approx, types.ContactApproxType):
-    raise ValueError('contact_approximation must be one of ' +
-                     ', '.join([f'"{t.value}"' for t in types.ContactApproxType]))
+  contact_approx = types.ContactApproxType._resolve(contact_approx)
 
   contact_smoothing = contact_smoothing or 0
   if isinstance(contact_smoothing, int):
     contact_smoothing = float(contact_smoothing)
   if not (isinstance(contact_smoothing, float) and contact_smoothing >= 0):
-    raise ValueError('contact_smoothing must be a nonnegative float"')
+    raise ValueError('contact_smoothing must be a nonnegative float')
 
   opt_impl = {
     'contact_approx': contact_approx,

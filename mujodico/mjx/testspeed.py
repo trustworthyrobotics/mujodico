@@ -42,6 +42,10 @@ _ITERATIONS = flags.DEFINE_integer(
 _LS_ITERATIONS = flags.DEFINE_integer(
     'ls_iterations', 4, 'number of linesearch iterations'
 )
+_CONTACT_APPROX = flags.DEFINE_string(
+    'contact_approx', None,
+    f'<{"|".join([t.value for t in mjx.ContactApproxType])}>: contact approximation'
+)
 _OUTPUT = flags.DEFINE_enum(
     'output', 'text', ['text', 'tsv'], 'format to print results'
 )
@@ -66,6 +70,7 @@ def _main(argv: Sequence[str]):
       _SOLVER.value,
       _ITERATIONS.value,
       _LS_ITERATIONS.value,
+      _CONTACT_APPROX.value,
   )
 
   name = argv[0]

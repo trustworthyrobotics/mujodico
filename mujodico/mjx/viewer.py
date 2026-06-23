@@ -36,6 +36,10 @@ _JIT = flags.DEFINE_bool('jit', True, 'To jit or not to jit.')
 _MODEL_PATH = flags.DEFINE_string(
     'mjcf', None, 'Path to a MuJoCo MJCF file.', required=True
 )
+_CONTACT_APPROX = flags.DEFINE_string(
+    'contact_approx', None,
+    f'<{"|".join([t.value for t in mjx.ContactApproxType])}>: Contact approximation.'
+)
 _IMPL = flags.DEFINE_string('impl', 'jax', 'MJX implementation.')
 _WP_KERNEL_CACHE_DIR = flags.DEFINE_string(
     'wp_kernel_cache_dir',
@@ -87,7 +91,7 @@ def _main(argv: Sequence[str]) -> None:
   else:
     m = mujoco.MjModel.from_xml_path(_MODEL_PATH.value)
   d = mujoco.MjData(m)
-  mx = mjx.put_model(m, impl=_IMPL.value)
+  mx = mjx.put_model(m, impl=_IMPL.value, contact_approximation=_CONTACT_APPROX.value)
   dx = mjx.put_data(
       m, d, impl=_IMPL.value, naconmax=_NACONMAX.value, njmax=_NJMAX.value
   )
