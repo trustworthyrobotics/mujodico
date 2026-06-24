@@ -453,7 +453,7 @@ def _solve_impl(
   return ctx
 
 
-@partial(jax.custom_vjp, nondiff_argnames=('cones',))
+@partial(jax.custom_jvp, nondiff_argnames=('cones',))
 def _solve(
   P: jax.Array,
   q: jax.Array,
@@ -487,42 +487,13 @@ def _solve(
   return ctx.x, ctx.y, ctx.z, ctx.s
 
 
-def _solve_fwd(
-  P: jax.Array,
-  q: jax.Array,
-  A: jax.Array,
-  b: jax.Array,
-  G: jax.Array,
-  h: jax.Array,
-  cones: tuple[NonNegativeCone | SecondOrderCone],
-  x_init: jax.Array | None = None,
-  y_init: jax.Array | None = None,
-  z_init: jax.Array | None = None,
-  s_init: jax.Array | None = None,
-  iterations: int = 100,
-  tolerance: float = 1e-8,
-) -> tuple[tuple[jax.Array, jax.Array, jax.Array, jax.Array], Context]:
+@_solve.defjvp
+def _solve_jvp(cones, primals, tangents):
+  P, q, A, b, G, h, x_init, y_init, z_init, s_init, iterations, tolerance = primals
 
   ctx = _solve_impl(P, q, A, b, G, h, cones,
                     x_init=x_init, y_init=y_init, z_init=z_init, s_init=s_init,
                     iterations=iterations, tolerance=tolerance)
-
-  return (ctx.x, ctx.y, ctx.z, ctx.s), ctx
-
-
-def _solve_bwd(
-  cones,
-  ctx: Context,
-  g: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array,
-           None, None, None, None, None, None]:
-
-  gx, gy, gz, gs = g
-
-  W = ctx.W
-  lx, ly, lz = _solve_kkt(ctx, gx, gy, gz - W.T @ W @ gs)
-  ls = _inverse_jordan_product(ctx, ctx.lmbda, W @ (gs - lz))  # never used
-
   x, y, z, s = ctx.x, ctx.y, ctx.z, ctx.s
 
   def f(P, q, A, b, G, h):
@@ -533,12 +504,11 @@ def _solve_bwd(
       # (s ∘ z − μ e) is not a function of parameters and thus ignored
     )
 
-  _, f_vjp = jax.vjp(f, ctx.P, ctx.q, ctx.A, ctx.b, ctx.G, ctx.h)
+  _, (lx, ly, lz) = jax.jvp(f, primals[:6], tangents[:6])
 
-  return f_vjp((-lx, -ly, -lz)) + (None, None, None, None, None, None)
+  dx, dy, dz, ds = _solve_newton(ctx, -lx, -ly, -lz, jp.zeros_like(lz))
 
-
-_solve.defvjp(_solve_fwd, _solve_bwd)
+  return (x, y, z, s), (dx, dy, dz, ds)
 
 
 def solve(

@@ -3,8 +3,8 @@ from absl.testing import absltest
 from absl.testing import parameterized
 import jax
 from jax import numpy as jp
-from jax._src.test_util import check_vjp
-from  mujodico.mjx._src import conic_solver
+from jax._src.test_util import check_jvp, check_vjp
+from mujodico.mjx._src import conic_solver
 import numpy as np
 
 
@@ -19,6 +19,18 @@ def _assert_eq(a, b, name):
 
 def _assert_zero(a, name):
   _assert_eq(a, np.zeros(a.size), name)
+
+
+def _check_solve_jvp(P, q, A, b, cones):
+  tol = _TOLERANCE * 10  # avoid test noise
+
+  def solve(P, q, A, b):
+    return conic_solver.solve(P, q, A, b, cones)
+
+  solve_jvp = partial(jax.jvp, solve)
+
+  jax._src.test_util.check_jvp(solve, solve_jvp, (P, q, A, b),
+                               eps=1e-3, atol=tol, rtol=tol)
 
 
 def _check_solve_vjp(P, q, A, b, cones):
@@ -70,6 +82,7 @@ class ConicSolverTest(parameterized.TestCase):
     _assert_zero(A @ x - b, "primal feasibility")
     _assert_zero(s, "zero slack")
 
+    _check_solve_jvp(P, q, A, b, cones)
     _check_solve_vjp(P, q, A, b, cones)
 
   @parameterized.parameters((0.0, 0.0), (0.0, 0.1), (0.1, 0.1))
@@ -91,6 +104,7 @@ class ConicSolverTest(parameterized.TestCase):
     self.assertTrue(np.all(z >= 0), "dual feasibility")
     _assert_eq(s * z, jp.array([mu1, mu2]), "complementarity")
 
+    _check_solve_jvp(P, q, A, b, cones)
     _check_solve_vjp(P, q, A, b, cones)
 
   @parameterized.parameters((0.0, 0.0), (0.0, 0.1), (0.1, 0.1))
@@ -114,6 +128,7 @@ class ConicSolverTest(parameterized.TestCase):
     self.assertTrue(np.all(z[:2] >= 0), "dual feasibility")
     _assert_eq((s * z)[:2], jp.array([mu1, mu2]), "complementarity")
 
+    _check_solve_jvp(P, q, A, b, cones)
     _check_solve_vjp(P, q, A, b, cones)
 
 
