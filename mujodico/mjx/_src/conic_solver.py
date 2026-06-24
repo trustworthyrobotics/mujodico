@@ -18,7 +18,6 @@ class ZeroCone:
 class NonNegativeCone:
   dim: int
   complementarity: float = 0.0
-  deg: int = field(init=False)
 
   def __post_init__(self):
     if self.dim <= 0:
@@ -26,9 +25,12 @@ class NonNegativeCone:
     if self.complementarity < 0.0:
       raise ValueError("Cone complementarity must be non-negative")
 
-    object.__setattr__(self, "deg", self.dim)
+  @property
+  def deg(self):
+    return self.dim
 
-  def _jordan_identity(self):
+  @property
+  def jordan_identity(self):
     return jp.ones(self.dim)
 
   def _jordan_product(self, s: jax.Array, z: jax.Array) -> jax.Array:
@@ -51,7 +53,6 @@ class NonNegativeCone:
 class SecondOrderCone:
   dim: int
   complementarity: float = 0.0
-  deg: int = field(init=False)
 
   def __post_init__(self):
     if self.dim < 2:
@@ -59,9 +60,12 @@ class SecondOrderCone:
     if self.complementarity < 0.0:
       raise ValueError("Cone complementarity must be non-negative")
 
-    object.__setattr__(self, "deg", 1)
+  @property
+  def deg(self):
+    return 1
 
-  def _jordan_identity(self):
+  @property
+  def jordan_identity(self):
     return jp.zeros(self.dim).at[0].set(1.0)
 
   def _jordan_product(self, s: jax.Array, z: jax.Array) -> jax.Array:
@@ -236,7 +240,7 @@ def _mu_e(ctx: Context) -> jax.Array:
   i = 0
   for cone in ctx.cones:
     end = i + cone.dim
-    result = result.at[i:end].set(cone.complementarity * cone._jordan_identity())
+    result = result.at[i:end].set(cone.complementarity * cone.jordan_identity)
     i = end
 
   return result
@@ -299,8 +303,7 @@ def _solve_kkt(
   """
 
   def _robust_cho_factor(Q, reg=ctx._EPS * 100):
-    diag = jp.diag(Q)
-    d = 1.0 / jp.sqrt(jp.maximum(diag, ctx._EPS))
+    d = 1.0 / jp.sqrt(jp.maximum(jp.diag(Q), ctx._EPS))
     Q = d[:, None] * Q * d[None, :]
     delta = reg * jp.max(jp.diag(Q)) if Q.size else 0.0
     Q = Q + delta * jp.eye(Q.shape[0], dtype=Q.dtype)
@@ -378,7 +381,7 @@ def _corrector_mu_e(
     rho = jp.abs(mu1 - mu_target) / jp.maximum(jp.abs(mu0 - mu_target), ctx._EPS)
     sigma = jp.clip(rho, 0.0, 1.0)**3
 
-    result = result.at[i:end].set(sigma * (mu1 - mu_target) * cone._jordan_identity())
+    result = result.at[i:end].set(sigma * (mu1 - mu_target) * cone.jordan_identity)
 
     i = end
 
@@ -450,7 +453,7 @@ def _solve_impl(
   return ctx
 
 
-@partial(jax.custom_vjp, nondiff_argnames=('cones', 'iterations', 'tolerance'))
+@partial(jax.custom_vjp, nondiff_argnames=('cones',))
 def _solve(
   P: jax.Array,
   q: jax.Array,
@@ -508,15 +511,17 @@ def _solve_fwd(
 
 
 def _solve_bwd(
-  cones, iterations, tolerance,
+  cones,
   ctx: Context,
   g: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array,
+           None, None, None, None, None, None]:
 
   gx, gy, gz, gs = g
 
   W = ctx.W
   lx, ly, lz = _solve_kkt(ctx, gx, gy, gz - W.T @ W @ gs)
+  ls = _inverse_jordan_product(ctx, ctx.lmbda, W @ (gs - lz))  # never used
 
   x, y, z, s = ctx.x, ctx.y, ctx.z, ctx.s
 
@@ -525,11 +530,12 @@ def _solve_bwd(
       P @ x + A.T @ y + G.T @ z + q,
       A @ x                     - b,
       G @ x                 + s - h,
+      # (s ∘ z − μ e) is not a function of parameters and thus ignored
     )
 
   _, f_vjp = jax.vjp(f, ctx.P, ctx.q, ctx.A, ctx.b, ctx.G, ctx.h)
 
-  return f_vjp((-lx, -ly, -lz)) + (None, None, None, None)
+  return f_vjp((-lx, -ly, -lz)) + (None, None, None, None, None, None)
 
 
 _solve.defvjp(_solve_fwd, _solve_bwd)
