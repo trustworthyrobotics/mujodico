@@ -565,50 +565,74 @@ def solve(
   """
 
   eq_idx = []
-  ineq_idx = []
-  nonzero_cones = []
+  nonneg_blocks = {}
+  other_blocks = []
 
   i = 0
   for cone in cones:
-      end = i + cone.dim
-      if isinstance(cone, ZeroCone):
-          eq_idx.extend(range(i, end))
-      else:
-          ineq_idx.extend(range(i, end))
-          nonzero_cones.append(cone)
-      i = end
+    end = i + cone.dim
+    idx = list(range(i, end))
+
+    if isinstance(cone, ZeroCone):
+      eq_idx.extend(idx)
+
+    elif isinstance(cone, NonNegativeCone):
+      nonneg_blocks.setdefault(cone.complementarity, []).extend(idx)
+
+    else:
+      other_blocks.append((idx, cone))
+
+    i = end
+
+  cone_idx = []
+  nonzero_cones = []
+
+  # add grouped nonnegative cones
+  for comp, idx in nonneg_blocks.items():
+    cone_idx.extend(idx)
+    nonzero_cones.append(NonNegativeCone(dim=len(idx), complementarity=comp))
+
+  # add other cones
+  for idx, cone in other_blocks:
+    cone_idx.extend(idx)
+    nonzero_cones.append(cone)
+
+  nonzero_cones = tuple(nonzero_cones)
 
   eq_idx = jp.array(eq_idx, dtype=jp.int32)
-  ineq_idx = jp.array(ineq_idx, dtype=jp.int32)
+  cone_idx = jp.array(cone_idx, dtype=jp.int32)
 
   Aeq = A[eq_idx]
   beq = b[eq_idx]
   zeq_init = z_init[eq_idx] if z_init is not None else None
 
-  Aineq = A[ineq_idx]
-  bineq = b[ineq_idx]
-  zineq_init = z_init[ineq_idx] if z_init is not None else None
-  sineq_init = s_init[ineq_idx] if s_init is not None else None
+  Acone = A[cone_idx]
+  bcone = b[cone_idx]
+  zcone_init = z_init[cone_idx] if z_init is not None else None
+  scone_init = s_init[cone_idx] if s_init is not None else None
 
-  x, zeq, zineq, sineq = _solve(
-    P=P, q=q,
-    A=Aeq, b=beq,
-    G=Aineq, h=bineq,
-    cones=tuple(nonzero_cones),
+  x, zeq, zcone, scone = _solve(
+    P=P,
+    q=q,
+    A=Aeq,
+    b=beq,
+    G=Acone,
+    h=bcone,
+    cones=nonzero_cones,
     x_init=x_init,
     y_init=zeq_init,
-    z_init=zineq_init,
-    s_init=sineq_init,
+    z_init=zcone_init,
+    s_init=scone_init,
     iterations=iterations,
     tolerance=tolerance,
   )
 
   z = jp.zeros(A.shape[0], dtype=A.dtype)
   z = z.at[eq_idx].set(zeq)
-  z = z.at[ineq_idx].set(zineq)
+  z = z.at[cone_idx].set(zcone)
 
   s = jp.zeros(A.shape[0], dtype=A.dtype)
   s = s.at[eq_idx].set(beq - Aeq @ x)
-  s = s.at[ineq_idx].set(sineq)
+  s = s.at[cone_idx].set(scone)
 
   return x, z, s
