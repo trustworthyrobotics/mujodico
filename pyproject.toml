@@ -36,9 +36,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-warp = [
-    "warp-lang==1.12.1",
-]
 dev = [
     "isort",
     "pyink",

@@ -30,12 +30,6 @@ from mujoco.mjx._src import constraint
 from mujoco.mjx._src import mesh
 from mujoco.mjx._src import support
 from mujoco.mjx._src import types
-import mujoco.mjx.warp as mjxw
-# pylint: disable=g-importing-member
-from mujoco.mjx.warp import mjwp_types
-from mujoco.mjx.warp import mujoco_warp as mjwp
-from mujoco.mjx.warp import warp as wp
-# pylint: enable=g-importing-member
 import numpy as np
 import scipy
 
@@ -51,6 +45,7 @@ def _is_cuda_gpu_device(device: jax.Device) -> bool:
 
 
 def _check_warp_installed():
+  raise RuntimeError("MuJoDiCo does not have a warp implementation")
   if not mjxw.WARP_INSTALLED:
     raise RuntimeError(
         'warp-lang is not installed. Cannot use WARP implementation of MJX.'
@@ -254,7 +249,6 @@ def _put_option(
 
   option_obj = {
       types.Impl.JAX: types.OptionJAX,
-      types.Impl.WARP: mjxw.types.OptionWarp,
   }[impl]
   private_fields = {
       f.name: getattr(o, f.name, None) for f in option_obj.fields()
@@ -280,13 +274,8 @@ def _put_option(
 
 def _put_statistic(
     s: mujoco.MjStatistic, impl: types.Impl
-) -> Union[types.Statistic, types.StatisticWarp]:
+) -> types.Statistic:
   """Puts mujoco.MjStatistic onto a device, resulting in mjx.Statistic."""
-  if impl == types.Impl.WARP:
-    fields = {
-        f.name: getattr(s, f.name, None) for f in types.StatisticWarp.fields()
-    }
-    return types.StatisticWarp(**fields)
   return types.Statistic(
       meaninertia=s.meaninertia,
       meanmass=s.meanmass,
@@ -427,54 +416,6 @@ def _put_model_jax(
   return _strip_weak_type(model)
 
 
-def _put_model_warp(
-    m: mujoco.MjModel,
-    graph_mode: mjxw.types.GraphMode,
-    device: Optional[jax.Device] = None,
-) -> types.Model:
-  """Puts mujoco.MjModel onto a device, resulting in mjx.Model."""
-  with wp.ScopedDevice('cpu'):  # pylint: disable=undefined-variable
-    mw = mjwp.put_model(m)  # pylint: disable=undefined-variable
-
-  fields = {f.name for f in types.Model.fields() if f.name != '_impl'}
-  fields = {f: getattr(m, f) for f in fields}
-  # Grab MJW private Option fields, and assume that public MjOption fields are
-  # directly compatible with MJXW.
-  option_keys = {f.name for f in mjxw.types.OptionWarp.fields()} - {
-      f.name for f in types.Option.fields()
-  }
-  # graph_mode is MJX-specific, not from mujoco.mjx.third_party.mujoco_warp.
-  option_keys = option_keys - {'graph_mode'}
-  private_options = {k: getattr(mw.opt, k) for k in option_keys}
-  private_options['graph_mode'] = graph_mode
-  fields['opt'] = _put_option(m.opt, types.Impl.WARP, private_options)
-  fields['stat'] = _put_statistic(m.stat, types.Impl.WARP)
-
-  # Use MJW fields directly instead of MjModel, so that shape and dtype are
-  # always compatible with MJXW (e.g. cam_mat0/geom_aabb).
-  for k in fields:
-    if not hasattr(mw, k) or k in ('stat', 'opt'):
-      continue
-    field = _wp_to_np_type(getattr(mw, k), k)
-    if k == 'geom_dataid' and field.ndim > 1:
-      # Batched geom_dataid is not supported in MJX.
-      field = field[0]
-    fields[k] = field
-
-  impl_fields = {}
-  for k in mjxw.types.ModelWarp.__annotations__.keys():
-    field = _wp_to_np_type(getattr(mw, k), k)
-    impl_fields[k] = field
-
-  model = types.Model(
-      **fields,
-      _impl=mjxw.types.ModelWarp(**impl_fields),
-  )
-
-  model = jax.device_put(model, device=device)
-  return _strip_weak_type(model)
-
-
 # TODO(josechenf): Iterate on the keepalive implementation to make it easier to
 # use before OSS.
 def _put_model_cpp(
@@ -517,7 +458,6 @@ def put_model(
     m: mujoco.MjModel,
     device: Optional[jax.Device] = None,
     impl: Optional[Union[str, types.Impl]] = None,
-    graph_mode: Optional[mjxw.types.GraphMode] = None,
     keepalive_refs: Optional[Dict[int, Any]] = None,
 ) -> types.Model:
   """Puts mujoco.MjModel onto a device, resulting in mjx.Model.
@@ -526,8 +466,6 @@ def put_model(
     m: the model to put onto device
     device: which device to use - if unspecified picks the default device
     impl: implementation to use
-    graph_mode: CUDA graph capture mode (for Warp only). Use GraphMode enum from
-      warp._src.jax_experimental.ffi. GraphMode.WARP is the default mode.
     keepalive_refs: optional dict to store references to underlying MuJoCo
       objects, preventing them from being garbage collected. Required for CPP
       impl to keep the model alive.
