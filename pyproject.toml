@@ -3,12 +3,12 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name="mujoco-mjx"
+name="mujodico"
 version = "3.14.0"
 authors = [
-    {name = "Google DeepMind", email = "mujoco@deepmind.com"},
+    {name = "Wei-Chen Li", email = "williamrob104@gmail.com"},
 ]
-description = "MuJoCo XLA (MJX)"
+description = "MuJoDiCo"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = "Apache-2.0"
 classifiers = [
@@ -46,14 +46,12 @@ dev = [
 ]
 
 [project.scripts]
-mjx-testspeed = "mujoco.mjx.testspeed:main"
-mjx-viewer = "mujoco.mjx.viewer:main"
+mjx-testspeed = "mujodico.mjx.testspeed:main"
+mjx-viewer = "mujodico.mjx.viewer:main"
 
 [project.urls]
-Homepage = "https://github.com/google-deepmind/mujoco/tree/main/mjx"
-Documentation = "https://mujoco.readthedocs.io/en/3.14.0"
-Repository = "https://github.com/google-deepmind/mujoco/tree/main/mjx"
-Changelog = "https://mujoco.readthedocs.io/en/3.14.0/changelog.html"
+Homepage = "https://github.com/wei-chen-li/mujodico"
+Repository = "https://github.com/wei-chen-li/mujodico"
 
 [tool.isort]
 force_single_line = true
@@ -82,4 +80,4 @@ norecursedirs = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["mujoco*"]
+include = ["mujodico*"]
