@@ -17,7 +17,7 @@ import numpy as np
 
 def _effective_m(m: Model, d: Data) -> tuple[jax.Array, jax.Array]:
   """Computes the effective mass matrix and qacc_smooth for the integrator type."""
-  qm = support.full_m(m, d) if support.is_sparse(m) else d._impl.qM
+  qm = support.full_m(m, d) if support.is_sparse(m) else d._impl.M
   qacc_smooth = d.qacc_smooth
   if m.opt.integrator == IntegratorType.IMPLICITFAST:
     qderiv = derivative.deriv_smooth_vel(m, d)
