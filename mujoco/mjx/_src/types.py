@@ -22,7 +22,6 @@ import warnings
 import jax
 import mujoco
 from mujoco.mjx._src.dataclasses import PyTreeNode  # pylint: disable=g-importing-member
-from mujoco.mjx.warp import types as mjxw_types
 import numpy as np
 
 
@@ -509,7 +508,7 @@ class Option(PyTreeNode):
   integrator: IntegratorType
   solver: SolverType
   timestep: jax.Array
-  _impl: Union[OptionJAX, mjxw_types.OptionWarp]
+  _impl: OptionJAX
 
 
 class ModelCPP(PyTreeNode):
@@ -915,14 +914,13 @@ class Model(PyTreeNode):
   names: bytes
   signature: np.uint64
   _sizes: jax.Array
-  _impl: Union[ModelJAX, mjxw_types.ModelWarp]
+  _impl: ModelJAX
 
   @property
   def impl(self) -> Impl:
     return {
         ModelCPP: Impl.CPP,
         ModelJAX: Impl.JAX,
-        mjxw_types.ModelWarp: Impl.WARP,
     }[type(self._impl)]
 
   def __getattr__(self, name: str):
@@ -1128,14 +1126,13 @@ class Data(PyTreeNode):
   qacc_smooth: jax.Array
   qfrc_constraint: jax.Array
   qfrc_inverse: jax.Array
-  _impl: Union[DataCPP, DataJAX, mjxw_types.DataWarp]
+  _impl: Union[DataCPP, DataJAX]
 
   @property
   def impl(self) -> Impl:
     return {
         DataCPP: Impl.CPP,
         DataJAX: Impl.JAX,
-        mjxw_types.DataWarp: Impl.WARP,
     }[type(self._impl)]
 
   def __getattr__(self, name: str):
@@ -1156,13 +1153,14 @@ class Data(PyTreeNode):
     return val
 
   def __getitem__(self, key):
-    if self.impl == Impl.WARP:
-      return jax.tree.map_with_path(
-          lambda path, x, k=key: x[k]
-          if tree_path_to_attr_str(path) not in mjxw_types.DATA_NON_VMAP
-          else x,
-          self,
-      )
+    def get_name_from_path(path: jax.tree_util.KeyPath) -> str:
+      if any(isinstance(p, jax.tree_util.SequenceKey) for p in path):
+        is_seq_key = [isinstance(p, jax.tree_util.SequenceKey) for p in path]
+        path = path[: is_seq_key.index(True)]
+      assert all(isinstance(p, jax.tree_util.GetAttrKey) for p in path)
+      path = [p for p in path if p.name != '_impl']
+      attr = '__'.join(p.name for p in path)
+      return attr
 
     return jax.tree.map(lambda x: x[key], self)
 
