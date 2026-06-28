@@ -44,7 +44,6 @@ from mujoco.mjx._src.types import Model
 from mujoco.mjx._src.types import ModelJAX
 from mujoco.mjx._src.types import TrnType
 # pylint: enable=g-importing-member
-import mujoco.mjx.warp as mjxw
 import numpy as np
 
 # RK4 tableau

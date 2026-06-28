@@ -30,12 +30,6 @@ from mujoco.mjx._src import constraint
 from mujoco.mjx._src import mesh
 from mujoco.mjx._src import support
 from mujoco.mjx._src import types
-import mujoco.mjx.warp as mjxw
-# pylint: disable=g-importing-member
-from mujoco.mjx.warp import mjwp_types
-from mujoco.mjx.warp import mujoco_warp as mjwp
-from mujoco.mjx.warp import warp as wp
-# pylint: enable=g-importing-member
 import numpy as np
 import scipy
 
@@ -51,6 +45,7 @@ def _is_cuda_gpu_device(device: jax.Device) -> bool:
 
 
 def _check_warp_installed():
+  raise RuntimeError("MuJoDiCo does not have a warp implementation")
   if not mjxw.WARP_INSTALLED:
     raise RuntimeError(
         'warp-lang is not installed. Cannot use WARP implementation of MJX.'
@@ -257,7 +252,6 @@ def _put_option(
 
   option_obj = {
       types.Impl.JAX: types.OptionJAX,
-      types.Impl.WARP: mjxw.types.OptionWarp,
   }[impl]
   private_fields = {
       f.name: getattr(o, f.name, None) for f in option_obj.fields()
@@ -291,13 +285,8 @@ def _put_option(
 
 def _put_statistic(
     s: mujoco.MjStatistic, impl: types.Impl
-) -> Union[types.Statistic, types.StatisticWarp]:
+) -> types.Statistic:
   """Puts mujoco.MjStatistic onto a device, resulting in mjx.Statistic."""
-  if impl == types.Impl.WARP:
-    fields = {
-        f.name: getattr(s, f.name, None) for f in types.StatisticWarp.fields()
-    }
-    return types.StatisticWarp(**fields)
   return types.Statistic(
       meaninertia=s.meaninertia,
       meanmass=s.meanmass,
@@ -440,7 +429,7 @@ def _put_model_jax(
 
 def _put_model_warp(
     m: mujoco.MjModel,
-    graph_mode: mjxw.types.GraphMode,
+    graph_mode,
     device: Optional[jax.Device] = None,
     batch_sizes: Optional[Dict[str, int]] = None,
 ) -> types.Model:
@@ -538,7 +527,6 @@ def put_model(
     m: mujoco.MjModel,
     device: Optional[jax.Device] = None,
     impl: Optional[Union[str, types.Impl]] = None,
-    graph_mode: Optional[mjxw.types.GraphMode] = None,
     keepalive_refs: Optional[Dict[int, Any]] = None,
     batch_sizes: Optional[Dict[str, int]] = None,
 ) -> types.Model:
@@ -548,8 +536,6 @@ def put_model(
     m: the model to put onto device
     device: which device to use - if unspecified picks the default device
     impl: implementation to use
-    graph_mode: CUDA graph capture mode (for Warp only). Use GraphMode enum from
-      warp.JaxCallableGraphMode.WARP is the default mode.
     keepalive_refs: optional dict to store references to underlying MuJoCo
       objects, preventing them from being garbage collected. Required for CPP
       impl to keep the model alive.
