@@ -3,8 +3,8 @@ from absl.testing import absltest
 from absl.testing import parameterized
 import jax
 from jax import numpy as jp
-from jax._src.test_util import check_jvp, check_vjp
-from mujodico.mjx._src import conic_solver
+from jax._src import test_util
+from mujodico.mjx._src import conic_solver as conic
 import numpy as np
 
 
@@ -21,28 +21,31 @@ def _assert_zero(a, name):
   _assert_eq(a, np.zeros(a.size), name)
 
 
-def _check_solve_jvp(P, q, A, b, cones):
-  tol = _TOLERANCE * 10  # avoid test noise
+def _check_jacobians(P, q, A, b, cones, comps, jac_fun):
+  check_jac_fun = (
+    jax._src.test_util.check_jvp
+    if jac_fun == jax.jvp else
+    jax._src.test_util.check_vjp
+  )
 
-  def solve(P, q, A, b):
-    return conic_solver.solve(P, q, A, b, cones)
+  def f1(P, q, A, b):
+    return conic.solve(P, q, A, b, cones, comps)
 
-  solve_jvp = partial(jax.jvp, solve)
+  def f2(comps):
+    return conic.solve(P, q, A, b, cones, comps)
 
-  jax._src.test_util.check_jvp(solve, solve_jvp, (P, q, A, b),
-                               eps=1e-3, atol=tol, rtol=tol)
+  check_jac_fun(f1, partial(jac_fun, f1), (P, q, A, b), eps=1e-3)
+
+  # only check jacobian with respect to μ when μ ≠ 0
+  if comps is not None and jp.all(comps > 0):
+    check_jac_fun(f2, partial(jac_fun, f2), (comps,), eps=1e-3)
 
 
-def _check_solve_vjp(P, q, A, b, cones):
-  tol = _TOLERANCE * 10  # avoid test noise
+def _check_jvp(P, q, A, b, cones, comps=None):
+  _check_jacobians(P, q, A, b, cones, comps, jax.jvp)
 
-  def solve(P, q, A, b):
-    return conic_solver.solve(P, q, A, b, cones)
-
-  solve_vjp = partial(jax.vjp, solve)
-
-  jax._src.test_util.check_vjp(solve, solve_vjp, (P, q, A, b),
-                               eps=1e-3, atol=tol, rtol=tol)
+def _check_vjp(P, q, A, b, cones, comps=None):
+  _check_jacobians(P, q, A, b, cones, comps, jax.vjp)
 
 
 class ConicSolverTest(parameterized.TestCase):
@@ -67,14 +70,14 @@ class ConicSolverTest(parameterized.TestCase):
     self.Asoc = -jp.identity(3, dtype=_float)
     self.bsoc = jp.array([0, 0, 0], dtype=_float)
 
-    self.solve = jax.jit(conic_solver.solve, static_argnames='cones')
+    self.solve = jax.jit(conic.solve, static_argnames='cones')
 
   def test_equality_constrained_qp(self):
     P = self.P
     q = self.q
     A = self.Aeq
     b = self.beq
-    cones = (conic_solver.ZeroCone(1),)
+    cones = (conic.ZeroCone(1),)
 
     x, z, s = self.solve(P=P, q=q, A=A, b=b, cones=cones)
 
@@ -82,8 +85,8 @@ class ConicSolverTest(parameterized.TestCase):
     _assert_zero(A @ x - b, "primal feasibility")
     _assert_zero(s, "zero slack")
 
-    _check_solve_jvp(P, q, A, b, cones)
-    _check_solve_vjp(P, q, A, b, cones)
+    _check_jvp(P, q, A, b, cones)
+    _check_vjp(P, q, A, b, cones)
 
   @parameterized.parameters((0.0, 0.0), (0.0, 0.1), (0.1, 0.1))
   def test_inequality_constrained_qp(self, mu1, mu2):
@@ -91,12 +94,10 @@ class ConicSolverTest(parameterized.TestCase):
     q = self.q
     A = self.Aineq
     b = self.bineq
-    cones = (
-      conic_solver.NonNegativeCone(1, mu1),
-      conic_solver.NonNegativeCone(1, mu2),
-    )
+    cones = (conic.NonNegativeCone(1), conic.NonNegativeCone(1))
+    comps = jp.array([mu1, mu2])
 
-    x, z, s = self.solve(P=P, q=q, A=A, b=b, cones=cones)
+    x, z, s = self.solve(P=P, q=q, A=A, b=b, cones=cones, complementarities=comps)
 
     _assert_zero(P @ x + q + A.T @ z, "stationarity")
     _assert_zero(A @ x + s - b, "primal feasibility")
@@ -104,8 +105,8 @@ class ConicSolverTest(parameterized.TestCase):
     self.assertTrue(np.all(z >= 0), "dual feasibility")
     _assert_eq(s * z, jp.array([mu1, mu2]), "complementarity")
 
-    _check_solve_jvp(P, q, A, b, cones)
-    _check_solve_vjp(P, q, A, b, cones)
+    _check_jvp(P, q, A, b, cones, comps)
+    _check_vjp(P, q, A, b, cones, comps)
 
   @parameterized.parameters((0.0, 0.0), (0.0, 0.1), (0.1, 0.1))
   def test_inequality_equality_constrained_qp(self, mu1, mu2):
@@ -113,13 +114,10 @@ class ConicSolverTest(parameterized.TestCase):
     q = self.q
     A = jp.vstack((self.Aineq, self.Aeq))
     b = jp.concatenate((self.bineq, self.beq))
-    cones = (
-      conic_solver.NonNegativeCone(1, mu1),
-      conic_solver.NonNegativeCone(1, mu2),
-      conic_solver.ZeroCone(1),
-    )
+    cones = (conic.NonNegativeCone(1), conic.NonNegativeCone(1), conic.ZeroCone(1))
+    comps = jp.array([mu1, mu2, 0])
 
-    x, z, s = self.solve(P=P, q=q, A=A, b=b, cones=cones)
+    x, z, s = self.solve(P=P, q=q, A=A, b=b, cones=cones, complementarities=comps)
 
     _assert_zero(P @ x + q + A.T @ z, "stationarity")
     _assert_zero(A @ x + s - b, "primal feasibility")
@@ -128,8 +126,8 @@ class ConicSolverTest(parameterized.TestCase):
     self.assertTrue(np.all(z[:2] >= 0), "dual feasibility")
     _assert_eq((s * z)[:2], jp.array([mu1, mu2]), "complementarity")
 
-    _check_solve_jvp(P, q, A, b, cones)
-    _check_solve_vjp(P, q, A, b, cones)
+    _check_jvp(P, q, A, b, cones, comps)
+    _check_vjp(P, q, A, b, cones, comps)
 
 
 if __name__ == '__main__':

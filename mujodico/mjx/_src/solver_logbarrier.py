@@ -38,7 +38,7 @@ def solve(m: Model, d: Data) -> Data:
   efc_J = d._impl.efc_J
   efc_pos = d._impl.efc_pos
 
-  cones, friction_scale = _build_cones(m, d)
+  cones, comps, friction_scale = _build_cones(m, d)
 
   dt = m.opt.timestep
   tau = d._impl.efc_b / jp.maximum(d._impl.efc_k, 1e-8)
@@ -54,7 +54,7 @@ def solve(m: Model, d: Data) -> Data:
   z_init = d._impl.efc_force if warm_start else None
 
   x, z, s = conic.solve(
-    P=P, q=q, A=A, b=b, cones=tuple(cones),
+    P=P, q=q, A=A, b=b, cones=tuple(cones), complementarities=comps,
     x_init=x_init, z_init=z_init,
     iterations=m.opt.iterations,
     tolerance=m.opt.tolerance,
@@ -88,6 +88,7 @@ def _build_cones(m: Model, d: Data):
     contact_smoothing = m.opt._impl.contact_smoothing
 
     cones = []
+    comps = []
     friction_scale = jp.ones(nefc)
 
     i = 0
@@ -96,23 +97,27 @@ def _build_cones(m: Model, d: Data):
 
       if t == ConstraintType.EQUALITY:
         cones.append(conic.ZeroCone(dim=1))
+        comps.append(0.0)
         i += 1
 
       elif t in (ConstraintType.LIMIT_JOINT, ConstraintType.LIMIT_TENDON):
         cones.append(conic.NonNegativeCone(dim=1))
+        comps.append(0.0)
         i += 1
 
       elif t in (ConstraintType.CONTACT_FRICTIONLESS, ConstraintType.CONTACT_PYRAMIDAL):
-        cones.append(conic.NonNegativeCone(dim=1, complementarity=contact_smoothing))
+        cones.append(conic.NonNegativeCone(dim=1))
+        comps.append(contact_smoothing)
         i += 1
 
       elif t == ConstraintType.CONTACT_ELLIPTIC:
         dim, friction = contact_dim_friction[i]
-        cones.append(conic.SecondOrderCone(dim=dim, complementarity=contact_smoothing))
+        cones.append(conic.SecondOrderCone(dim=dim))
+        comps.append(contact_smoothing)
         friction_scale = friction_scale.at[i+1:i+dim].set(friction[:dim-1])
         i += dim
 
       else:
         raise RuntimeError(f"Unsupported constraint type {t}")
 
-    return tuple(cones), friction_scale
+    return tuple(cones), jp.array(comps), friction_scale
