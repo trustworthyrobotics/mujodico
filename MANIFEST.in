@@ -1,1 +1,1 @@
-recursive-include mujoco/mjx/test_data *
+recursive-include mujodico/mjx/test_data *
