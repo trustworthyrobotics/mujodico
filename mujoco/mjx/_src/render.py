@@ -17,7 +17,6 @@
 from typing import Any
 
 import jax
-import mujoco.mjx.warp as mjxw
 
 # pylint: disable=g-importing-member
 from mujoco.mjx._src.types import Data

@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
-import mujoco.mjx.warp as mjxw
 
 if TYPE_CHECKING:
   from mujoco.mjx.warp.render_context import RenderContextPytree

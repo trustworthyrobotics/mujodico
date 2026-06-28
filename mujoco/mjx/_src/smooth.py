@@ -35,7 +35,6 @@ from mujoco.mjx._src.types import TendonType
 from mujoco.mjx._src.types import TrnType
 from mujoco.mjx._src.types import WrapType
 # pylint: enable=g-importing-member
-import mujoco.mjx.warp as mjxw
 import numpy as np
 
 

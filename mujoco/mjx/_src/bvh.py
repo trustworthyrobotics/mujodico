@@ -20,7 +20,6 @@ from mujoco.mjx._src.types import Data
 from mujoco.mjx._src.types import Impl
 from mujoco.mjx._src.types import Model
 # pylint: enable=g-importing-member
-import mujoco.mjx.warp as mjxw
 
 
 def refit_bvh(m: Model, d: Data, ctx: Any):
