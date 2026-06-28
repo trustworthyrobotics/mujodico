@@ -58,8 +58,8 @@ _RK4_B = np.array([1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0])
 
 # Constraint solvers
 _SOLVE_FUNC = {
-  ContactApproxType.MUJOCO: solver.solve,
-  ContactApproxType.LOG_BARRIER: solver_logbarrier.solve,
+    ContactApproxType.MUJOCO: solver.solve,
+    ContactApproxType.LOG_BARRIER: solver_logbarrier.solve,
 }
 
 
@@ -424,7 +424,10 @@ def implicit(m: Model, d: Data) -> Data:
   qderiv = derivative.deriv_smooth_vel(m, d)
 
   qacc = d.qacc
-  if qderiv is not None and m.opt._impl.contact_approx == ContactApproxType.MUJOCO:
+  if (
+      qderiv is not None
+      and m.opt._impl.contact_approx == ContactApproxType.MUJOCO
+  ):
     # TODO(robotics-simulation): use smooth.factor_m / solve_m here:
     qm = support.full_m(m, d) if support.is_sparse(m) else d._impl.M
     qm -= m.opt.timestep * qderiv
@@ -457,8 +460,10 @@ def forward(m: Model, d: Data) -> Data:
     return d
 
   if m.opt._impl.contact_approx not in _SOLVE_FUNC:
-    raise NotImplementedError(f'solver for {m.opt._impl.contact_approx.value} contact '
-                              f'approximation not implemented.')
+    raise NotImplementedError(
+        f'solver for {m.opt._impl.contact_approx.value} contact '
+        'approximation not implemented.'
+    )
   solve_func = _SOLVE_FUNC[m.opt._impl.contact_approx]
   d = named_scope(solve_func)(m, d)
   d = sensor.sensor_acc(m, d)

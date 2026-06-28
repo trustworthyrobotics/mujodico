@@ -1,6 +1,6 @@
-from functools import partial
 from absl.testing import absltest
 from absl.testing import parameterized
+from functools import partial
 import jax
 from jax import numpy as jp
 from jax._src import test_util
@@ -14,7 +14,9 @@ _TOLERANCE = 5e-5
 
 def _assert_eq(a, b, name):
   err_msg = f"Failed: {name}"
-  np.testing.assert_allclose(a, b, err_msg=err_msg, atol=_TOLERANCE, rtol=_TOLERANCE)
+  np.testing.assert_allclose(
+      a, b, err_msg=err_msg, atol=_TOLERANCE, rtol=_TOLERANCE
+  )
 
 
 def _assert_zero(a, name):
@@ -23,9 +25,9 @@ def _assert_zero(a, name):
 
 def _check_jacobians(P, q, A, b, cones, comps, jac_fun):
   check_jac_fun = (
-    jax._src.test_util.check_jvp
-    if jac_fun == jax.jvp else
-    jax._src.test_util.check_vjp
+      jax._src.test_util.check_jvp
+      if jac_fun == jax.jvp
+      else jax._src.test_util.check_vjp
   )
 
   def f1(P, q, A, b):
@@ -44,6 +46,7 @@ def _check_jacobians(P, q, A, b, cones, comps, jac_fun):
 def _check_jvp(P, q, A, b, cones, comps=None):
   _check_jacobians(P, q, A, b, cones, comps, jax.jvp)
 
+
 def _check_vjp(P, q, A, b, cones, comps=None):
   _check_jacobians(P, q, A, b, cones, comps, jax.vjp)
 
@@ -55,22 +58,19 @@ class ConicSolverTest(parameterized.TestCase):
 
     _float = jp.float32
 
-    self.P = jp.array([[ 3, 1, -1],
-                       [ 1, 4,  2],
-                       [-1, 2,  5]], dtype=_float)
-    self.q = jp.array([ 1,  2, -3], dtype=_float)
+    self.P = jp.array([[3, 1, -1], [1, 4, 2], [-1, 2, 5]], dtype=_float)
+    self.q = jp.array([1, 2, -3], dtype=_float)
 
-    self.Aeq = jp.array([[ 1, 1, -1]], dtype=_float)
+    self.Aeq = jp.array([[1, 1, -1]], dtype=_float)
     self.beq = jp.array([1], dtype=_float)
 
-    self.Aineq = jp.array([[0, 1, 0],
-                           [0, 0, 1]], dtype=_float)
+    self.Aineq = jp.array([[0, 1, 0], [0, 0, 1]], dtype=_float)
     self.bineq = jp.array([2, 2], dtype=_float)
 
     self.Asoc = -jp.identity(3, dtype=_float)
     self.bsoc = jp.array([0, 0, 0], dtype=_float)
 
-    self.solve = jax.jit(conic.solve, static_argnames='cones')
+    self.solve = jax.jit(conic.solve, static_argnames="cones")
 
   def test_equality_constrained_qp(self):
     P = self.P
@@ -97,7 +97,9 @@ class ConicSolverTest(parameterized.TestCase):
     cones = (conic.NonNegativeCone(1), conic.NonNegativeCone(1))
     comps = jp.array([mu1, mu2])
 
-    x, z, s = self.solve(P=P, q=q, A=A, b=b, cones=cones, complementarities=comps)
+    x, z, s = self.solve(
+        P=P, q=q, A=A, b=b, cones=cones, complementarities=comps
+    )
 
     _assert_zero(P @ x + q + A.T @ z, "stationarity")
     _assert_zero(A @ x + s - b, "primal feasibility")
@@ -114,10 +116,16 @@ class ConicSolverTest(parameterized.TestCase):
     q = self.q
     A = jp.vstack((self.Aineq, self.Aeq))
     b = jp.concatenate((self.bineq, self.beq))
-    cones = (conic.NonNegativeCone(1), conic.NonNegativeCone(1), conic.ZeroCone(1))
+    cones = (
+        conic.NonNegativeCone(1),
+        conic.NonNegativeCone(1),
+        conic.ZeroCone(1),
+    )
     comps = jp.array([mu1, mu2, 0])
 
-    x, z, s = self.solve(P=P, q=q, A=A, b=b, cones=cones, complementarities=comps)
+    x, z, s = self.solve(
+        P=P, q=q, A=A, b=b, cones=cones, complementarities=comps
+    )
 
     _assert_zero(P @ x + q + A.T @ z, "stationarity")
     _assert_zero(A @ x + s - b, "primal feasibility")
@@ -130,5 +138,5 @@ class ConicSolverTest(parameterized.TestCase):
     _check_vjp(P, q, A, b, cones, comps)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
   absltest.main()

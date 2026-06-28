@@ -11,7 +11,7 @@ class ZeroCone:
 
   def __post_init__(self):
     if self.dim <= 0:
-      raise ValueError("ZeroCone requires dim >= 1")
+      raise ValueError('ZeroCone requires dim >= 1')
 
 
 @dataclasses.dataclass(frozen=True)
@@ -20,7 +20,7 @@ class NonNegativeCone:
 
   def __post_init__(self):
     if self.dim <= 0:
-      raise ValueError("NonNegativeCone requires dim >= 1")
+      raise ValueError('NonNegativeCone requires dim >= 1')
 
   @property
   def deg(self):
@@ -52,7 +52,7 @@ class SecondOrderCone:
 
   def __post_init__(self):
     if self.dim < 2:
-      raise ValueError("SecondOrderCone requires dim >= 2")
+      raise ValueError('SecondOrderCone requires dim >= 2')
 
   @property
   def deg(self):
@@ -79,10 +79,26 @@ class SecondOrderCone:
 
 
 @functools.partial(
-  jax.tree_util.register_dataclass,
-  data_fields=['P', 'q', 'A', 'b', 'G', 'h', 'comps',
-               'x', 'y', 'z', 's', 'W', 'Winv', 'lmbda', 'chol_Q', 'chol_S'],
-  meta_fields=['cones', 'dim', 'iterations', 'tolerance', '_EPS'],
+    jax.tree_util.register_dataclass,
+    data_fields=[
+        'P',
+        'q',
+        'A',
+        'b',
+        'G',
+        'h',
+        'comps',
+        'x',
+        'y',
+        'z',
+        's',
+        'W',
+        'Winv',
+        'lmbda',
+        'chol_Q',
+        'chol_S',
+    ],
+    meta_fields=['cones', 'dim', 'iterations', 'tolerance', '_EPS'],
 )
 @dataclasses.dataclass(frozen=True)
 class Context:
@@ -109,13 +125,21 @@ class Context:
   _EPS: float = 1e-8  # numerical noise floor
 
   _ALLOWED_FIELDS = frozenset({
-    'x', 'y', 'z', 's', 'W', 'Winv', 'lmbda', 'chol_Q', 'chol_S',
+      'x',
+      'y',
+      'z',
+      's',
+      'W',
+      'Winv',
+      'lmbda',
+      'chol_Q',
+      'chol_S',
   })
 
   def replace(self, **kwargs):
     invalid = kwargs.keys() - self._ALLOWED_FIELDS
     if invalid:
-        raise ValueError(f"Attempt replacing immutable fields: {invalid}")
+      raise ValueError(f'Attempt replacing immutable fields: {invalid}')
     return dataclasses.replace(self, **kwargs)
 
 
@@ -124,27 +148,27 @@ def _initialize(**kwargs) -> Context:
 
   dim = sum([cone.dim for cone in kwargs['cones']])
   W = jp.eye(dim)
-  Winv= jp.eye(dim)
+  Winv = jp.eye(dim)
 
   ctx = Context(
-    P=kwargs['P'],
-    q=kwargs['q'],
-    A=kwargs['A'],
-    b=kwargs['b'],
-    G=kwargs['G'],
-    h=kwargs['h'],
-    cones=kwargs['cones'],
-    comps=kwargs['comps'],
-    x=kwargs['x'],
-    y=kwargs['y'],
-    z=kwargs['z'],
-    s=kwargs['s'],
-    W=W,
-    Winv=Winv,
-    lmbda=jp.zeros(dim),
-    dim=dim,
-    iterations=kwargs['iterations'],
-    tolerance=kwargs['tolerance'],
+      P=kwargs['P'],
+      q=kwargs['q'],
+      A=kwargs['A'],
+      b=kwargs['b'],
+      G=kwargs['G'],
+      h=kwargs['h'],
+      cones=kwargs['cones'],
+      comps=kwargs['comps'],
+      x=kwargs['x'],
+      y=kwargs['y'],
+      z=kwargs['z'],
+      s=kwargs['s'],
+      W=W,
+      Winv=Winv,
+      lmbda=jp.zeros(dim),
+      dim=dim,
+      iterations=kwargs['iterations'],
+      tolerance=kwargs['tolerance'],
   )
 
   if any([var is None for var in (ctx.x, ctx.y, ctx.z)]):
@@ -196,7 +220,9 @@ def _compute_scaling(ctx: Context) -> Context:
   return ctx
 
 
-def _update_scaling(ctx: Context, dz: jax.Array, ds: jax.Array, alpha: jax.Array) -> Context:
+def _update_scaling(
+    ctx: Context, dz: jax.Array, ds: jax.Array, alpha: jax.Array
+) -> Context:
   """Update W and λ so that W z = W⁻ᵀ s = λ."""
 
   W, Winv, lmbda = ctx.W, ctx.Winv, ctx.lmbda
@@ -294,17 +320,29 @@ def _optimality_conditions(
     s ∘ z - μ e
   """
   return (
-    P @ x + A.T @ y + G.T @ z + q,
-    A @ x                     - b,
-    G @ x                 + s - h,
-    _jordan_product(cones, s, z) - _mu_e(cones, comps),
+      P @ x + A.T @ y + G.T @ z + q,
+      A @ x - b,
+      G @ x + s - h,
+      _jordan_product(cones, s, z) - _mu_e(cones, comps),
   )
 
 
-def _residual(ctx: Context) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+def _residual(
+    ctx: Context,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
   return _optimality_conditions(
-    ctx.P, ctx.q, ctx.A, ctx.b, ctx.G, ctx.h, ctx.cones, ctx.comps,
-    ctx.x, ctx.y, ctx.z, ctx.s,
+      ctx.P,
+      ctx.q,
+      ctx.A,
+      ctx.b,
+      ctx.G,
+      ctx.h,
+      ctx.cones,
+      ctx.comps,
+      ctx.x,
+      ctx.y,
+      ctx.z,
+      ctx.s,
   )
 
 
@@ -347,7 +385,7 @@ def _solve_kkt(
     chol_Q = _robust_cho_factor(Q)
 
   def Q_solve(rhs):
-      return _robust_cho_solve(chol_Q, rhs)
+    return _robust_cho_solve(chol_Q, rhs)
 
   rhs_x = bx + G.T @ WTW_inv @ bz
 
@@ -397,16 +435,27 @@ def _corrector_mu_e(
 
     if isinstance(cone, NonNegativeCone):
       mu0 = ctx.s[i:end] * ctx.z[i:end]
-      mu1 = (ctx.s[i:end] + alpha * ds[i:end]) * (ctx.z[i:end] + alpha * dz[i:end])
+      mu1 = (ctx.s[i:end] + alpha * ds[i:end]) * (
+          ctx.z[i:end] + alpha * dz[i:end]
+      )
     else:
       mu0 = jp.dot(ctx.s[i:end], ctx.z[i:end]) / cone.deg
-      mu1 = jp.dot(ctx.s[i:end] + alpha * ds[i:end], ctx.z[i:end] + alpha * dz[i:end]) / cone.deg
+      mu1 = (
+          jp.dot(
+              ctx.s[i:end] + alpha * ds[i:end], ctx.z[i:end] + alpha * dz[i:end]
+          )
+          / cone.deg
+      )
     mu_target = comp
 
-    rho = jp.abs(mu1 - mu_target) / jp.maximum(jp.abs(mu0 - mu_target), ctx._EPS)
-    sigma = jp.clip(rho, 0.0, 1.0)**3
+    rho = jp.abs(mu1 - mu_target) / jp.maximum(
+        jp.abs(mu0 - mu_target), ctx._EPS
+    )
+    sigma = jp.clip(rho, 0.0, 1.0) ** 3
 
-    result = result.at[i:end].set(sigma * (mu1 - mu_target) * cone.jordan_identity)
+    result = result.at[i:end].set(
+        sigma * (mu1 - mu_target) * cone.jordan_identity
+    )
 
     i = end
 
@@ -414,28 +463,39 @@ def _corrector_mu_e(
 
 
 def _solve_impl(
-  P: jax.Array,
-  q: jax.Array,
-  A: jax.Array,
-  b: jax.Array,
-  G: jax.Array,
-  h: jax.Array,
-  cones: tuple[NonNegativeCone | SecondOrderCone],
-  comps: tuple[jax.Array],
-  *,
-  x_init: jax.Array | None = None,
-  y_init: jax.Array | None = None,
-  z_init: jax.Array | None = None,
-  s_init: jax.Array | None = None,
-  iterations: int = 100,
-  tolerance: float = 1e-8,
+    P: jax.Array,
+    q: jax.Array,
+    A: jax.Array,
+    b: jax.Array,
+    G: jax.Array,
+    h: jax.Array,
+    cones: tuple[NonNegativeCone | SecondOrderCone],
+    comps: tuple[jax.Array],
+    *,
+    x_init: jax.Array | None = None,
+    y_init: jax.Array | None = None,
+    z_init: jax.Array | None = None,
+    s_init: jax.Array | None = None,
+    iterations: int = 100,
+    tolerance: float = 1e-8,
 ) -> Context:
   """See :func:`_solve`"""
 
   ctx = _initialize(
-    P=P, q=q, A=A, b=b, G=G, h=h, cones=cones, comps=comps,
-    x=x_init, y=y_init, z=z_init, s=s_init,
-    iterations=iterations, tolerance=tolerance,
+      P=P,
+      q=q,
+      A=A,
+      b=b,
+      G=G,
+      h=h,
+      cones=cones,
+      comps=comps,
+      x=x_init,
+      y=y_init,
+      z=z_init,
+      s=s_init,
+      iterations=iterations,
+      tolerance=tolerance,
   )
 
   rx, ry, rz, rs = _residual(ctx)
@@ -443,12 +503,12 @@ def _solve_impl(
 
   def cond_fun(val):
     ctx, rx, ry, rz, rs, iter = val
-    return (
-      (iter < ctx.iterations) &
-      ((jp.linalg.norm(rx, jp.inf) > ctx.tolerance) |
-       (jp.linalg.norm(ry, jp.inf) > ctx.tolerance) |
-       (jp.linalg.norm(rz, jp.inf) > ctx.tolerance) |
-       (jp.linalg.norm(rs, jp.inf) > ctx.tolerance)))
+    return (iter < ctx.iterations) & (
+        (jp.linalg.norm(rx, jp.inf) > ctx.tolerance)
+        | (jp.linalg.norm(ry, jp.inf) > ctx.tolerance)
+        | (jp.linalg.norm(rz, jp.inf) > ctx.tolerance)
+        | (jp.linalg.norm(rs, jp.inf) > ctx.tolerance)
+    )
 
   def body_fun(val):
     ctx, rx, ry, rz, rs, iter = val
@@ -456,9 +516,10 @@ def _solve_impl(
     ctx, dx, dy, dz, ds = _solve_newton(ctx, -rx, -ry, -rz, -rs)
     alpha = _line_search(ctx, dz, ds)
 
-    bs = (-rs
-      - _jordan_product(ctx.cones, ctx.Winv.T @ ds, ctx.W @ dz)
-      + _corrector_mu_e(ctx, ds, dz, alpha)
+    bs = (
+        -rs
+        - _jordan_product(ctx.cones, ctx.Winv.T @ ds, ctx.W @ dz)
+        + _corrector_mu_e(ctx, ds, dz, alpha)
     )
 
     ctx, dx, dy, dz, ds = _solve_newton(ctx, -rx, -ry, -rz, bs)
@@ -484,20 +545,20 @@ def _solve_impl(
 
 @functools.partial(jax.custom_jvp, nondiff_argnames=('cones',))
 def _solve(
-  P: jax.Array,
-  q: jax.Array,
-  A: jax.Array,
-  b: jax.Array,
-  G: jax.Array,
-  h: jax.Array,
-  cones: tuple[NonNegativeCone | SecondOrderCone],
-  comps: tuple[jax.Array],
-  x_init: jax.Array | None = None,
-  y_init: jax.Array | None = None,
-  z_init: jax.Array | None = None,
-  s_init: jax.Array | None = None,
-  iterations: int = 100,
-  tolerance: float = 1e-8,
+    P: jax.Array,
+    q: jax.Array,
+    A: jax.Array,
+    b: jax.Array,
+    G: jax.Array,
+    h: jax.Array,
+    cones: tuple[NonNegativeCone | SecondOrderCone],
+    comps: tuple[jax.Array],
+    x_init: jax.Array | None = None,
+    y_init: jax.Array | None = None,
+    z_init: jax.Array | None = None,
+    s_init: jax.Array | None = None,
+    iterations: int = 100,
+    tolerance: float = 1e-8,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
   """
   Solves the conic program
@@ -510,9 +571,22 @@ def _solve(
   where y is the dual of (A x = b), and z is the dual of (G x + s = h).
   """
 
-  ctx = _solve_impl(P, q, A, b, G, h, cones, comps,
-                    x_init=x_init, y_init=y_init, z_init=z_init, s_init=s_init,
-                    iterations=iterations, tolerance=tolerance)
+  ctx = _solve_impl(
+      P,
+      q,
+      A,
+      b,
+      G,
+      h,
+      cones,
+      comps,
+      x_init=x_init,
+      y_init=y_init,
+      z_init=z_init,
+      s_init=s_init,
+      iterations=iterations,
+      tolerance=tolerance,
+  )
 
   return ctx.x, ctx.y, ctx.z, ctx.s
 
@@ -527,12 +601,38 @@ def _solve_jvp(cones, primals, tangents):
      λ ∘ (W dz + W⁻ᵀ ds) = 0
   """
 
-  (P, q, A, b, G, h, comps,
-   x_init, y_init, z_init, s_init, iterations, tolerance) = primals
+  (
+      P,
+      q,
+      A,
+      b,
+      G,
+      h,
+      comps,
+      x_init,
+      y_init,
+      z_init,
+      s_init,
+      iterations,
+      tolerance,
+  ) = primals
 
-  ctx = _solve_impl(P, q, A, b, G, h, cones, comps,
-                    x_init=x_init, y_init=y_init, z_init=z_init, s_init=s_init,
-                    iterations=iterations, tolerance=tolerance)
+  ctx = _solve_impl(
+      P,
+      q,
+      A,
+      b,
+      G,
+      h,
+      cones,
+      comps,
+      x_init=x_init,
+      y_init=y_init,
+      z_init=z_init,
+      s_init=s_init,
+      iterations=iterations,
+      tolerance=tolerance,
+  )
   x, y, z, s = ctx.x, ctx.y, ctx.z, ctx.s
 
   def f(P, q, A, b, G, h, comps):
@@ -546,18 +646,18 @@ def _solve_jvp(cones, primals, tangents):
 
 
 def solve(
-  P: jax.Array,
-  q: jax.Array,
-  A: jax.Array,
-  b: jax.Array,
-  cones: tuple[ZeroCone | NonNegativeCone | SecondOrderCone],
-  complementarities: jax.Array | None = None,
-  *,
-  x_init: jax.Array | None = None,
-  z_init: jax.Array | None = None,
-  s_init: jax.Array | None = None,
-  iterations: int = 100,
-  tolerance: float = 1e-8,
+    P: jax.Array,
+    q: jax.Array,
+    A: jax.Array,
+    b: jax.Array,
+    cones: tuple[ZeroCone | NonNegativeCone | SecondOrderCone],
+    complementarities: jax.Array | None = None,
+    *,
+    x_init: jax.Array | None = None,
+    z_init: jax.Array | None = None,
+    s_init: jax.Array | None = None,
+    iterations: int = 100,
+    tolerance: float = 1e-8,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
   """
   Solves the conic program
@@ -569,8 +669,11 @@ def solve(
   where z is the dual of (A x + s = b).
   """
 
-  complementarities = (jp.array(complementarities)
-    if (complementarities is not None) else jp.zeros(len(cones)))
+  complementarities = (
+      jp.array(complementarities)
+      if (complementarities is not None)
+      else jp.zeros(len(cones))
+  )
 
   eq_idx = []
   nonneg_blocks = []
@@ -599,7 +702,9 @@ def solve(
     cone_idx.extend(idx)
   if nonneg_blocks:
     dim = sum([cone.dim for _, cone, _ in nonneg_blocks])
-    comps = jp.concatenate([jp.full(cone.dim, comp) for _, cone, comp in nonneg_blocks])
+    comps = jp.concatenate(
+        [jp.full(cone.dim, comp) for _, cone, comp in nonneg_blocks]
+    )
     reordered_cones.append(NonNegativeCone(dim=dim))
     reordered_comps.append(comps)
 
@@ -622,20 +727,20 @@ def solve(
   scone_init = s_init[cone_idx] if s_init is not None else None
 
   x, zeq, zcone, scone = _solve(
-    P=P,
-    q=q,
-    A=Aeq,
-    b=beq,
-    G=Acone,
-    h=bcone,
-    cones=tuple(reordered_cones),
-    comps=tuple(reordered_comps),
-    x_init=x_init,
-    y_init=zeq_init,
-    z_init=zcone_init,
-    s_init=scone_init,
-    iterations=iterations,
-    tolerance=tolerance,
+      P=P,
+      q=q,
+      A=Aeq,
+      b=beq,
+      G=Acone,
+      h=bcone,
+      cones=tuple(reordered_cones),
+      comps=tuple(reordered_comps),
+      x_init=x_init,
+      y_init=zeq_init,
+      z_init=zcone_init,
+      s_init=scone_init,
+      iterations=iterations,
+      tolerance=tolerance,
   )
 
   z = jp.zeros(A.shape[0], dtype=A.dtype)
