@@ -1,0 +1,45 @@
+<mujoco model="1d_pusher">
+
+    <option timestep="0.02"  />
+    <option integrator="implicitfast" />
+    <option iterations="20" tolerance="1e-5" />
+
+    <default>
+        <joint damping="5"/>
+        <geom condim="1" />
+    </default>
+
+    <worldbody>
+
+        <!-- Red pusher -->
+        <body name="pusher" pos="0 0 0">
+            <joint name="pusher_slide_x" type="slide" axis="1 0 0" />
+            <joint name="pusher_slide_y" type="slide" axis="0 1 0" />
+
+            <geom name="pusher_geom"
+                  type="sphere"
+                  size="0.05"
+                  mass="1"
+                  rgba="1 0 0 1" />
+        </body>
+
+        <!-- Blue object -->
+        <body name="object" pos="0 0 0">
+            <joint name="object_slide_x" type="slide" axis="1 0 0" />
+            <joint name="object_slide_y" type="slide" axis="0 1 0" />
+
+            <geom name="object_geom"
+                  type="sphere"
+                  size="0.08"
+                  mass="1"
+                  rgba="0 0 1 1" />
+        </body>
+
+    </worldbody>
+
+    <actuator>
+        <velocity name="pusher_vel_x" joint="pusher_slide_x" kv="100" />
+        <velocity name="pusher_vel_y" joint="pusher_slide_y" kv="100" />
+    </actuator>
+
+</mujoco>
