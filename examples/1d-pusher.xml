@@ -39,9 +39,9 @@
     </worldbody>
 
     <actuator>
-        <position name="pusher_pos"
+        <velocity name="pusher_vel"
                   joint="pusher_slide"
-                  kp="100" />
+                  kv="100" />
     </actuator>
 
 </mujoco>
