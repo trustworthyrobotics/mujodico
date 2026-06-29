@@ -65,12 +65,24 @@ class SecondOrderCone:
   def _jordan_product(self, s: jax.Array, z: jax.Array) -> jax.Array:
     assert s.size == self.dim
     assert z.size == self.dim
-    raise NotImplementedError()
+    return jp.concatenate((
+      jp.sum(s * z, keepdims=True),
+      s[0] * z[1:] + z[0] * s[1:]
+    ))
 
   def _inverse_jordan_product(self, u: jax.Array, v: jax.Array) -> jax.Array:
     assert u.size == self.dim
     assert v.size == self.dim
-    raise NotImplementedError()
+
+    u0, u1 = u[0], u[1:]
+    v0, v1 = v[0], v[1:]
+
+    det = u0 * u0 - jp.dot(u1, u1)
+
+    r0 = u0 * v0 - jp.dot(u1, v1)
+    r1 = -u1 * v0 + ((det * v1) + (u1 * jp.dot(u1, v1))) / u0
+
+    return jp.concatenate((jp.array([r0]), r1)) / det
 
   def _line_search(self, s: jax.Array, ds: jax.Array) -> jax.Array:
     assert s.size == self.dim
