@@ -1,18 +1,18 @@
 <mujoco model="1d_pusher">
 
-    <option timestep="0.002"  />
+    <option timestep="0.02"  />
     <option integrator="implicitfast" />
     <option iterations="20" tolerance="1e-5" />
 
     <default>
-        <joint damping="1"/>
+        <joint damping="5"/>
         <geom condim="1" />
     </default>
 
     <worldbody>
 
         <!-- Red sphere pusher -->
-        <body name="pusher" pos="0 0 0">
+        <body name="pusher" pos="-0.3 0 0">
             <joint name="pusher_slide"
                    type="slide"
                    axis="1 0 0" />
@@ -24,8 +24,8 @@
                   rgba="1 0 0 1" />
         </body>
 
-        <!-- Blue cube object -->
-        <body name="object" pos="0.3 0 0">
+        <!-- Blue capsule object -->
+        <body name="object" pos="0.0 0 0">
             <joint name="object_slide"
                    type="slide"
                    axis="1 0 0" />
