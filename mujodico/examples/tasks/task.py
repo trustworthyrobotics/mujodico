@@ -25,6 +25,7 @@ class Task:
   Qf: np.ndarray
   u_ref: np.ndarray
   R: np.ndarray
+  contact_smoothing: float
 
   def __post_init__(self):
     nx = self.model.nq + self.model.nv
@@ -91,6 +92,7 @@ class Task:
     u_lb, u_ub = self.u_bounds
     print("  u_lb =", u_lb)
     print("  u_ub =", u_ub)
+    print("  contact_smoothing =", self.contact_smoothing)
 
   def visualize_trajectory(self, xs: np.ndarray):
     model = self.model

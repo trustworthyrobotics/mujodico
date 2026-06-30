@@ -62,8 +62,11 @@ class PushSphere1d(Task):
     x_goal = np.array([0.0, 1.0, 0.0, 0.0])
     Q = np.diag([0.0, 1.0, 0.0, 0.1])
     Qf = Q * 100.0
+
     u_ref = np.array([0.0])
     R = np.eye(1) * 0.01
+
+    contact_smoothing = 1.0
 
     super().__init__(
         model=model,
@@ -74,6 +77,7 @@ class PushSphere1d(Task):
         Qf=Qf,
         u_ref=u_ref,
         R=R,
+        contact_smoothing=contact_smoothing,
     )
 
   def _update_visualization(

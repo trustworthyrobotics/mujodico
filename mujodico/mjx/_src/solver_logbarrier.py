@@ -85,7 +85,7 @@ def _build_cones(m: Model, d: Data):
     efc_type = constraint.make_efc_type(m)
     nefc = efc_type.size
 
-    contact_smoothing = m.opt._impl.contact_smoothing
+    complementarity = m.opt._impl.contact_smoothing / m.opt.timestep
 
     cones = []
     comps = []
@@ -107,13 +107,13 @@ def _build_cones(m: Model, d: Data):
 
       elif t in (ConstraintType.CONTACT_FRICTIONLESS, ConstraintType.CONTACT_PYRAMIDAL):
         cones.append(conic.NonNegativeCone(dim=1))
-        comps.append(contact_smoothing)
+        comps.append(complementarity)
         i += 1
 
       elif t == ConstraintType.CONTACT_ELLIPTIC:
         dim, friction = contact_dim_friction[i]
         cones.append(conic.SecondOrderCone(dim=dim))
-        comps.append(contact_smoothing)
+        comps.append(complementarity)
         friction_scale = friction_scale.at[i+1:i+dim].set(friction[:dim-1])
         i += dim
 

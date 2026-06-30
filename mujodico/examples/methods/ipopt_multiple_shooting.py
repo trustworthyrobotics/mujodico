@@ -12,7 +12,7 @@ def solve(task: Task):
   mjx_smooth_model = mjx.put_model(
       model,
       contact_approximation="log barrier",
-      contact_smoothing=1e1,
+      contact_smoothing=task.contact_smoothing,
   )
 
   mjx_model = mjx.put_model(
