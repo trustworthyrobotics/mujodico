@@ -1,0 +1,24 @@
+from mujodico.examples.tasks.task import Task
+from mujodico.examples.tasks.push_sphere_1d import PushSphere1d
+
+
+_TASKS = [
+    PushSphere1d,
+]
+
+
+def get_task_names():
+  return [task.__name__ for task in _TASKS]
+
+
+def parse_task_name(name: str | None):
+  if name is None:
+    raise ValueError('task not specified')
+
+  name = name.lower().strip().replace(' ', '').replace('-', '').replace('_', '')
+
+  for task in _TASKS:
+    if name == task.__name__.lower():
+      return task
+
+  raise ValueError(f'Unknown method {name}')

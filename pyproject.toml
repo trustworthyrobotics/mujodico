@@ -44,6 +44,7 @@ dev = [
 [project.scripts]
 mjx-testspeed = "mujodico.mjx.testspeed:main"
 mjx-viewer = "mujodico.mjx.viewer:main"
+mujodico-examples = "mujodico.examples.examples:main"
 
 [project.urls]
 Homepage = "https://github.com/wei-chen-li/mujodico"
