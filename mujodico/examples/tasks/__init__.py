@@ -1,9 +1,11 @@
+import mujodico.examples.tasks.push_sphere_1d
+import mujodico.examples.tasks.push_sphere_2d
 from mujodico.examples.tasks.task import Task
-from mujodico.examples.tasks.push_sphere_1d import PushSphere1d
 
 
 _TASKS = [
-    PushSphere1d,
+    push_sphere_1d.PushSphere1d,
+    push_sphere_2d.PushSphere2d,
 ]
 
 
