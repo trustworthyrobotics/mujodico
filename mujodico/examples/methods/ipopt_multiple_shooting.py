@@ -27,21 +27,26 @@ def solve(task: Task):
   nx = nq + model.nv
   nu = model.nu
 
+  N = task.horizon
+  n_vars = (N + 1) * nx + N * nu
+
+  x_goal = jp.array(task.x_goal)
+  Q = jp.array(task.Q)
+  Qf = jp.array(task.Qf)
+  u_ref = jp.array(task.u_ref)
+  R = jp.array(task.R)
+
   @jax.jit
   def step(x, u):
     d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:], ctrl=u)
-    d0 = mjx.step(mjx_model, d)
-    xnext = jp.concatenate((d0.qpos, d0.qvel))
-    d1 = mjx.step(mjx_smooth_model, d)
-    xnext_smooth = jp.concatenate((d1.qpos, d1.qvel))
-    return (
-        jax.lax.stop_gradient(xnext)
-        + xnext_smooth
-        - jax.lax.stop_gradient(xnext_smooth)
-    )
+    d = mjx.step(mjx_model, d)
+    return jp.concatenate((d.qpos, d.qvel))
 
-  N = task.horizon
-  n_vars = (N + 1) * nx + N * nu
+  @jax.jit
+  def step_smooth(x, u):
+    d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:], ctrl=u)
+    d = mjx.step(mjx_smooth_model, d)
+    return jp.concatenate((d.qpos, d.qvel))
 
   def pack(xs: jax.Array | np.ndarray, us: jax.Array | np.ndarray):
     assert xs.shape == (N + 1, nx)
@@ -63,15 +68,9 @@ def solve(task: Task):
 
     return xs, us
 
-  x_goal = jp.array(task.x_goal)
-  Q = jp.array(task.Q)
-  Qf = jp.array(task.Qf)
-  u_ref = jp.array(task.u_ref)
-  R = jp.array(task.R)
-
   @jax.jit
-  def objective(z):
-    xs, us = unpack(z)
+  def objective(vars):
+    xs, us = unpack(vars)
 
     dx = xs[:-1] - x_goal
     dxf = xs[-1] - x_goal
@@ -81,26 +80,49 @@ def solve(task: Task):
     return cost
 
   @jax.jit
-  def constraints(z):
-    xs, us = unpack(z)
+  def constraints(vars):
+    xs, us = unpack(vars)
     xs_next = jax.vmap(step)(xs[:-1], us)
     return (xs[1:] - xs_next).ravel()
 
+  @jax.jit
+  def constraints_jac_entries(vars):
+    xs, us = unpack(vars)
+
+    def stage_jac(x, u):
+      A, B = jax.jacrev(step_smooth, argnums=(0, 1))(x, u)
+      return jp.concatenate([(-A).reshape(-1), (-B).reshape(-1), jp.ones(nx)])
+
+    per_stage = jax.vmap(stage_jac)(xs[:-1], us)
+    return per_stage.reshape(-1)
+
   objective_grad = jax.jit(jax.grad(objective))
-  constraint_jac = jax.jit(jax.jacfwd(constraints))
+  objective_hess_structure = _objective_hessian_structure(task)
+  objective_hess_entries = _objective_hessian_entries(task)
+
+  constraints_jac_structure = _dynamics_constraint_jacobian_structure(task)
 
   class NLP:
-    def objective(self, z):
-      return float(objective(jp.asarray(z)))
+    def objective(self, vars):
+      return float(objective(jp.asarray(vars)))
 
-    def gradient(self, z):
-      return np.asarray(objective_grad(jp.asarray(z)))
+    def gradient(self, vars):
+      return np.asarray(objective_grad(jp.asarray(vars)))
 
-    def constraints(self, z):
-      return np.asarray(constraints(jp.asarray(z)))
+    def constraints(self, vars):
+      return np.asarray(constraints(jp.asarray(vars)))
 
-    def jacobian(self, z):
-      return np.asarray(constraint_jac(jp.asarray(z)).reshape(-1))
+    def jacobian(self, vars):
+      return np.asarray(constraints_jac_entries(jp.asarray(vars)))
+
+    def jacobianstructure(self):
+      return constraints_jac_structure
+
+    def hessian(self, vars, lmbda, objective_factor):
+      return objective_hess_entries * objective_factor
+
+    def hessianstructure(self):
+      return objective_hess_structure
 
   x_lb, x_ub = task.x_bounds
   u_lb, u_ub = task.u_bounds
@@ -113,20 +135,20 @@ def solve(task: Task):
   us_lb = np.repeat(u_lb[None, :], N, axis=0)
   us_ub = np.repeat(u_ub[None, :], N, axis=0)
 
-  lb = pack(xs_lb, us_lb)
-  ub = pack(xs_ub, us_ub)
+  vars_lb = pack(xs_lb, us_lb)
+  vars_ub = pack(xs_ub, us_ub)
 
-  cl = np.zeros(N * nx)
-  cu = np.zeros(N * nx)
+  constraints_lb = np.zeros(N * nx)
+  constraints_ub = np.zeros(N * nx)
 
   problem = cyipopt.Problem(
       n=n_vars,
       m=N * nx,
       problem_obj=NLP(),
-      lb=lb,
-      ub=ub,
-      cl=cl,
-      cu=cu,
+      lb=vars_lb,
+      ub=vars_ub,
+      cl=constraints_lb,
+      cu=constraints_ub,
   )
 
   problem.add_option("max_iter", 100)
@@ -134,10 +156,94 @@ def solve(task: Task):
   xs_init = np.linspace(task.x_0, task.x_goal, N + 1)
   us_init = np.zeros((N, nu))
 
-  vars_init = np.concatenate([xs_init.ravel(), us_init.ravel()])
+  vars_init = pack(xs_init, us_init)
 
   vars_opt, info = problem.solve(vars_init)
 
   xs_opt, us_opt = unpack(vars_opt)
 
-  return xs_opt, us_opt
+  return np.asarray(xs_opt), np.asarray(us_opt)
+
+
+def _dynamics_constraint_jacobian_structure(task: Task):
+  N = task.horizon
+  nx = task.model.nq + task.model.nv
+  nu = task.model.nu
+
+  x_rows, x_cols = np.indices((nx, nx))
+  u_rows, u_cols = np.indices((nx, nu))
+  eye = np.arange(nx)
+
+  x_rows = x_rows.ravel()
+  x_cols = x_cols.ravel()
+  u_rows = u_rows.ravel()
+  u_cols = u_cols.ravel()
+
+  stage_rows = np.concatenate([x_rows, u_rows, eye])
+  stage_cols = np.concatenate([x_cols, nx + u_cols, nx + nu + eye])
+
+  irow = []
+  jcol = []
+
+  for k in range(N):
+    row_offset = k * nx
+    col_offset = k * (nx + nu)
+
+    irow.append(stage_rows + row_offset)
+    jcol.append(stage_cols + col_offset)
+
+  return (
+      np.concatenate(irow).astype(np.int32),
+      np.concatenate(jcol).astype(np.int32),
+  )
+
+
+def _objective_hessian_structure(task: Task):
+  N = task.horizon
+  nx = task.model.nq + task.model.nv
+  nu = task.model.nu
+
+  q_i, q_j = np.tril_indices(nx)
+  r_i, r_j = np.tril_indices(nu)
+
+  irow = []
+  jcol = []
+
+  offset = 0
+  for k in range(N + 1):
+    # Q (or Qf) block
+    irow.append(q_i + offset)
+    jcol.append(q_j + offset)
+    offset += nx
+
+    if k == N:
+      break
+
+    # R block
+    irow.append(r_i + offset)
+    jcol.append(r_j + offset)
+    offset += nu
+
+  return (
+      np.concatenate(irow).astype(np.int32),
+      np.concatenate(jcol).astype(np.int32),
+  )
+
+
+def _objective_hessian_entries(task: Task):
+  N = task.horizon
+
+  Q = 2 * np.asarray(task.Q)
+  Qf = 2 * np.asarray(task.Qf)
+  R = 2 * np.asarray(task.R)
+
+  q_entries = Q[np.tril_indices_from(Q)]
+  r_entries = R[np.tril_indices_from(R)]
+  qf_entries = Qf[np.tril_indices_from(Qf)]
+
+  entries = np.concatenate((
+      np.repeat(np.concatenate((q_entries, r_entries)), N),
+      qf_entries,
+  ))
+
+  return entries
