@@ -141,14 +141,17 @@ class IpoptMultipleShooting:
         cu=constraints_ub,
     )
 
-  def solve(self):
-    N = self.task.horizon
-
-    xs_init = np.linspace(self.task.x_0, self.task.x_goal, N + 1)
-    us_init = np.zeros((N, self.task.nu))
+  def solve(
+      self,
+      *,
+      xs_init: np.ndarray,
+      us_init: np.ndarray,
+      iterations: int,
+      **kwargs,
+  ):
     vars_init = self._pack(xs_init, us_init)
 
-    self.problem.add_option("max_iter", 100)
+    self.problem.add_option("max_iter", iterations)
 
     vars_opt, info = self.problem.solve(vars_init)
 

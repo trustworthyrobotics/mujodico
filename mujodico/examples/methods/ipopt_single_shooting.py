@@ -106,13 +106,20 @@ class IpoptSingleShooting:
     self.rollout = rollout
     self.problem = problem
 
-  def solve(self):
+  def solve(
+      self,
+      *,
+      us_init: np.ndarray,
+      iterations: int,
+      **kwargs,
+  ):
     N, nu = self.task.horizon, self.task.nu
-    us_init = np.zeros((N, nu))
+    assert us_init.shape == (N, nu)
 
     vars_init = us_init.ravel()
 
-    self.problem.add_option("max_iter", 100)
+    self.problem.add_option("max_iter", iterations)
+
     us_opt, info = self.problem.solve(vars_init)
 
     us_opt = jp.array(us_opt).reshape(N, nu)

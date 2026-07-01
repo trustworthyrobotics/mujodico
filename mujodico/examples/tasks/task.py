@@ -84,6 +84,19 @@ class Task:
     )
     return u_lb, u_ub
 
+  @property
+  def xs_init(self):
+    xs = np.linspace(self.x_0, self.x_goal, self.horizon + 1)
+
+    mask = np.diag(self.Q) > 0
+    xs[:, ~mask] = self.x_0[~mask]
+
+    return xs
+
+  @property
+  def us_init(self):
+    return np.zeros((self.horizon, self.nu))
+
   def print_summary(self):
     print("Task:", self.__class__.__name__)
     print("  horizon =", self.horizon)

@@ -57,7 +57,11 @@ def _main(argv: Sequence[str]) -> None:
   task = task_cls()
   method = method_cls(task, plan_contact_approx)
 
-  xs_nominal, us_nominal = method.solve()
+  xs_nominal, us_nominal = method.solve(
+    xs_init=task.xs_init,
+    us_init=task.us_init,
+    iterations=100,
+  )
 
   model = task.model
   mjx_model = mjx.put_model(model, contact_approximation=eval_contact_approx)
