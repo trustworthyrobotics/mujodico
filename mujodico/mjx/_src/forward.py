@@ -357,7 +357,7 @@ def euler(m: Model, d: Data) -> Data:
 
   # integrate damping implicitly
   qacc = d.qacc
-  if not m.opt.disableflags & DisableBit.EULERDAMP:
+  if not m.opt.disableflags & DisableBit.EULERDAMP or qacc is None:
     if support.is_sparse(m):
       diag_adr = m.M_rowadr + m.M_rownnz - 1
       M = d._impl.M.at[diag_adr].add(m.opt.timestep * m.dof_damping)
@@ -424,13 +424,12 @@ def implicit(m: Model, d: Data) -> Data:
   qderiv = derivative.deriv_smooth_vel(m, d)
 
   qacc = d.qacc
-  if (
-      qderiv is not None
-      and m.opt._impl.contact_approx == ContactApproxType.MUJOCO
-  ):
+  if (m.opt._impl.contact_approx == ContactApproxType.MUJOCO and qderiv is not None
+      or qacc is None):
     # TODO(robotics-simulation): use smooth.factor_m / solve_m here:
     qm = support.full_m(m, d) if support.is_sparse(m) else d._impl.M
-    qm -= m.opt.timestep * qderiv
+    if qderiv is not None:
+      qm -= m.opt.timestep * qderiv
     qh, _ = jax.scipy.linalg.cho_factor(qm)
     qfrc = d.qfrc_smooth + d.qfrc_constraint
     qacc = jax.scipy.linalg.cho_solve((qh, False), qfrc)
