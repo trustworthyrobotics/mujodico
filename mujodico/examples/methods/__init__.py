@@ -1,8 +1,10 @@
+import mujodico.examples.methods.ipopt_lifted_multiple_shooting
 import mujodico.examples.methods.ipopt_multiple_shooting
 import mujodico.examples.methods.ipopt_single_shooting
 
 
 _METHODS = [
+    ipopt_lifted_multiple_shooting.IpoptLiftedMultipleShooting,
     ipopt_multiple_shooting.IpoptMultipleShooting,
     ipopt_single_shooting.IpoptSingleShooting,
 ]
