@@ -16,12 +16,28 @@ import numpy as np
 _METHOD = flags.DEFINE_string(
     'method',
     None,
-    '{' + '|'.join(get_method_names()) + '}',
+    f'<{"|".join(get_method_names())}>\n(required)',
+    required=True,
 )
 _TASK = flags.DEFINE_string(
     'task',
     None,
-    '{' + '|'.join(get_task_names()) + '}',
+    f'<{"|".join(get_task_names())}>\n(required)',
+    required=True,
+)
+_PLAN_CONTACT_APPROX = flags.DEFINE_string(
+    'plan_contact_approx',
+    None,
+    f'<{"|".join([t.value for t in mjx.ContactApproxType])}>:'
+    ' Contact approximation for planning.\n(required)',
+    required=True,
+)
+_EVAL_CONTACT_APPROX = flags.DEFINE_string(
+    'eval_contact_approx',
+    None,
+    f'<{"|".join([t.value for t in mjx.ContactApproxType])}>:'
+    ' Contact approximation for evaluation.\n'
+    '(default: same as plan_contact_approx)',
 )
 
 
@@ -32,13 +48,19 @@ def _main(argv: Sequence[str]) -> None:
   method_cls = parse_method_name(_METHOD.value)
   task_cls = parse_task_name(_TASK.value)
 
+  plan_contact_approx = _PLAN_CONTACT_APPROX.value
+  plan_contact_approx = mjx.ContactApproxType._resolve(plan_contact_approx)
+
+  eval_contact_approx = _EVAL_CONTACT_APPROX.value or plan_contact_approx
+  eval_contact_approx = mjx.ContactApproxType._resolve(eval_contact_approx)
+
   task = task_cls()
-  method = method_cls(task)
+  method = method_cls(task, plan_contact_approx)
 
   xs_nominal, us_nominal = method.solve()
 
   model = task.model
-  mjx_model = mjx.put_model(model)
+  mjx_model = mjx.put_model(model, contact_approximation=eval_contact_approx)
   mjx_data = mjx.make_data(mjx_model)
 
   @jax.jit

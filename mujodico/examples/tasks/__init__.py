@@ -13,14 +13,13 @@ def get_task_names():
   return [task.__name__ for task in _TASKS]
 
 
-def parse_task_name(name: str | None):
-  if name is None:
-    raise ValueError('task not specified')
-
-  name_clean = name.lower().strip().translate(str.maketrans('', '', ' -_'))
+def parse_task_name(name: str):
+  name = name.lower().strip().translate(str.maketrans('', '', ' -_'))
 
   for task in _TASKS:
-    if name_clean == task.__name__.lower():
+    if name == task.__name__.lower():
       return task
 
-  raise ValueError(f'Unknown task {name}')
+  raise ValueError(
+      f'unknown task: value should be one of <{"|".join(get_task_names())}>'
+  )

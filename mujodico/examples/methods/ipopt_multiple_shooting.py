@@ -15,20 +15,20 @@ except ImportError as e:
 
 class IpoptMultipleShooting:
 
-  def __init__(self, task: Task):
+  def __init__(self, task: Task, contact_approx: mjx.ContactApproxType):
     self.task = task
 
     model = task.model
 
     mjx_smooth_model = mjx.put_model(
         model,
-        contact_approximation="log barrier",
+        contact_approximation=contact_approx,
         contact_smoothing=task.contact_smoothing,
     )
 
     mjx_model = mjx.put_model(
         model,
-        contact_approximation="log barrier",
+        contact_approximation=contact_approx,
         contact_smoothing=0.0,
     )
 
