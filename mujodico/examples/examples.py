@@ -29,12 +29,13 @@ def _main(argv: Sequence[str]) -> None:
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
 
-  method_fun = parse_method_name(_METHOD.value)
+  method_cls = parse_method_name(_METHOD.value)
   task_cls = parse_task_name(_TASK.value)
 
   task = task_cls()
+  method = method_cls(task)
 
-  xs_nominal, us_nominal = method_fun(task)
+  xs_nominal, us_nominal = method.solve()
 
   model = task.model
   mjx_model = mjx.put_model(model)

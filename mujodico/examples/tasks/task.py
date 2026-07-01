@@ -27,9 +27,16 @@ class Task:
   R: np.ndarray
   contact_smoothing: float
 
+  @property
+  def nx(self):
+    return self.model.nq + self.model.nv + self.model.na
+
+  @property
+  def nu(self):
+    return self.model.nu
+
   def __post_init__(self):
-    nx = self.model.nq + self.model.nv
-    nu = self.model.nu
+    nx, nu = self.nx, self.nu
     assert self.x_0.shape == (nx,)
     assert self.x_goal.shape == (nx,)
     assert self.Q.shape == (nx, nx)
@@ -80,6 +87,8 @@ class Task:
   def print_summary(self):
     print("Task:", self.__class__.__name__)
     print("  horizon =", self.horizon)
+    print("  nx =", self.nx, f"(nq={self.model.nq}, nv={self.model.nv}, na={self.model.na})")
+    print("  nu =", self.nu)
     print("  x_0 =", self.x_0)
     print("  x_goal =", self.x_goal)
     print("  Q =", str(self.Q).replace("\n", "\n" + " " * 6))

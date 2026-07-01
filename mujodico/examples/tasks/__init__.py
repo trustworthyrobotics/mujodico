@@ -17,10 +17,10 @@ def parse_task_name(name: str | None):
   if name is None:
     raise ValueError('task not specified')
 
-  name = name.lower().strip().replace(' ', '').replace('-', '').replace('_', '')
+  name_clean = name.lower().strip().translate(str.maketrans('', '', ' -_'))
 
   for task in _TASKS:
-    if name == task.__name__.lower():
+    if name_clean == task.__name__.lower():
       return task
 
-  raise ValueError(f'Unknown method {name}')
+  raise ValueError(f'Unknown task {name}')
