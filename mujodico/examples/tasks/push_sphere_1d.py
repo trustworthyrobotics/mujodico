@@ -20,7 +20,7 @@ _XML = """
   <worldbody>
 
     <body name="pusher" pos="0 0 0">
-      <joint name="pusher_slide" type="slide" axis="1 0 0" />
+      <joint name="pusher_slide" type="slide" axis="1 0 0" range="-2 2" />
 
       <geom name="pusher_geom"
             type="sphere"
@@ -30,7 +30,7 @@ _XML = """
     </body>
 
     <body name="object" pos="0 0 0">
-      <joint name="object_slide" type="slide" axis="1 0 0" />
+      <joint name="object_slide" type="slide" axis="1 0 0" range="-2 2" />
 
       <geom name="object_geom"
             type="sphere"
@@ -42,10 +42,8 @@ _XML = """
   </worldbody>
 
   <actuator>
-    <velocity name="pusher_vel"
-        joint="pusher_slide"
-        kv="100"
-        ctrlrange="-1 1" />
+    <intvelocity name="pusher_vel" joint="pusher_slide" kp="100"
+                 ctrlrange="-1 1" actrange="-1.5 1.5" />
   </actuator>
 
 </mujoco>
@@ -58,9 +56,9 @@ class PushSphere1d(Task):
     model = mujoco.MjModel.from_xml_string(_XML)
     horizon = 100
 
-    x_0 = np.array([-0.2, 0.0, 0.0, 0.0])
-    x_goal = np.array([0.0, 1.0, 0.0, 0.0])
-    Q = np.diag([0.0, 1.0, 0.0, 0.1])
+    x_0 = np.array([-0.2, 0.0, 0.0, 0.0, 0.0])
+    x_goal = np.array([0.0, 1.0, 0.0, 0.0, 0.0])
+    Q = np.diag([0.0, 1.0, 0.0, 0.1, 0.0])
     Qf = Q * 100.0
 
     u_ref = np.array([0.0])

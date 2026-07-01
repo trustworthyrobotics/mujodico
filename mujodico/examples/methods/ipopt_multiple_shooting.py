@@ -35,7 +35,6 @@ class IpoptMultipleShooting:
     mjx_data = mjx.make_data(mjx_model)
 
     N = task.horizon
-    nq = model.nq
     nx = task.nx
     nu = task.nu
 
@@ -47,15 +46,17 @@ class IpoptMultipleShooting:
 
     @jax.jit
     def step(x, u):
-      d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:], ctrl=u)
+      nq, nv = mjx_model.nq, mjx_model.nv
+      d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
       d = mjx.step(mjx_model, d)
-      return jp.concatenate((d.qpos, d.qvel))
+      return jp.concatenate((d.qpos, d.qvel, d.act))
 
     @jax.jit
     def step_smooth(x, u):
-      d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:], ctrl=u)
+      nq, nv = mjx_model.nq, mjx_model.nv
+      d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
       d = mjx.step(mjx_smooth_model, d)
-      return jp.concatenate((d.qpos, d.qvel))
+      return jp.concatenate((d.qpos, d.qvel, d.act))
 
     @jax.jit
     def objective(vars: jax.Array):
@@ -83,7 +84,7 @@ class IpoptMultipleShooting:
         return jp.concatenate([(-A).reshape(-1), (-B).reshape(-1), jp.ones(nx)])
 
       per_stage = jax.vmap(stage_jac)(xs[:-1], us)
-      return per_stage.reshape(-1)
+      return per_stage.ravel()
 
     objective_grad = jax.jit(jax.grad(objective))
     objective_hess_structure, objective_hess_entries = self._objective_hessian()
@@ -114,25 +115,25 @@ class IpoptMultipleShooting:
         return objective_hess_structure
 
     x_lb, x_ub = task.x_bounds
-    u_lb, u_ub = task.u_bounds
-
     xs_lb = np.repeat(x_lb[None, :], N + 1, axis=0)
     xs_lb[0] = task.x_0
     xs_ub = np.repeat(x_ub[None, :], N + 1, axis=0)
     xs_ub[0] = task.x_0
 
+    u_lb, u_ub = task.u_bounds
     us_lb = np.repeat(u_lb[None, :], N, axis=0)
     us_ub = np.repeat(u_ub[None, :], N, axis=0)
 
     vars_lb = self._pack(xs_lb, us_lb)
     vars_ub = self._pack(xs_ub, us_ub)
 
-    constraints_lb = np.zeros(N * nx)
-    constraints_ub = np.zeros(N * nx)
+    n_constraints = N * nx
+    constraints_lb = np.zeros(n_constraints)
+    constraints_ub = np.zeros(n_constraints)
 
     self.problem = cyipopt.Problem(
-        n=(N + 1) * nx + N * nu,
-        m=N * nx,
+        n=vars_lb.size,
+        m=n_constraints,
         problem_obj=NLP(),
         lb=vars_lb,
         ub=vars_ub,
@@ -190,10 +191,8 @@ class IpoptMultipleShooting:
     u_rows, u_cols = np.indices((nx, nu))
     eye = np.arange(nx)
 
-    x_rows = x_rows.ravel()
-    x_cols = x_cols.ravel()
-    u_rows = u_rows.ravel()
-    u_cols = u_cols.ravel()
+    x_rows, x_cols = x_rows.ravel(), x_cols.ravel()
+    u_rows, u_cols = u_rows.ravel(), u_cols.ravel()
 
     stage_rows = np.concatenate([x_rows, u_rows, eye])
     stage_cols = np.concatenate([x_cols, nx + u_cols, nx + nu + eye])

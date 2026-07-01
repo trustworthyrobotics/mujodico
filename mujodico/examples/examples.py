@@ -69,9 +69,10 @@ def _main(argv: Sequence[str]) -> None:
 
   @jax.jit
   def step(x, u):
-    d = mjx_data.replace(qpos=x[: model.nq], qvel=x[model.nq :], ctrl=u)
+    nq, nv = mjx_model.nq, mjx_model.nv
+    d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
     d = mjx.step(mjx_model, d)
-    return jp.concatenate((d.qpos, d.qvel))
+    return jp.concatenate((d.qpos, d.qvel, d.act))
 
   @jax.jit
   def rollout(x0, us):

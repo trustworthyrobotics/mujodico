@@ -46,40 +46,55 @@ class Task:
 
   @property
   def x_bounds(self):
-    q_lb = np.full(self.model.nq, -np.inf)
-    q_ub = np.full(self.model.nq, np.inf)
+    m = self.model
 
-    for j in range(self.model.njnt):
-      if not self.model.jnt_limited[j]:
+    q_lb = np.full(m.nq, -np.inf)
+    q_ub = np.full(m.nq, np.inf)
+
+    for j in range(m.njnt):
+      if not m.jnt_limited[j]:
         continue
 
-        # Only scalar joints have simple bounds
-      if self.model.jnt_type[j] in (
+      # Only scalar joints have simple bounds
+      if m.jnt_type[j] in (
           mujoco.mjtJoint.mjJNT_HINGE,
           mujoco.mjtJoint.mjJNT_SLIDE,
       ):
-        adr = self.model.jnt_qposadr[j]
-        q_lb[adr] = self.model.jnt_range[j, 0]
-        q_ub[adr] = self.model.jnt_range[j, 1]
+        adr = m.jnt_qposadr[j]
+        q_lb[adr] = m.jnt_range[j, 0]
+        q_ub[adr] = m.jnt_range[j, 1]
 
-    v_lb = np.full(self.model.nv, -np.inf)
-    v_ub = np.full(self.model.nv, np.inf)
+    v_lb = np.full(m.nv, -np.inf)
+    v_ub = np.full(m.nv, np.inf)
 
-    x_lb = np.concatenate([q_lb, v_lb])
-    x_ub = np.concatenate([q_ub, v_ub])
+    a_lb = np.where(
+        m.actuator_actlimited,
+        m.actuator_actrange[:, 0],
+        -np.inf,
+    )[m.actuator_actnum > 0]
+    a_ub = np.where(
+        m.actuator_actlimited,
+        m.actuator_actrange[:, 1],
+        np.inf,
+    )[m.actuator_actnum > 0]
+
+    x_lb = np.concatenate([q_lb, v_lb, a_lb])
+    x_ub = np.concatenate([q_ub, v_ub, a_ub])
 
     return x_lb, x_ub
 
   @property
   def u_bounds(self):
+    m = self.model
+
     u_lb = np.where(
-        self.model.actuator_ctrllimited,
-        self.model.actuator_ctrlrange[:, 0],
+        m.actuator_ctrllimited,
+        m.actuator_ctrlrange[:, 0],
         -np.inf,
     )
     u_ub = np.where(
-        self.model.actuator_ctrllimited,
-        self.model.actuator_ctrlrange[:, 1],
+        m.actuator_ctrllimited,
+        m.actuator_ctrlrange[:, 1],
         np.inf,
     )
     return u_lb, u_ub
@@ -98,23 +113,25 @@ class Task:
     return np.zeros((self.horizon, self.nu))
 
   def print_summary(self):
-    print("Task:", self.__class__.__name__)
-    print("  horizon =", self.horizon)
-    print("  nx =", self.nx, f"(nq={self.model.nq}, nv={self.model.nv}, na={self.model.na})")
-    print("  nu =", self.nu)
-    print("  x_0 =", self.x_0)
-    print("  x_goal =", self.x_goal)
-    print("  Q =", str(self.Q).replace("\n", "\n" + " " * 6))
-    print("  Qf =", str(self.Qf).replace("\n", "\n" + " " * 7))
-    print("  u_ref =", self.u_ref)
-    print("  R =", str(self.R).replace("\n", "\n" + " " * 6))
     x_lb, x_ub = self.x_bounds
-    print("  x_lb =", x_lb)
-    print("  x_ub =", x_ub)
     u_lb, u_ub = self.u_bounds
-    print("  u_lb =", u_lb)
-    print("  u_ub =", u_ub)
-    print("  contact_smoothing =", self.contact_smoothing)
+    print(f'''
+Task: {self.__class__.__name__}
+  horizon = {self.horizon}
+  nx = {self.nx} (nq={self.model.nq}, nv={self.model.nv}, na={self.model.na})
+  nu = {self.nu}
+  x_0 = {self.x_0}
+  x_goal = {self.x_goal}
+  x_lb = {x_lb}
+  x_ub = {x_ub}
+  Q = {str(self.Q).replace('\n', '\n' + ' ' * 6)}
+  Qf = {str(self.Qf).replace('\n', '\n' + ' ' * 6)}
+  u_ref = {self.u_ref}
+  u_lb = {u_lb}
+  u_ub = {u_ub}
+  R = {str(self.R).replace('\n', '\n' + ' ' * 6)}
+  contact_smoothing = {self.contact_smoothing}
+''')
 
   def visualize_trajectory(self, xs: np.ndarray):
     model = self.model

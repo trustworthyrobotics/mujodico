@@ -33,7 +33,6 @@ class IpoptSingleShooting:
     mjx_data = mjx.make_data(mjx_model)
 
     N = task.horizon
-    nq = model.nq
     nu = task.nu
 
     x_0 = jp.array(task.x_0)
@@ -45,11 +44,12 @@ class IpoptSingleShooting:
 
     @jax.jit
     def step(x, u):
-      d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:], ctrl=u)
+      nq, nv = mjx_model.nq, mjx_model.nv
+      d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
       d0 = mjx.step(mjx_model, d)
-      xnext = jp.concatenate((d0.qpos, d0.qvel))
+      xnext = jp.concatenate((d0.qpos, d0.qvel, d0.act))
       d1 = mjx.step(mjx_smooth_model, d)
-      xnext_smooth = jp.concatenate((d1.qpos, d1.qvel))
+      xnext_smooth = jp.concatenate((d1.qpos, d1.qvel, d1.act))
       return (
           jax.lax.stop_gradient(xnext)
           + xnext_smooth
