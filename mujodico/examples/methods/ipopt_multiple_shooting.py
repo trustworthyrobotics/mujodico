@@ -86,8 +86,7 @@ class IpoptMultipleShooting:
       return per_stage.reshape(-1)
 
     objective_grad = jax.jit(jax.grad(objective))
-    objective_hess_structure = self._objective_hessian_structure()
-    objective_hess_entries = self._objective_hessian_entries()
+    objective_hess_structure, objective_hess_entries = self._objective_hessian()
 
     constraints_jac_structure = self._dynamics_constraint_jacobian_structure()
 
@@ -214,49 +213,47 @@ class IpoptMultipleShooting:
         np.concatenate(jcol).astype(np.int32),
     )
 
-  def _objective_hessian_structure(self):
+  def _objective_hessian(self):
     N, nx, nu = self.task.horizon, self.task.nx, self.task.nu
-
-    q_i, q_j = np.tril_indices(nx)
-    r_i, r_j = np.tril_indices(nu)
-
-    irow = []
-    jcol = []
-
-    offset = 0
-    for k in range(N + 1):
-      # Q (or Qf) block
-      irow.append(q_i + offset)
-      jcol.append(q_j + offset)
-      offset += nx
-
-      if k == N:
-        break
-
-      # R block
-      irow.append(r_i + offset)
-      jcol.append(r_j + offset)
-      offset += nu
-
-    return (
-        np.concatenate(irow).astype(np.int32),
-        np.concatenate(jcol).astype(np.int32),
-    )
-
-  def _objective_hessian_entries(self):
-    N = self.task.horizon
 
     Q = 2 * np.asarray(self.task.Q)
     Qf = 2 * np.asarray(self.task.Qf)
     R = 2 * np.asarray(self.task.R)
 
-    q_entries = Q[np.tril_indices_from(Q)]
-    r_entries = R[np.tril_indices_from(R)]
-    qf_entries = Qf[np.tril_indices_from(Qf)]
+    q_i, q_j = np.tril_indices(nx)
+    qf_i, qf_j = np.tril_indices(nx)
+    r_i, r_j = np.tril_indices(nu)
 
-    entries = np.concatenate((
-        np.repeat(np.concatenate((q_entries, r_entries)), N),
-        qf_entries,
-    ))
+    q_entries = Q[q_i, q_j]
+    qf_entries = Qf[qf_i, qf_j]
+    r_entries = R[r_i, r_j]
 
-    return entries
+    irow = []
+    jcol = []
+    entries = []
+
+    offset = 0
+    for _ in range(N):
+      irow.append(q_i + offset)
+      jcol.append(q_j + offset)
+      entries.append(q_entries)
+      offset += nx
+
+      irow.append(r_i + offset)
+      jcol.append(r_j + offset)
+      entries.append(r_entries)
+      offset += nu
+
+    irow.append(qf_i + offset)
+    jcol.append(qf_j + offset)
+    entries.append(qf_entries)
+
+    structure = (
+        np.concatenate(irow).astype(np.int32),
+        np.concatenate(jcol).astype(np.int32),
+    )
+
+    return (
+        structure,
+        np.concatenate(entries),
+    )
