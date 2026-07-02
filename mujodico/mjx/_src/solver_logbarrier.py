@@ -176,23 +176,22 @@ def kkt_conditions(m: Model, efc_contact_mask: jax.Array):
   """Returns the KKT conditions including expression, lower bound, and upper bound."""
 
   nq, nv, na = m.nq, m.nv, m.na
+  nx = nq + nv + na
 
   nc = int(jp.count_nonzero(efc_contact_mask))
 
   data = io.make_data(m)
 
   def kkt_fn(x: jax.Array, u: jax.Array, cf: jax.Array, x_next: jax.Array):
-    assert x.size == nq + nv + na
+    assert x.size == nx
     assert u.size == m.nu
     assert cf.size == nc
-    assert x_next.size == nq + nv + na
+    assert x_next.size == nx
 
     qpos = x[:nq]
     qvel = x[nq : nq + nv]
     act = x[nq + nv :]
-    qpos_next = x_next[:nq]
     qvel_next = x_next[nq : nq + nv]
-    act_next = x_next[nq + nv :]
 
     d = data.replace(qpos=qpos, qvel=qvel, act=act, ctrl=u)
 
@@ -201,32 +200,31 @@ def kkt_conditions(m: Model, efc_contact_mask: jax.Array):
     d = forward.fwd_actuation(m, d)
     d = forward.fwd_acceleration(m, d)
 
-    qm, qvel_smooth = _linearize_unconstrained_dynamics(m, d)
+    # TODO(wei-chen): consider using computed force with stop gradient instead of zero
+    efc_force = jp.zeros(d._impl.nefc)
+    efc_force = efc_force.at[efc_contact_mask].set(cf)
 
-    efc_J = d._impl.efc_J[efc_contact_mask]
-    efc_pos = d._impl.efc_pos[efc_contact_mask]
+    d = d.tree_replace({
+        'qfrc_constraint': d._impl.efc_J.T @ efc_force,
+        '_impl.efc_force': efc_force,
+        'qacc': None,
+    })
+
+    if m.opt.integrator == IntegratorType.EULER:
+      d_next = forward.euler(m, d)
+    elif m.opt.integrator == IntegratorType.IMPLICITFAST:
+      d_next = forward.implicit(m, d)
+    else:
+      raise NotImplementedError(f'integrator {m.opt.integrator} not implemented.')
 
     dt = m.opt.timestep
     tau = d._impl.efc_b / jp.maximum(d._impl.efc_k, 1e-8)
-    tau = tau[efc_contact_mask]
 
-    cpos = efc_J @ qvel_next + efc_pos / (dt + tau)
-
-    d_next = d.replace(qacc=(qvel_next - d.qvel) / dt, qfrc_constraint=None)
-
-    if m.opt.integrator == IntegratorType.EULER:
-      d_next = forward.euler(m, d_next)
-    elif m.opt.integrator == IntegratorType.IMPLICITFAST:
-      d_next = forward.implicit(m, d_next)
-    else:
-      raise NotImplementedError(
-          f'integrator {m.opt.integrator} not implemented.'
-      )
+    cpos = d._impl.efc_J @ qvel_next + d._impl.efc_pos / (dt + tau)
+    cpos = cpos[efc_contact_mask]
 
     return jp.concatenate([
-        d_next.qpos - qpos_next,
-        qm @ (qvel_next - qvel_smooth) / dt - efc_J.T @ cf,
-        d_next.act - act_next,
+        jp.concatenate([d_next.qpos, d_next.qvel, d_next.act]) - x_next,
         cpos,
         cpos * cf,
     ])
@@ -234,17 +232,13 @@ def kkt_conditions(m: Model, efc_contact_mask: jax.Array):
   mu_e = m.opt._impl.contact_smoothing * jp.ones(nc)
 
   kkt_lb = jp.concatenate([
-    jp.zeros(nq),
-    jp.zeros(nv),
-    jp.zeros(na),
+    jp.zeros(nx),
     jp.zeros(nc),
     mu_e,
   ])
 
   kkt_ub = jp.concatenate([
-    jp.zeros(nq),
-    jp.zeros(nv),
-    jp.zeros(na),
+    jp.zeros(nx),
     jp.full(nc, jp.inf),
     mu_e,
   ])
