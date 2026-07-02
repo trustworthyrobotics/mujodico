@@ -63,30 +63,7 @@ def _main(argv: Sequence[str]) -> None:
     iterations=100,
   )
 
-  model = task.model
-  mjx_model = mjx.put_model(model, contact_approximation=eval_contact_approx)
-  mjx_data = mjx.make_data(mjx_model)
-
-  @jax.jit
-  def step(x, u):
-    nq, nv = mjx_model.nq, mjx_model.nv
-    d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
-    d = mjx.step(mjx_model, d)
-    return jp.concatenate((d.qpos, d.qvel, d.act))
-
-  @jax.jit
-  def rollout(x0, us):
-    def scan_step(x, u):
-      x_next = step(x, u)
-      return x_next, x_next
-
-    _, xs = jax.lax.scan(scan_step, x0, us)
-    return jp.concatenate([x0[None], xs], axis=0)
-
-  xs_rollout = rollout(task.x_0, us_nominal)
-  xs_rollout = np.asarray(xs_rollout)
-
-  task.visualize_trajectory(xs_rollout)
+  task.visualize_trajectory(xs_nominal)
 
 
 def main():

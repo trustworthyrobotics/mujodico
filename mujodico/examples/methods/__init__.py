@@ -1,9 +1,11 @@
+import mujodico.examples.methods.ipopt_kkt_contact_implicit
 import mujodico.examples.methods.ipopt_lifted_multiple_shooting
 import mujodico.examples.methods.ipopt_multiple_shooting
 import mujodico.examples.methods.ipopt_single_shooting
 
 
 _METHODS = [
+    ipopt_kkt_contact_implicit.IpoptKKTContactImplicit,
     ipopt_lifted_multiple_shooting.IpoptLiftedMultipleShooting,
     ipopt_multiple_shooting.IpoptMultipleShooting,
     ipopt_single_shooting.IpoptSingleShooting,
