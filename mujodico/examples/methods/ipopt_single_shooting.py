@@ -1,3 +1,4 @@
+import time
 import jax
 import jax.numpy as jp
 from mujodico import mjx
@@ -42,21 +43,22 @@ class IpoptSingleShooting:
     u_ref = jp.array(task.u_ref)
     R = jp.array(task.R)
 
-    @jax.jit
     def step(x, u):
       nq, nv = mjx_model.nq, mjx_model.nv
       d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
+
       d0 = mjx.step(mjx_model, d)
       xnext = jp.concatenate((d0.qpos, d0.qvel, d0.act))
+
       d1 = mjx.step(mjx_smooth_model, d)
       xnext_smooth = jp.concatenate((d1.qpos, d1.qvel, d1.act))
+
       return (
           jax.lax.stop_gradient(xnext)
           + xnext_smooth
           - jax.lax.stop_gradient(xnext_smooth)
       )
 
-    @jax.jit
     def rollout(x_0, us):
       def scan_step(x, u):
         x_next = step(x, u)
@@ -65,7 +67,6 @@ class IpoptSingleShooting:
       _, xs = jax.lax.scan(scan_step, x_0, us)
       return jp.concatenate([x_0[None], xs], axis=0)
 
-    @jax.jit
     def objective(vars):
       us = vars.reshape(N, nu)
       xs = rollout(x_0, us)
@@ -77,13 +78,28 @@ class IpoptSingleShooting:
       cost = jp.sum((dx @ Q) * dx) + jp.sum((du @ R) * du) + dxf @ Qf @ dxf
       return cost
 
-    objective_grad = jax.jit(jax.grad(objective))
+    vars_trace = jp.zeros((N, nu)).ravel()
+
+    objective_grad = jax.jit(jax.grad(objective)).lower(vars_trace).compile()
+    objective = jax.jit(objective).lower(vars_trace).compile()
+
+    self._dynamics_time = 0
+
+    def timed(fn):
+      def wrapped(*args, **kwargs):
+        tic = time.perf_counter()
+        out = fn(*args, **kwargs)
+        self._dynamics_time += time.perf_counter() - tic
+        return out
+      return wrapped
 
     class NLP:
 
+      @timed
       def objective(self, vars):
         return float(objective(jp.asarray(vars)))
 
+      @timed
       def gradient(self, vars):
         return np.asarray(objective_grad(jp.asarray(vars)))
 
@@ -95,7 +111,7 @@ class IpoptSingleShooting:
     vars_ub = us_ub.ravel()
 
     problem = cyipopt.Problem(
-        n=N * nu,
+        n=vars_lb.size,
         m=0,
         problem_obj=NLP(),
         lb=vars_lb,
@@ -120,7 +136,19 @@ class IpoptSingleShooting:
 
     self.problem.add_option("max_iter", iterations)
 
+    self._dynamics_time = 0
+    tic = time.perf_counter()
+
     us_opt, info = self.problem.solve(vars_init)
+
+    total_time = time.perf_counter() - tic
+
+    print(f'''
+Method: {self.__class__.__name__}
+  total time: {total_time:.6f} sec
+    dynamics time: {self._dynamics_time:.6f} sec / {self._dynamics_time/total_time*100:.2f}%
+    ipopt time:    {total_time-self._dynamics_time:.6f} sec / {(1-self._dynamics_time/total_time)*100:.2f}%
+''')
 
     us_opt = jp.array(us_opt).reshape(N, nu)
 

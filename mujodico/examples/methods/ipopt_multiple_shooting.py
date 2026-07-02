@@ -1,3 +1,4 @@
+import time
 import jax
 import jax.numpy as jp
 from mujodico import mjx
@@ -44,21 +45,18 @@ class IpoptMultipleShooting:
     u_ref = jp.array(task.u_ref)
     R = jp.array(task.R)
 
-    @jax.jit
     def step(x, u):
       nq, nv = mjx_model.nq, mjx_model.nv
       d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
       d = mjx.step(mjx_model, d)
       return jp.concatenate((d.qpos, d.qvel, d.act))
 
-    @jax.jit
     def step_smooth(x, u):
       nq, nv = mjx_model.nq, mjx_model.nv
       d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
       d = mjx.step(mjx_smooth_model, d)
       return jp.concatenate((d.qpos, d.qvel, d.act))
 
-    @jax.jit
     def objective(vars: jax.Array):
       xs, us = self._unpack(vars)
 
@@ -69,13 +67,11 @@ class IpoptMultipleShooting:
       cost = jp.sum((dx @ Q) * dx) + jp.sum((du @ R) * du) + dxf @ Qf @ dxf
       return cost
 
-    @jax.jit
     def constraints(vars: jax.Array):
       xs, us = self._unpack(vars)
       xs_next = jax.vmap(step)(xs[:-1], us)
       return (xs[1:] - xs_next).ravel()
 
-    @jax.jit
     def constraints_jac_entries(vars: jax.Array):
       xs, us = self._unpack(vars)
 
@@ -86,31 +82,53 @@ class IpoptMultipleShooting:
       per_stage = jax.vmap(stage_jac)(xs[:-1], us)
       return per_stage.ravel()
 
-    objective_grad = jax.jit(jax.grad(objective))
+    vars_trace = self._pack(xs=jp.zeros((N+1, nx)), us=jp.zeros((N, nu)))
+
+    objective_grad = jax.jit(jax.grad(objective)).lower(vars_trace).compile()
+    objective = jax.jit(objective).lower(vars_trace).compile()
     objective_hess_structure, objective_hess_entries = self._objective_hessian()
 
+    constraints = jax.jit(constraints).lower(vars_trace).compile()
+    constraints_jac_entries = jax.jit(constraints_jac_entries).lower(vars_trace).compile()
     constraints_jac_structure = self._dynamics_constraint_jacobian_structure()
+
+    self._dynamics_time = 0
+
+    def timed(fn):
+      def wrapped(*args, **kwargs):
+        tic = time.perf_counter()
+        out = fn(*args, **kwargs)
+        self._dynamics_time += time.perf_counter() - tic
+        return out
+      return wrapped
 
     class NLP:
 
+      @timed
       def objective(self, vars):
         return float(objective(jp.asarray(vars)))
 
+      @timed
       def gradient(self, vars):
         return np.asarray(objective_grad(jp.asarray(vars)))
 
+      @timed
       def constraints(self, vars):
         return np.asarray(constraints(jp.asarray(vars)))
 
+      @timed
       def jacobian(self, vars):
         return np.asarray(constraints_jac_entries(jp.asarray(vars)))
 
+      @timed
       def jacobianstructure(self):
         return constraints_jac_structure
 
+      @timed
       def hessian(self, vars, lmbda, objective_factor):
         return objective_hess_entries * objective_factor
 
+      @timed
       def hessianstructure(self):
         return objective_hess_structure
 
@@ -153,7 +171,19 @@ class IpoptMultipleShooting:
 
     self.problem.add_option("max_iter", iterations)
 
+    self._dynamics_time = 0
+    tic = time.perf_counter()
+
     vars_opt, info = self.problem.solve(vars_init)
+
+    total_time = time.perf_counter() - tic
+
+    print(f'''
+Method: {self.__class__.__name__}
+  total time: {total_time:.6f} sec
+    dynamics time: {self._dynamics_time:.6f} sec / {self._dynamics_time/total_time*100:.2f}%
+    ipopt time:    {total_time-self._dynamics_time:.6f} sec / {(1-self._dynamics_time/total_time)*100:.2f}%
+''')
 
     xs_opt, us_opt = self._unpack(vars_opt)
 
