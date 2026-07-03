@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jp
 from mujodico import mjx
 from mujodico.examples.tasks import Task
+from mujodico.examples.methods import support
 import numpy as np
 
 try:
@@ -72,33 +73,11 @@ class IpoptLiftedMultipleShooting:
       return jax.lax.stop_gradient(cf) + cf_smooth - jax.lax.stop_gradient(cf_smooth)
 
     def advance(x, u, cf):
-      m = mjx_model
-      nq, nv = m.nq, m.nv
-      d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
-
-      d = mjx.fwd_position(m, d)
-      d = mjx.fwd_velocity(m, d)
-      d = mjx.fwd_actuation(m, d)
-      d = mjx.fwd_acceleration(m, d)
-
       # TODO(wei-chen): consider using computed force with stop gradient instead of zero
-      efc_force = jp.zeros(d._impl.nefc)
+      efc_force = jp.zeros(mjx_data._impl.nefc)
       efc_force = efc_force.at[efc_contact_mask].set(cf)
 
-      d = d.tree_replace({
-          'qfrc_constraint': d._impl.efc_J.T @ efc_force,
-          '_impl.efc_force': efc_force,
-          'qacc': None,
-      })
-
-      if m.opt.integrator == mjx.IntegratorType.EULER:
-        d = mjx.euler(m, d)
-      elif m.opt.integrator == mjx.IntegratorType.IMPLICITFAST:
-        d = mjx.implicit(m, d)
-      else:
-        raise NotImplementedError(f'integrator {m.opt.integrator} not implemented.')
-
-      return jp.concatenate((d.qpos, d.qvel, d.act))
+      return support.step_given_efc_force(mjx_model, x, u, efc_force)
 
     def objective(vars: jax.Array):
       xs, us, cfs = self._unpack(vars)
