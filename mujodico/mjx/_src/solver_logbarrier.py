@@ -172,8 +172,8 @@ def _build_cones(m: Model, d: Data):
   return tuple(cones), jp.array(comps), friction_scale
 
 
-def kkt_conditions(m: Model, efc_contact_mask: jax.Array):
-  """Returns the KKT conditions including expression, lower bound, and upper bound."""
+def constitutive_relations(m: Model, efc_contact_mask: jax.Array):
+  """Returns the constitutive relations including expression, lower bound, and upper bound."""
 
   nq, nv, na = m.nq, m.nv, m.na
   nx = nq + nv + na
@@ -182,65 +182,39 @@ def kkt_conditions(m: Model, efc_contact_mask: jax.Array):
 
   data = io.make_data(m)
 
-  def kkt_fn(x: jax.Array, u: jax.Array, cf: jax.Array, x_next: jax.Array):
+  def constitutive_fn(x: jax.Array, u: jax.Array, cf: jax.Array, x_next: jax.Array):
     assert x.size == nx
     assert u.size == m.nu
     assert cf.size == nc
     assert x_next.size == nx
 
-    qpos = x[:nq]
-    qvel = x[nq : nq + nv]
-    act = x[nq + nv :]
-    qvel_next = x_next[nq : nq + nv]
-
-    d = data.replace(qpos=qpos, qvel=qvel, act=act, ctrl=u)
+    d = data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
 
     d = forward.fwd_position(m, d)
-    d = forward.fwd_velocity(m, d)
-    d = forward.fwd_actuation(m, d)
-    d = forward.fwd_acceleration(m, d)
-
-    # TODO(wei-chen): consider using computed force with stop gradient instead of zero
-    efc_force = jp.zeros(d._impl.nefc)
-    efc_force = efc_force.at[efc_contact_mask].set(cf)
-
-    d = d.tree_replace({
-        'qfrc_constraint': d._impl.efc_J.T @ efc_force,
-        '_impl.efc_force': efc_force,
-        'qacc': None,
-    })
-
-    if m.opt.integrator == IntegratorType.EULER:
-      d_next = forward.euler(m, d)
-    elif m.opt.integrator == IntegratorType.IMPLICITFAST:
-      d_next = forward.implicit(m, d)
-    else:
-      raise NotImplementedError(f'integrator {m.opt.integrator} not implemented.')
 
     dt = m.opt.timestep
     tau = d._impl.efc_b / jp.maximum(d._impl.efc_k, 1e-8)
+
+    qvel_next = x_next[nq : nq + nv]
 
     cpos = d._impl.efc_J @ qvel_next + d._impl.efc_pos / (dt + tau)
     cpos = cpos[efc_contact_mask]
 
     return jp.concatenate([
-        jp.concatenate([d_next.qpos, d_next.qvel, d_next.act]) - x_next,
         cpos,
         cpos * cf,
     ])
 
   mu_e = m.opt._impl.contact_smoothing * jp.ones(nc)
 
-  kkt_lb = jp.concatenate([
-    jp.zeros(nx),
+  constitutive_lb = jp.concatenate([
     jp.zeros(nc),
-    mu_e,
+    jp.zeros_like(mu_e),
   ])
 
-  kkt_ub = jp.concatenate([
-    jp.zeros(nx),
+  constitutive_ub = jp.concatenate([
     jp.full(nc, jp.inf),
     mu_e,
   ])
 
-  return kkt_fn, kkt_lb, kkt_ub
+  return constitutive_fn, constitutive_lb, constitutive_ub

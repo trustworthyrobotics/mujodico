@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jp
 from mujodico import mjx
 from mujodico.examples.tasks import Task
+from mujodico.examples.methods import support
 from mujodico.mjx._src import constraint
 from mujodico.mjx._src import solver_logbarrier
 import numpy as np
@@ -16,8 +17,8 @@ except ImportError as e:
   ) from e
 
 
-_KKT_CONDITIONS_FUNC = {
-    mjx.ContactApproxType.LOG_BARRIER: solver_logbarrier.kkt_conditions,
+_CONSTITUTIVE_RELATIONS_FUNC = {
+    mjx.ContactApproxType.LOG_BARRIER: solver_logbarrier.constitutive_relations,
 }
 
 
@@ -34,6 +35,14 @@ class IpoptKKTContactImplicit:
         contact_smoothing=task.contact_smoothing,
     )
 
+    mjx_model = mjx.put_model(
+        model,
+        contact_approximation=contact_approx,
+        contact_smoothing=0.0,
+    )
+
+    mjx_data = mjx.make_data(mjx_model)
+
     N = task.horizon
     nx = task.nx
     nu = task.nu
@@ -47,7 +56,7 @@ class IpoptKKTContactImplicit:
     efc_type = constraint.make_efc_type(mjx_smooth_model)
     if jp.any(efc_type == mjx.ConstraintType.CONTACT_ELLIPTIC):
       raise NotImplementedError(
-          'IpoptLiftedMultipleShooting does not support ellictic cone yet'
+          'IpoptKKTContactImplicit does not support ellictic cone yet'
       )
 
     efc_contact_mask = jp.bitwise_or(
@@ -58,14 +67,21 @@ class IpoptKKTContactImplicit:
     nc = int(jp.count_nonzero(efc_contact_mask))
     self.nc = nc
 
-    contact_approx = mjx.ContactApproxType._resolve(contact_approx)
-    if contact_approx not in _KKT_CONDITIONS_FUNC:
-      raise NotImplementedError(
-          f'kkt conditions for {contact_approx} contact approximation not implemented.'
-      )
-    kkt_conditions_func = _KKT_CONDITIONS_FUNC[contact_approx]
+    def advance(x, u, cf):
+      # TODO(wei-chen): consider using computed force with stop gradient instead of zero
+      efc_force = jp.zeros(mjx_data._impl.nefc)
+      efc_force = efc_force.at[efc_contact_mask].set(cf)
 
-    kkt_fn, kkt_lb, kkt_ub = kkt_conditions_func(mjx_smooth_model, efc_contact_mask)
+      return support.step_given_efc_force(mjx_model, x, u, efc_force)
+
+    contact_approx = mjx.ContactApproxType._resolve(contact_approx)
+    if contact_approx not in _CONSTITUTIVE_RELATIONS_FUNC:
+      raise NotImplementedError(
+          f'constitutive relation for {contact_approx} contact approximation not implemented.'
+      )
+    constitutive_relations_func = _CONSTITUTIVE_RELATIONS_FUNC[contact_approx]
+
+    constitutive_fn, constitutive_lb, constitutive_ub = constitutive_relations_func(mjx_smooth_model, efc_contact_mask)
 
     def objective(vars: jax.Array):
       xs, us, cfs = self._unpack(vars)
@@ -80,16 +96,28 @@ class IpoptKKTContactImplicit:
     def constraints(vars: jax.Array):
       xs, us, cfs = self._unpack(vars)
 
-      per_stage = jax.vmap(kkt_fn)(xs[:-1], us, cfs, xs[1:])
+      def stage(x, u, cf, xnext):
+        return jp.concatenate([
+          xnext - advance(x, u, cf),
+          constitutive_fn(x, u, cf, xnext),
+        ])
 
+      per_stage = jax.vmap(stage)(xs[:-1], us, cfs, xs[1:])
       return per_stage.ravel()
 
     def constraints_jac_entries(vars: jax.Array):
       xs, us, cfs = self._unpack(vars)
 
       def stage_jac(x, u, cf, xnext):
-        jacobians = jax.jacfwd(kkt_fn, argnums=(0, 1, 2, 3))(x, u, cf, xnext)
-        return jp.concatenate(jacobians, axis=1)
+        A, B, C = jax.jacfwd(advance, argnums=(0, 1, 2))(x, u, cf)
+        jacobians = jax.jacfwd(constitutive_fn, argnums=(0, 1, 2, 3))(x, u, cf, xnext)
+        return jp.concatenate([
+          (-A).ravel(),
+          (-B).ravel(),
+          (-C).ravel(),
+          jp.ones(nx),
+          jp.concatenate(jacobians, axis=1).ravel(),
+        ])
 
       per_stage = jax.vmap(stage_jac)(xs[:-1], us, cfs, xs[1:])
       return per_stage.ravel()
@@ -106,7 +134,7 @@ class IpoptKKTContactImplicit:
 
     constraints = jax.jit(constraints).lower(vars_trace).compile()
     constraints_jac_entries = jax.jit(constraints_jac_entries).lower(vars_trace).compile()
-    constraints_jac_structure = self._constraint_jacobian_structure(kkt_lb.size)
+    constraints_jac_structure = self._constraint_jacobian_structure(constitutive_lb.size)
 
     self._dynamics_time = 0
 
@@ -164,8 +192,14 @@ class IpoptKKTContactImplicit:
     vars_lb = self._pack(xs_lb, us_lb, cfs_lb)
     vars_ub = self._pack(xs_ub, us_ub, cfs_ub)
 
-    constraints_lb = np.tile(np.asarray(kkt_lb), N)
-    constraints_ub = np.tile(np.asarray(kkt_ub), N)
+    constraints_lb = np.tile(np.concatenate([
+      np.zeros(nx),
+      np.asarray(constitutive_lb)
+    ]), N)
+    constraints_ub = np.tile(np.concatenate([
+      np.zeros(nx),
+      np.asarray(constitutive_ub)
+    ]), N)
 
     self.problem = cyipopt.Problem(
         n=vars_lb.size,
@@ -241,19 +275,41 @@ Method: {self.__class__.__name__}
 
     return xs, us, cfs
 
-  def _constraint_jacobian_structure(self, n_per_stage: int):
+  def _constraint_jacobian_structure(self, n_constitutive_per_stage: int):
     N, nx, nu, nc = self.task.horizon, self.task.nx, self.task.nu, self.nc
 
-    stage_rows, stage_cols = np.indices((n_per_stage, nx + nu + nc + nx))
+    xx_rows, xx_cols = np.indices((nx, nx))
+    xu_rows, xu_cols = np.indices((nx, nu))
+    xc_rows, xc_cols = np.indices((nx, nc))
+    x_eye = np.arange(nx)
+    constitutive_rows, constitutive_cols = np.indices((n_constitutive_per_stage, nx + nu + nc + nx))
 
-    stage_rows = stage_rows.ravel()
-    stage_cols = stage_cols.ravel()
+    xx_rows, xx_cols = xx_rows.ravel(), xx_cols.ravel()
+    xu_rows, xu_cols = xu_rows.ravel(), xu_cols.ravel()
+    xc_rows, xc_cols = xc_rows.ravel(), xc_cols.ravel()
+    constitutive_rows = constitutive_rows.ravel()
+    constitutive_cols = constitutive_cols.ravel()
+
+    stage_rows = np.concatenate([
+      xx_rows,
+      xu_rows,
+      xc_rows,
+      x_eye,
+      nx + constitutive_rows,
+    ])
+    stage_cols = np.concatenate([
+      xx_cols,
+      nx + xu_cols,
+      nx + nu + xc_cols,
+      nx + nu + nc + x_eye,
+      constitutive_cols,
+    ])
 
     irow = []
     jcol = []
 
     for k in range(N):
-      row_offset = k * n_per_stage
+      row_offset = k * (nx + n_constitutive_per_stage)
       col_offset = k * (nx + nu + nc)
 
       irow.append(stage_rows + row_offset)
