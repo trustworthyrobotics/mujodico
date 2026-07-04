@@ -1,5 +1,6 @@
 import mujoco
 from mujodico.examples.tasks.task import Task
+from mujodico.examples.tasks import plotly_util
 import numpy as np
 import plotly.graph_objects as go
 import viser
@@ -89,14 +90,16 @@ class PushBox2d(Task):
 
     fig.add_trace(go.Scatter(x=xs[:k, 0], y=xs[:k, 1], name='Pusher',
                              mode='lines', line=dict(color='red')))
-    add_circle(fig, x=xs[k-1, 0], y=xs[k-1, 1], r=0.03, color='red')
+    plotly_util.add_circle(fig, x=xs[k-1, 0], y=xs[k-1, 1], r=0.03, color='red')
 
     fig.add_trace(go.Scatter(x=xs[:k, 2], y=xs[:k, 3], name='Object',
                              mode='lines', line=dict(color='blue')))
-    add_rectangle(fig, x=xs[k-1, 2], y=xs[k-1, 3], theta=xs[k-1, 4], w=0.3, h=0.16, color='blue')
+    plotly_util.add_rectangle(fig, x=xs[k-1, 2], y=xs[k-1, 3], theta=xs[k-1, 4],
+                              w=0.3, h=0.16, color='blue')
 
-    add_rectangle(fig, x=self.x_goal[2], y=self.x_goal[3], theta=self.x_goal[4], w=0.3, h=0.16, color='blue',
-                    name='Object goal', opacity=0.2)
+    plotly_util.add_rectangle(fig, x=self.x_goal[2], y=self.x_goal[3], theta=self.x_goal[4],
+                              w=0.3, h=0.16, color='blue',
+                              name='Object goal', opacity=0.2)
 
     fig.update_layout(
         xaxis_title='x',
@@ -112,53 +115,6 @@ class PushBox2d(Task):
       self.plot.figure = fig
 
 
-def add_circle(fig, x, y, r, color="black", name=None, **kwargs):
-  t = np.linspace(0, 2*np.pi)
-  fig.add_trace(go.Scatter(
-    x=x + r * np.cos(t),
-    y=y + r * np.sin(t),
-    fill="toself",
-    mode="lines",
-    line=dict(color=color),
-    fillcolor=color,
-    name=name,
-    showlegend=False if name is None else True,
-    **kwargs
-  ))
-
-
-def add_rectangle(fig, x, y, theta, w, h, color='black', name=None, **kwargs):
-  corners = np.array([
-      [-w/2, -h/2],
-      [ w/2, -h/2],
-      [ w/2,  h/2],
-      [-w/2,  h/2],
-      [-w/2, -h/2],
-  ])
-
-  c, s = np.cos(theta), np.sin(theta)
-  R = np.array([
-      [c, -s],
-      [s,  c],
-  ])
-
-  pts = corners @ R.T
-  pts[:, 0] += x
-  pts[:, 1] += y
-
-  fig.add_trace(go.Scatter(
-      x=pts[:, 0],
-      y=pts[:, 1],
-      fill="toself",
-      mode="lines",
-      line=dict(color=color),
-      fillcolor=color,
-      name=name,
-      showlegend=False if name is None else True,
-      **kwargs,
-  ))
-
-
 if __name__ == '__main__':
-  task = PushSphere2d()
+  task = PushBox2d()
   task.print_summary()

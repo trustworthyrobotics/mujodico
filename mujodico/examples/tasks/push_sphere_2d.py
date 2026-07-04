@@ -1,5 +1,6 @@
 import mujoco
 from mujodico.examples.tasks.task import Task
+from mujodico.examples.tasks import plotly_util
 import numpy as np
 import plotly.graph_objects as go
 import viser
@@ -87,14 +88,14 @@ class PushSphere2d(Task):
 
     fig.add_trace(go.Scatter(x=xs[:k, 0], y=xs[:k, 1], name='Pusher',
                              mode='lines', line=dict(color='red')))
-    add_circle(fig, x=xs[k-1, 0], y=xs[k-1, 1], r=0.05, color='red')
+    plotly_util.add_circle(fig, x=xs[k-1, 0], y=xs[k-1, 1], r=0.05, color='red')
 
     fig.add_trace(go.Scatter(x=xs[:k, 2], y=xs[:k, 3], name='Object',
                              mode='lines', line=dict(color='blue')))
-    add_circle(fig, x=xs[k-1, 2], y=xs[k-1, 3], r=0.08, color='blue')
+    plotly_util.add_circle(fig, x=xs[k-1, 2], y=xs[k-1, 3], r=0.08, color='blue')
 
-    add_circle(fig, x=self.x_goal[2], y=self.x_goal[3], r=0.08, color='blue',
-                    name='Object goal', opacity=0.2)
+    plotly_util.add_circle(fig, x=self.x_goal[2], y=self.x_goal[3], r=0.08, color='blue',
+                           name='Object goal', opacity=0.2)
 
     fig.update_layout(
         xaxis_title='x',
@@ -108,21 +109,6 @@ class PushSphere2d(Task):
       self.plot = server.gui.add_plotly(fig)
     else:
       self.plot.figure = fig
-
-
-def add_circle(fig, x, y, r, color="black", name=None, **kwargs):
-  t = np.linspace(0, 2*np.pi)
-  fig.add_trace(go.Scatter(
-    x=x + r * np.cos(t),
-    y=y + r * np.sin(t),
-    fill="toself",
-    mode="lines",
-    line=dict(color=color),
-    fillcolor=color,
-    name=name,
-    showlegend=False if name is None else True,
-    **kwargs
-  ))
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
-import mujodico.examples.tasks.push_box_2d
-import mujodico.examples.tasks.push_sphere_1d
-import mujodico.examples.tasks.push_sphere_2d
-from mujodico.examples.tasks.task import Task
+from mujodico.examples.tasks import push_box_2d
+from mujodico.examples.tasks import push_sphere_1d
+from mujodico.examples.tasks import push_sphere_2d
+from mujodico.examples.tasks.task import Task as Task
 
 
 _TASKS = [

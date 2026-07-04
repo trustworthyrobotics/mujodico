@@ -1,5 +1,6 @@
 import mujoco
 from mujodico.examples.tasks.task import Task
+from mujodico.examples.tasks import plotly_util
 import numpy as np
 import plotly.graph_objects as go
 import viser

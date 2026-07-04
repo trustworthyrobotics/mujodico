@@ -5,13 +5,12 @@ import numpy as np
 
 try:
   import mjviser
-  import plotly
   import viser
 except ImportError as e:
   raise ImportError(
       "Optional visualization dependencies are not installed. "
       "Install them with:\n\n"
-      "    pip install mjviser plotly"
+      "    pip install mjviser"
   ) from e
 
 
