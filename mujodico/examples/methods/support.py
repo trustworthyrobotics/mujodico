@@ -18,7 +18,7 @@ def step_given_efc_force(
   assert x.size == m.nq + m.nv + m.na
   assert u.size == m.nu
 
-  d = mjx.make_data(m)
+  d = mjx.make_data(m, impl=m.impl)
 
   d = d.replace(
     qpos=x[:m.nq],

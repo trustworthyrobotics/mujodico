@@ -21,19 +21,21 @@ class IpoptMultipleShooting:
 
     model = task.model
 
-    mjx_smooth_model = mjx.put_model(
-        model,
-        contact_approximation=contact_approx,
-        contact_smoothing=task.contact_smoothing,
-    )
-
     mjx_model = mjx.put_model(
         model,
+        impl='jax',
         contact_approximation=contact_approx,
         contact_smoothing=0.0,
     )
 
-    mjx_data = mjx.make_data(mjx_model)
+    mjx_smooth_model = mjx.put_model(
+        model,
+        impl=mjx_model.impl,
+        contact_approximation=contact_approx,
+        contact_smoothing=task.contact_smoothing,
+    )
+
+    mjx_data = mjx.make_data(mjx_model, impl=mjx_model.impl)
 
     N = task.horizon
     nx = task.nx

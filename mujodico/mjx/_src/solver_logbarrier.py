@@ -180,7 +180,7 @@ def constitutive_relations(m: Model, efc_contact_mask: jax.Array):
 
   nc = int(jp.count_nonzero(efc_contact_mask))
 
-  data = io.make_data(m)
+  data = io.make_data(m, impl=m.impl)
 
   def constitutive_fn(x: jax.Array, u: jax.Array, cf: jax.Array, x_next: jax.Array):
     assert x.size == nx

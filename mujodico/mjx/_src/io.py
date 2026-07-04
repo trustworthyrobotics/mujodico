@@ -45,7 +45,7 @@ def _is_cuda_gpu_device(device: jax.Device) -> bool:
 
 
 def _check_warp_installed():
-  raise RuntimeError("MuJoDiCo does not have a warp implementation")
+  raise ValueError("MuJoDiCo does not have a warp implementation")
   if not mjxw.WARP_INSTALLED:
     raise RuntimeError(
         'warp-lang is not installed. Cannot use WARP implementation of MJX.'
