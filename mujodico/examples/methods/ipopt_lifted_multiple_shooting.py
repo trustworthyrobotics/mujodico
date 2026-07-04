@@ -72,7 +72,9 @@ class IpoptLiftedMultipleShooting:
       d1 = mjx.forward(mjx_smooth_model, d)
       cf_smooth = d1._impl.efc_force[efc_contact_mask]
 
-      return jax.lax.stop_gradient(cf) + cf_smooth - jax.lax.stop_gradient(cf_smooth)
+      res = jax.lax.stop_gradient(cf) + cf_smooth - jax.lax.stop_gradient(cf_smooth)
+
+      return res
 
     def advance(x, u, cf):
       # TODO(wei-chen): consider using computed force with stop gradient instead of zero
