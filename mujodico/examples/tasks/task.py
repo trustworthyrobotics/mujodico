@@ -121,14 +121,14 @@ Task: {self.__class__.__name__}
   nu = {self.nu}
   x_0 = {self.x_0}
   x_goal = {self.x_goal}
+  diag(Q) = {np.diag(self.Q)}
+  diag(Qf) = {np.diag(self.Qf)}
   x_lb = {x_lb}
   x_ub = {x_ub}
-  Q = {str(self.Q).replace('\n', '\n' + ' ' * 6)}
-  Qf = {str(self.Qf).replace('\n', '\n' + ' ' * 6)}
   u_ref = {self.u_ref}
+  diag(R) = {np.diag(self.R)}
   u_lb = {u_lb}
   u_ub = {u_ub}
-  R = {str(self.R).replace('\n', '\n' + ' ' * 6)}
   contact_smoothing = {self.contact_smoothing}
 ''')
 
