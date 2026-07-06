@@ -2,6 +2,7 @@ import time
 import jax
 import jax.numpy as jp
 from mujodico import mjx
+from mujodico.examples.methods import support
 from mujodico.examples.tasks import Task
 import numpy as np
 
@@ -16,7 +17,12 @@ except ImportError as e:
 
 class IpoptMultipleShooting:
 
-  def __init__(self, task: Task, contact_approx: mjx.ContactApproxType):
+  def __init__(
+      self,
+      task: Task,
+      contact_approx: mjx.ContactApproxType,
+      hess_approx: support.HessianApproxType,
+  ):
     self.task = task
 
     model = task.model
@@ -78,10 +84,11 @@ class IpoptMultipleShooting:
       u = var[nx : nx + nu]
       xnext = var[nx + nu :]
 
-      return (
-          stage_objective(x, u) * scale0
-          + jp.sum(stage_constraint(x, u, xnext) * scale1)
-      )
+      lagrangian = stage_objective(x, u) * scale0
+      if hess_approx == support.HessianApproxType.Full:
+        lagrangian += jp.sum(stage_constraint(x, u, xnext) * scale1)
+
+      return lagrangian
 
     def objective(vars: jax.Array):
       xs, us = self._unpack(vars)
@@ -175,6 +182,9 @@ class IpoptMultipleShooting:
 
       @timed
       def hessian(self, vars, lagrange, objective_factor):
+        if hess_approx == support.HessianApproxType.LBFGS:
+          raise AttributeError()  # cyipopt defaults to L-BFGS if hessian() throws
+
         return np.asarray(
             lagrangian_hessian_entries(
                 jp.asarray(vars),

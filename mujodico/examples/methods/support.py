@@ -1,9 +1,34 @@
+import enum
 import jax
 from jax import numpy as jp
 from mujodico import mjx
 # pylint: disable=g-importing-member
 from mujodico.mjx._src.types import Model
 # pylint: enable=g-importing-member
+
+
+class HessianApproxType(enum.Enum):
+  GaussNewton = 'gaussnewton'
+  Full = 'full'
+  LBFGS = 'lbfgs'
+
+  @classmethod
+  def _resolve(cls, value: str | None):
+    if isinstance(value, cls):
+      return value
+
+    if value is None:
+      return cls.GaussNewton
+
+    name = value.lower().strip().translate(str.maketrans('', '', ' -_'))
+    for member in cls:
+      if member.value.lower() == name:
+        return member
+
+    raise ValueError(
+        'unknown hessian approximation: value should be one of '
+        f'<{"|".join([member.value for member in cls])}>'
+    )
 
 
 def step_given_efc_force(

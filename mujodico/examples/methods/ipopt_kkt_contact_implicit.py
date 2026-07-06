@@ -24,7 +24,12 @@ _CONSTITUTIVE_RELATIONS_FUNC = {
 
 class IpoptKKTContactImplicit:
 
-  def __init__(self, task: Task, contact_approx: mjx.ContactApproxType):
+  def __init__(
+      self,
+      task: Task,
+      contact_approx: mjx.ContactApproxType,
+      hess_approx: support.HessianApproxType,
+  ):
     self.task = task
 
     model = task.model

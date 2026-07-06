@@ -2,8 +2,8 @@ import time
 import jax
 import jax.numpy as jp
 from mujodico import mjx
-from mujodico.examples.tasks import Task
 from mujodico.examples.methods import support
+from mujodico.examples.tasks import Task
 import numpy as np
 
 try:
@@ -17,7 +17,12 @@ except ImportError as e:
 
 class IpoptLiftedMultipleShooting:
 
-  def __init__(self, task: Task, contact_approx: mjx.ContactApproxType):
+  def __init__(
+      self,
+      task: Task,
+      contact_approx: mjx.ContactApproxType,
+      hess_approx: support.HessianApproxType,
+  ):
     self.task = task
 
     model = task.model
@@ -74,13 +79,11 @@ class IpoptLiftedMultipleShooting:
       d1 = mjx.forward(mjx_smooth_model, d)
       cf_smooth = d1._impl.efc_force[efc_contact_mask]
 
-      res = (
+      return (
           jax.lax.stop_gradient(cf)
           + cf_smooth
           - jax.lax.stop_gradient(cf_smooth)
       )
-
-      return res
 
     def advance(x, u, cf):
       # TODO(wei-chen): consider using computed force with stop gradient instead of zero
@@ -108,10 +111,11 @@ class IpoptLiftedMultipleShooting:
       cf = var[nx + nu : nx + nu + nc]
       xnext = var[nx + nu + nc :]
 
-      return (
-          stage_objective(x, u, cf) * scale0
-          + jp.sum(stage_constraint(x, u, cf, xnext) * scale1)
-      )
+      lagrangian = stage_objective(x, u, cf) * scale0
+      if hess_approx == support.HessianApproxType.Full:
+        lagrangian += jp.sum(stage_constraint(x, u, cf, xnext) * scale1)
+
+      return lagrangian
 
     def objective(vars: jax.Array):
       xs, us, cfs = self._unpack(vars)
@@ -219,6 +223,9 @@ class IpoptLiftedMultipleShooting:
 
       @timed
       def hessian(self, vars, lagrange, objective_factor):
+        if hess_approx == support.HessianApproxType.LBFGS:
+          raise AttributeError()  # cyipopt defaults to L-BFGS if hessian() throws
+
         return np.asarray(
             lagrangian_hessian_entries(
                 jp.asarray(vars),

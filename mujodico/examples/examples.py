@@ -8,7 +8,7 @@ import jax
 from jax import numpy as jp
 import mujoco
 from mujodico import mjx
-from mujodico.examples.methods import get_method_names, parse_method_name
+from mujodico.examples.methods import get_method_names, parse_method_name, support
 from mujodico.examples.tasks import get_task_names, parse_task_name
 import numpy as np
 
@@ -25,19 +25,22 @@ _TASK = flags.DEFINE_string(
     f'<{"|".join(get_task_names())}>\n(required)',
     required=True,
 )
-_PLAN_CONTACT_APPROX = flags.DEFINE_string(
-    'plan_contact_approx',
+_CONTACT_APPROX = flags.DEFINE_string(
+    'contact_approx',
     None,
     f'<{"|".join([t.value for t in mjx.ContactApproxType])}>:'
     ' Contact approximation for planning.\n(required)',
     required=True,
 )
-_EVAL_CONTACT_APPROX = flags.DEFINE_string(
-    'eval_contact_approx',
-    None,
-    f'<{"|".join([t.value for t in mjx.ContactApproxType])}>:'
-    ' Contact approximation for evaluation.\n'
-    '(default: same as plan_contact_approx)',
+_HESS_APPROX = flags.DEFINE_string(
+    'hess_approx',
+    'gaussnewton',
+    f'<{"|".join([t.value for t in support.HessianApproxType])}>:'
+    ' Trajectory optimization Hessian approximation.\n'
+    '(default: gaussnewton)',
+)
+_ITERATIONS = flags.DEFINE_integer(
+    'iterations', 100, 'Number of solver iterations', lower_bound=0,
 )
 
 
@@ -48,19 +51,17 @@ def _main(argv: Sequence[str]) -> None:
   method_cls = parse_method_name(_METHOD.value)
   task_cls = parse_task_name(_TASK.value)
 
-  plan_contact_approx = _PLAN_CONTACT_APPROX.value
-  plan_contact_approx = mjx.ContactApproxType._resolve(plan_contact_approx)
+  contact_approx = mjx.ContactApproxType._resolve(_CONTACT_APPROX.value)
 
-  eval_contact_approx = _EVAL_CONTACT_APPROX.value or plan_contact_approx
-  eval_contact_approx = mjx.ContactApproxType._resolve(eval_contact_approx)
+  hess_approx = support.HessianApproxType._resolve(_HESS_APPROX.value)
 
   task = task_cls()
-  method = method_cls(task, plan_contact_approx)
+  method = method_cls(task, contact_approx, hess_approx)
 
   xs_nominal, us_nominal = method.solve(
     xs_init=task.xs_init,
     us_init=task.us_init,
-    iterations=100,
+    iterations=_ITERATIONS.value,
   )
 
   task.visualize_trajectory(xs_nominal)

@@ -2,6 +2,7 @@ import time
 import jax
 import jax.numpy as jp
 from mujodico import mjx
+from mujodico.examples.methods import support
 from mujodico.examples.tasks import Task
 import numpy as np
 
@@ -16,7 +17,12 @@ except ImportError as e:
 
 class IpoptSingleShooting:
 
-  def __init__(self, task: Task, contact_approx: mjx.ContactApproxType):
+  def __init__(
+      self,
+      task: Task,
+      contact_approx: mjx.ContactApproxType,
+      hess_approx: support.HessianApproxType,
+  ):
     model = task.model
 
     mjx_model = mjx.put_model(
