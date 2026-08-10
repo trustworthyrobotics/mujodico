@@ -30,6 +30,7 @@ from mujodico.mjx._src import sensor
 from mujodico.mjx._src import smooth
 from mujodico.mjx._src import solver
 from mujodico.mjx._src import solver_logbarrier
+from mujodico.mjx._src import solver_sap
 from mujodico.mjx._src import support
 # pylint: disable=g-importing-member
 from mujodico.mjx._src.types import BiasType
@@ -60,6 +61,7 @@ _RK4_B = np.array([1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0])
 _SOLVE_FUNC = {
     ContactApproxType.MUJOCO: solver.solve,
     ContactApproxType.LOG_BARRIER: solver_logbarrier.solve,
+    ContactApproxType.LAGGED: solver_sap.solve,
 }
 
 
@@ -465,6 +467,7 @@ def forward(m: Model, d: Data) -> Data:
     )
   solve_func = _SOLVE_FUNC[m.opt._impl.contact_approx]
   d = named_scope(solve_func)(m, d)
+
   d = sensor.sensor_acc(m, d)
 
   return d
