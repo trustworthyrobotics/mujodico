@@ -26,7 +26,6 @@ from mujodico.mjx._src.dataclasses import PyTreeNode
 from mujodico.mjx._src.types import ConstraintType
 from mujodico.mjx._src.types import ContactApproxType
 from mujodico.mjx._src.types import Data
-from mujodico.mjx._src.types import DataJAX
 from mujodico.mjx._src.types import DisableBit
 from mujodico.mjx._src.types import IntegratorType
 from mujodico.mjx._src.types import Model
@@ -36,15 +35,11 @@ from mujodico.mjx._src.types import OptionJAX
 
 class SapConstraint(PyTreeNode, ABC):
   @abstractmethod
-  def calc_cost(self, vc: jax.Array) -> jax.Array:
+  def calc_impulse(self, vc: jax.Array) -> jax.Array:
     pass
 
   @abstractmethod
-  def calc_cost_gradient(self, vc: jax.Array) -> jax.Array:
-    pass
-
-  @abstractmethod
-  def calc_cost_hessian(self, vc: jax.Array) -> jax.Array:
+  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
     pass
 
 
@@ -57,13 +52,10 @@ class SapFixedConstraint(SapConstraint):
     ):
     pass
 
-  def calc_cost(self, vc: jax.Array) -> jax.Array:
+  def calc_impulse(self, vc: jax.Array) -> jax.Array:
     raise NotImplementedError()
 
-  def calc_cost_gradient(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
-
-  def calc_cost_hessian(self, vc: jax.Array) -> jax.Array:
+  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
     raise NotImplementedError()
 
 
@@ -76,13 +68,10 @@ class SapLimitConstraint(SapConstraint):
     ):
     pass
 
-  def calc_cost(self, vc: jax.Array) -> jax.Array:
+  def calc_impulse(self, vc: jax.Array) -> jax.Array:
     raise NotImplementedError()
 
-  def calc_cost_gradient(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
-
-  def calc_cost_hessian(self, vc: jax.Array) -> jax.Array:
+  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
     raise NotImplementedError()
 
 
@@ -94,13 +83,10 @@ class SapFrictionConstraint(SapConstraint):
     ):
     pass
 
-  def calc_cost(self, vc: jax.Array) -> jax.Array:
+  def calc_impulse(self, vc: jax.Array) -> jax.Array:
     raise NotImplementedError()
 
-  def calc_cost_gradient(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
-
-  def calc_cost_hessian(self, vc: jax.Array) -> jax.Array:
+  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
     raise NotImplementedError()
 
 
@@ -169,28 +155,6 @@ def _contact_normal_impulse_grad(vn, phi0, k, d, dt, epsilon1, epsilon2):
   return dt * k * (dg1_dvn * g2 + g1 * dg2_dvn)
 
 
-def _contact_normal_impulse_integral(vn, phi0, k, d, dt, epsilon1, epsilon2):
-  def term(s1, s2):
-    A = -phi0 + s1 * epsilon1
-    B = -dt
-    C = 1 + s2 * epsilon2
-    D = -d
-
-    vn_thresh = jp.minimum(-A / B, -C / D)
-    x = jp.minimum(vn, vn_thresh)
-
-    return dt * k * (s1 * s2) / (16 * epsilon1 * epsilon2) * (
-      (((((
-          (B**2 * D**2 / 5)) * x
-        + (A * B * D**2 + B**2 * C * D) / 2) * x
-        + (A**2 * D**2 + 4 * A * B * C * D + B**2 * C**2) / 3) * x
-        + (A**2 * C * D + A * B * C**2)) * x
-        + (A**2 * C**2)) * x
-    )
-
-  return term(+1, +1) + term(+1, -1) + term(-1, +1) + term(-1, -1)
-
-
 class SapNormalContactConstraint(SapConstraint):
   phi0: jax.Array
   dt: jax.Array
@@ -208,14 +172,13 @@ class SapNormalContactConstraint(SapConstraint):
       'epsilon2': 0.1,
     }
 
-  def calc_cost(self, vc: jax.Array) -> jax.Array:
-    return -_contact_normal_impulse_integral(vn=vc, **self._params)
+  def calc_impulse(self, vc: jax.Array) -> jax.Array:
+    assert vc.shape == self.phi0.shape
+    return _contact_normal_impulse(vn=vc, **self._params)
 
-  def calc_cost_gradient(self, vc: jax.Array) -> jax.Array:
-    return -_contact_normal_impulse(vn=vc, **self._params)
-
-  def calc_cost_hessian(self, vc: jax.Array) -> jax.Array:
-    return -_contact_normal_impulse_grad(vn=vc, **self._params)
+  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
+    assert vc.shape == self.phi0.shape
+    return _contact_normal_impulse_grad(vn=vc, **self._params)
 
 
 class SapContactLaggedConstraint(SapConstraint):
@@ -230,13 +193,10 @@ class SapContactLaggedConstraint(SapConstraint):
     ):
     pass
 
-  def calc_cost(self, vc: jax.Array) -> jax.Array:
+  def calc_impulse(self, vc: jax.Array) -> jax.Array:
     raise NotImplementedError()
 
-  def calc_cost_gradient(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
-
-  def calc_cost_hessian(self, vc: jax.Array) -> jax.Array:
+  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
     raise NotImplementedError()
 
 
@@ -323,9 +283,9 @@ class Context(PyTreeNode):
       )
 
     # Limit constraint
-    mask = jp.logical_or(
-      efc_type == ConstraintType.LIMIT_JOINT,
-      efc_type == ConstraintType.LIMIT_TENDON
+    mask = (
+      (efc_type == ConstraintType.LIMIT_JOINT) |
+      (efc_type == ConstraintType.LIMIT_TENDON)
     )
     if mask.any():
       efc_masks.append(mask)
@@ -338,9 +298,9 @@ class Context(PyTreeNode):
       )
 
     # Friction constraint
-    mask = jp.logical_or(
-      efc_type == ConstraintType.FRICTION_DOF,
-      efc_type == ConstraintType.FRICTION_TENDON
+    mask = (
+      (efc_type == ConstraintType.FRICTION_DOF) |
+      (efc_type == ConstraintType.FRICTION_TENDON)
     )
     if mask.any():
       efc_masks.append(mask)
@@ -352,9 +312,9 @@ class Context(PyTreeNode):
       )
 
     # Normal contact constraint
-    mask = jp.logical_or(
-      efc_type == ConstraintType.CONTACT_FRICTIONLESS,
-      efc_type == ConstraintType.CONTACT_PYRAMIDAL
+    mask = (
+      (efc_type == ConstraintType.CONTACT_FRICTIONLESS) |
+      (efc_type == ConstraintType.CONTACT_PYRAMIDAL)
     )
     if mask.any():
       efc_masks.append(mask)
@@ -398,15 +358,16 @@ class Context(PyTreeNode):
     return efc_masks, constraints
 
 
-def _calc_cost(ctx: Context) -> jax.Array:
+def _calc_constraint_impulse(ctx: Context) -> jax.Array:
   qvel = ctx.qvel
-  cost = 0.5 * qvel.dot(ctx.qm @ qvel) - qvel.dot(ctx.qm_qvel_smooth)
+  efc_impulse = jp.zeros_like(ctx.efc_pos)
 
   for efc_mask, sap_constraint in zip(ctx.efc_masks, ctx.sap_constraints):
-    vc = ctx.efc_J[efc_mask] @ qvel
-    cost += sap_constraint.calc_cost(vc)
+    Jc = ctx.efc_J[efc_mask]
+    vc = Jc @ qvel
+    efc_impulse = efc_impulse.at[efc_mask].set(sap_constraint.calc_impulse(vc))
 
-  return cost
+  return efc_impulse
 
 
 def _calc_cost_gradient(ctx: Context) -> jax.Array:
@@ -416,7 +377,9 @@ def _calc_cost_gradient(ctx: Context) -> jax.Array:
   for efc_mask, sap_constraint in zip(ctx.efc_masks, ctx.sap_constraints):
     Jc = ctx.efc_J[efc_mask]
     vc = Jc @ qvel
-    grad += Jc.T @ sap_constraint.calc_cost_gradient(vc)
+
+    cost_grad = -sap_constraint.calc_impulse(vc)
+    grad += Jc.T @ cost_grad
 
   return grad
 
@@ -429,25 +392,13 @@ def _calc_cost_hessian(ctx: Context) -> jax.Array:
     Jc = ctx.efc_J[efc_mask]
     vc = Jc @ qvel
 
-    cost_hess = sap_constraint.calc_cost_hessian(vc)
+    cost_hess = -sap_constraint.calc_impulse_grad(vc)
     if cost_hess.ndim == 1:
       hess += Jc.T @ (cost_hess[:, None] * Jc)
     else:
       hess += Jc.T @ cost_hess @ Jc
 
   return hess
-
-
-def _calc_constraint_impulse(ctx: Context) -> jax.Array:
-  qvel = ctx.qvel
-  efc_impulse = jp.zeros_like(ctx.efc_pos)
-
-  for efc_mask, sap_constraint in zip(ctx.efc_masks, ctx.sap_constraints):
-    Jc = ctx.efc_J[efc_mask]
-    vc = Jc @ qvel
-    efc_impulse = efc_impulse.at[efc_mask].set(-sap_constraint.calc_cost_gradient(vc))
-
-  return efc_impulse
 
 
 def _calc_step_direction(ctx: Context) -> Context:
@@ -479,9 +430,10 @@ def _eval_line_search_derivatives(
     vc = Jc @ (qvel + alpha * delta_qvel)
     delta_vc = Jc @ delta_qvel
 
-    dell_dalpha += delta_vc.dot(sap_constraint.calc_cost_gradient(vc))
+    cost_grad = -sap_constraint.calc_impulse(vc)
+    dell_dalpha += delta_vc.dot(cost_grad)
 
-    cost_hess = sap_constraint.calc_cost_hessian(vc)
+    cost_hess = -sap_constraint.calc_impulse_grad(vc)
     if cost_hess.ndim == 1:
       d2ell_dalpha2 += delta_vc.dot(cost_hess * delta_vc)
     else:
