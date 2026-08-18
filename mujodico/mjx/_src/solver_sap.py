@@ -16,13 +16,14 @@ we can write the dynamics as
 from abc import ABC, abstractmethod
 import jax
 from jax import numpy as jp
+from mujodico.mjx._src import collision_driver
 from mujodico.mjx._src import constraint
 from mujodico.mjx._src import derivative
-from mujodico.mjx._src import forward
-from mujodico.mjx._src import io
+from mujodico.mjx._src import solver_sap_util
 from mujodico.mjx._src import support
 # pylint: disable=g-importing-member
 from mujodico.mjx._src.dataclasses import PyTreeNode
+from mujodico.mjx._src.types import ConeType
 from mujodico.mjx._src.types import ConstraintType
 from mujodico.mjx._src.types import ContactApproxType
 from mujodico.mjx._src.types import Data
@@ -31,6 +32,7 @@ from mujodico.mjx._src.types import IntegratorType
 from mujodico.mjx._src.types import Model
 from mujodico.mjx._src.types import OptionJAX
 # pylint: enable=g-importing-member
+import numpy as np
 
 
 class SapConstraint(PyTreeNode, ABC):
@@ -90,76 +92,16 @@ class SapFrictionConstraint(SapConstraint):
     raise NotImplementedError()
 
 
-def _smooth_relu(x, epsilon):
-  assert epsilon > 0
-  return jp.where(
-    x <= -epsilon,
-    0.0,
-    jp.where(
-      x < epsilon,
-      (x + epsilon) ** 2 / (4.0 * epsilon),
-      x,
-    ),
-  )
-
-def _smooth_relu_grad(x, epsilon):
-  assert epsilon > 0
-  return jp.where(
-    x <= -epsilon,
-    0.0,
-    jp.where(
-      x < epsilon,
-      (x + epsilon) / (2.0 * epsilon),
-      1.0,
-    ),
-  )
-
-
-def _hunt_crossley_contact_force(phi, vn, k, d, epsilon1, epsilon2):
-    """Compute the smoothed Hunt-Crossley normal contact force:
-        f(φ, vₙ) = k g_ε₁(-φ) g_ε₂(1 - d vₙ),
-    where g_ε(x) is a C1-smooth approximation of ReLU:
-        g_ε(x) =
-            0                    if x <= -ε,
-            (x + ε)^2 / (4 ε)    if |x| < ε,
-            x                    if x >= ε.
-    """
-
-    g1 = _smooth_relu(-phi, epsilon1)
-    g2 = _smooth_relu(1.0 - d * vn, epsilon2)
-
-    return k * g1 * g2
-
-
-def _contact_normal_impulse(vn, phi0, k, d, dt, epsilon1, epsilon2):
-  return dt * _hunt_crossley_contact_force(
-    phi=phi0 + vn * dt,
-    vn=vn,
-    k=k,
-    d=d,
-    epsilon1=epsilon1,
-    epsilon2=epsilon2,
-  )
-
-
-def _contact_normal_impulse_grad(vn, phi0, k, d, dt, epsilon1, epsilon2):
-  x1 = -phi0 - dt * vn
-  x2 = 1.0 - d * vn
-
-  g1 = _smooth_relu(x1, epsilon1)
-  g2 = _smooth_relu(x2, epsilon2)
-
-  dg1_dvn = _smooth_relu_grad(x1, epsilon1) * -dt
-  dg2_dvn = _smooth_relu_grad(x2, epsilon2) * -d
-
-  return dt * k * (dg1_dvn * g2 + g1 * dg2_dvn)
-
-
 class SapNormalContactConstraint(SapConstraint):
   phi0: jax.Array
-  dt: jax.Array
   stiffness: jax.Array
   hunt_crossley_damping: jax.Array
+  dt: jax.Array
+
+  def __post_init__(self):
+    assert self.phi0.shape == self.stiffness.shape
+    assert self.phi0.shape == self.hunt_crossley_damping.shape
+    assert self.dt.ndim == 0
 
   @property
   def _params(self):
@@ -174,24 +116,28 @@ class SapNormalContactConstraint(SapConstraint):
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
     assert vc.shape == self.phi0.shape
-    return _contact_normal_impulse(vn=vc, **self._params)
+    return solver_sap_util.contact_normal_impulse(vn=vc, **self._params)
 
   def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
     assert vc.shape == self.phi0.shape
-    return _contact_normal_impulse_grad(vn=vc, **self._params)
+    return solver_sap_util.contact_normal_impulse_grad(vn=vc, **self._params)
 
 
 class SapContactLaggedConstraint(SapConstraint):
-  def __init__(
-      self,
-      phi0: float,
-      vn0: float,
-      dt: float,
-      stiffness: float,
-      hunt_crossley_damping: float,
-      friction: jax.Array,
-    ):
-    pass
+  phi0: jax.Array
+  vn0: jax.Array
+  stiffness: jax.Array
+  hunt_crossley_damping: jax.Array
+  friction: jax.Array
+  dt: jax.Array
+
+  def __post_init__(self):
+    assert self.phi0.shape == (3,)
+    assert self.vn0.ndim == 0
+    assert self.stiffness.ndim == 0
+    assert self.hunt_crossley_damping.ndim == 0
+    assert self.friction.shape == (2,)
+    assert self.dt.ndim == 0
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
     raise NotImplementedError()
@@ -220,8 +166,8 @@ class Context(PyTreeNode):
   qm_qvel_smooth: jax.Array
   efc_J: jax.Array
   efc_pos: jax.Array
-  efc_masks: list
-  sap_constraints: list[jax.Array]
+  efc_masks: list[np.ndarray]
+  sap_constraints: list[tuple[jax.Array]]
 
   @classmethod
   def create(cls, m: Model, d: Data) -> 'Context':
@@ -328,26 +274,29 @@ class Context(PyTreeNode):
       )
 
     # Elliptic contact constraint
-    contact = d._impl.contact
-    for k in range(len(contact.efc_address)):
-      idx = contact.efc_address[k]
-      if efc_type[idx] != ConstraintType.CONTACT_ELLIPTIC:
-        continue
+    if m.opt.cone == ConeType.PYRAMIDAL:
+      return efc_masks, constraints
 
-      dim = contact.dim[k]
-      mask = jp.zeros(efc_type.size, type=bool)
-      mask = mask.at[jp.arange(idx, idx + dim)].set(1)
+    contact_dim = collision_driver.make_condim(m)
+    contact_efc_address = constraint.make_efc_address(m, contact_dim, efc_type)
+
+    for k in range(len(contact_efc_address)):
+      dim = contact_dim[k]
+      efc_address = contact_efc_address[k]
+
+      mask = mask & False
+      mask[efc_address: efc_address + dim] = True
       efc_masks.append(mask)
 
       if m.opt._impl.contact_approx == ContactApproxType.LAGGED:
         constraints.append(
           SapContactLaggedConstraint(
             phi0=d._impl.efc_pos[mask],
-            vn0=d._impl.efc_J[mask] @ d.qvel,
+            vn0=d._impl.efc_J[efc_address] @ d.qvel,
             dt=dt,
-            stiffness=d._impl.efc_k[mask],
-            hunt_crossley_damping=d._impl.efc_b[mask],
-            friction=contact.friction[k][:dim-1],
+            stiffness=d._impl.efc_k[efc_address],
+            hunt_crossley_damping=d._impl.efc_b[efc_address],
+            friction=d._impl.contact.friction[k][:dim-1],
           )
         )
 
@@ -402,8 +351,8 @@ def _calc_cost_hessian(ctx: Context) -> jax.Array:
 
 
 def _calc_step_direction(ctx: Context) -> Context:
-  H = _calc_cost_hessian(ctx)
   g = _calc_cost_gradient(ctx)
+  H = _calc_cost_hessian(ctx)
 
   choH = jax.scipy.linalg.cho_factor(H)
   delta_qvel = jax.scipy.linalg.cho_solve(choH, -g)
