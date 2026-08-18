@@ -65,3 +65,14 @@ def contact_normal_impulse_grad(vn, phi0, k, d, dt, epsilon1, epsilon2):
   dg2_dvn = smooth_relu_grad(x2, epsilon2) * -d
 
   return dt * k * (dg1_dvn * g2 + g1 * dg2_dvn)
+
+
+def soft_normalize(x, epsilon):
+  x_soft_norm = jp.sqrt(x.dot(x) + epsilon**2)
+  return x / x_soft_norm
+
+
+def soft_normalize_grad(x, epsilon):
+  x_soft_norm = jp.sqrt(x.dot(x) + epsilon**2)
+  x_soft_normalize = x / x_soft_norm
+  return (jp.eye(x.size) - jp.outer(x_soft_normalize, x_soft_normalize)) / x_soft_norm

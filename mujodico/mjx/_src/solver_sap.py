@@ -132,18 +132,74 @@ class SapContactLaggedConstraint(SapConstraint):
   dt: jax.Array
 
   def __post_init__(self):
-    assert self.phi0.shape == (3,)
+    assert self.phi0.ndim == 0
     assert self.vn0.ndim == 0
     assert self.stiffness.ndim == 0
     assert self.hunt_crossley_damping.ndim == 0
-    assert self.friction.shape == (2,)
+    assert self.friction.ndim == 1
     assert self.dt.ndim == 0
 
+  @property
+  def _params_n(self):
+    return {
+      'phi0': self.phi0,
+      'dt': self.dt,
+      'k': self.stiffness,
+      'd': self.hunt_crossley_damping,
+      'epsilon1': 0.01,
+      'epsilon2': 0.1,
+    }
+
+  @property
+  def gamma_n0(self):
+    return solver_sap_util.hunt_crossley_contact_force(
+      phi=self.phi0,
+      vn=self.vn0,
+      k=self.stiffness,
+      d=self.hunt_crossley_damping,
+      epsilon1=0.01,
+      epsilon2=0.1,
+    ) * self.dt
+
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
+    assert vc.size == self.friction.size + 1
+
+    gamma_n = solver_sap_util.contact_normal_impulse(vn=vc[0], **self._params_n)
+    gamma = jp.array([gamma_n])
+
+    gamma_n0 = self.gamma_n0
+    if self.friction.size >= 2:
+      gamma_t = -self.friction[0] * gamma_n0 * solver_sap_util.soft_normalize(vc[1:3], epsilon=1e-3)
+      gamma = jp.concatenate((gamma, gamma_t))
+    if self.friction.size >= 3:
+      gamma_t = -self.friction[2] * gamma_n0 * solver_sap_util.soft_normalize(vc[3:4], epsilon=1e-3)
+      gamma = jp.concatenate((gamma, gamma_t))
+    if self.friction.size >= 5:
+      gamma_t = -self.friction[3] * gamma_n0 * solver_sap_util.soft_normalize(vc[4:6], epsilon=1e-3)
+      gamma = jp.concatenate((gamma, gamma_t))
+
+    return gamma
 
   def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
+    assert vc.size == self.friction.size + 1
+
+    grad = jp.zeros((vc.size, vc.size))
+
+    gamma_n_grad = solver_sap_util.contact_normal_impulse_grad(vn=vc[0], **self._params_n)
+    grad = grad.at[0, 0].set(gamma_n_grad)
+
+    gamma_n0 = self.gamma_n0
+    if self.friction.size >= 2:
+      gamma_t_grad = -self.friction[0] * gamma_n0 * solver_sap_util.soft_normalize_grad(vc[1:3], epsilon=1e-3)
+      grad = grad.at[1:3, 1:3].set(gamma_t_grad)
+    if self.friction.size >= 3:
+      gamma_t_grad = -self.friction[2] * gamma_n0 * solver_sap_util.soft_normalize_grad(vc[3:4], epsilon=1e-3)
+      grad = grad.at[3:4, 3:4].set(gamma_t_grad)
+    if self.friction.size >= 5:
+      gamma_t_grad = -self.friction[3] * gamma_n0 * solver_sap_util.soft_normalize_grad(vc[4:6], epsilon=1e-3)
+      grad = grad.at[4:6, 4:6].set(gamma_t_grad)
+
+    return grad
 
 
 class Context(PyTreeNode):
@@ -291,7 +347,7 @@ class Context(PyTreeNode):
       if m.opt._impl.contact_approx == ContactApproxType.LAGGED:
         constraints.append(
           SapContactLaggedConstraint(
-            phi0=d._impl.efc_pos[mask],
+            phi0=d._impl.efc_pos[efc_address],
             vn0=d._impl.efc_J[efc_address] @ d.qvel,
             dt=dt,
             stiffness=d._impl.efc_k[efc_address],
@@ -504,7 +560,7 @@ def _solve_impl(
 
   def cond_fn(carry):
     ctx, i = carry
-    return ((i < iter) & (jp.linalg.norm(ctx.delta_qvel, ord=jp.inf) > tolerance)) | (i == 0)
+    return (i < iter) & (jp.linalg.norm(ctx.delta_qvel, ord=jp.inf) > tolerance) | (i == 0)
 
   def body_fn(carry):
     ctx, i = carry
