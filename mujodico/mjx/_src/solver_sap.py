@@ -49,6 +49,11 @@ from mujodico.mjx._src.types import OptionJAX
 import numpy as np
 
 
+_SIGNED_DIST_TOL = 1e-2   # Unit: m
+_BOUNCE_SPEED_TOL = 1e-3  # Unit: m/s
+_STICTION_TOL = 1e-3      # Unit: m/s or rad/s
+
+
 class SapConstraint(PyTreeNode, ABC):
   dt: jax.Array
 
@@ -115,14 +120,18 @@ class SapFrictionConstraint(SapConstraint):
     assert vc.shape == self.frictionloss.shape
     return (
       self.dt * self.frictionloss *
-      -jax.vmap(lambda x: solver_sap_util.soft_normalize(x, epsilon=1e-3))(vc).ravel()
+      -jax.vmap(
+        lambda x: solver_sap_util.soft_normalize(x, epsilon=_STICTION_TOL)
+      )(vc).ravel()
     )
 
   def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
     assert vc.shape == self.frictionloss.shape
     return (
       self.dt * self.frictionloss *
-      -jax.vmap(lambda x: solver_sap_util.soft_normalize_grad(x, epsilon=1e-3))(vc).ravel()
+      -jax.vmap(
+        lambda x: solver_sap_util.soft_normalize_grad(x, epsilon=_STICTION_TOL)
+      )(vc).ravel()
     )
 
 
@@ -142,8 +151,8 @@ class SapNormalContactConstraint(SapConstraint):
       'dt': self.dt,
       'k': self.stiffness,
       'd': self.hunt_crossley_damping,
-      'epsilon1': 0.01,
-      'epsilon2': 0.1,
+      'epsilon1': _SIGNED_DIST_TOL,
+      'epsilon2': _BOUNCE_SPEED_TOL,
     }
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
@@ -176,9 +185,20 @@ class SapContactLaggedConstraint(SapConstraint):
       'dt': self.dt,
       'k': self.stiffness,
       'd': self.hunt_crossley_damping,
-      'epsilon1': 0.01,
-      'epsilon2': 0.1,
+      'epsilon1': _SIGNED_DIST_TOL,
+      'epsilon2': _BOUNCE_SPEED_TOL,
     }
+
+  @property
+  def gamma_n0(self):
+    return solver_sap_util.hunt_crossley_contact_force(
+      phi=self.phi0,
+      vn=self.vn0,
+      k=self.stiffness,
+      d=self.hunt_crossley_damping,
+      epsilon1=_SIGNED_DIST_TOL,
+      epsilon2=_BOUNCE_SPEED_TOL,
+    ) * self.dt
 
   @property
   def _blocks_t(self):
@@ -192,17 +212,6 @@ class SapContactLaggedConstraint(SapConstraint):
 
     return blocks
 
-  @property
-  def gamma_n0(self):
-    return solver_sap_util.hunt_crossley_contact_force(
-      phi=self.phi0,
-      vn=self.vn0,
-      k=self.stiffness,
-      d=self.hunt_crossley_damping,
-      epsilon1=0.01,
-      epsilon2=0.1,
-    ) * self.dt
-
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
     assert vc.size == self.friction.size + 1
 
@@ -215,7 +224,8 @@ class SapContactLaggedConstraint(SapConstraint):
     gamma_n0 = self.gamma_n0
     for start, end, friction in self._blocks_t:
       gamma = gamma.at[start:end].set(
-        -friction * gamma_n0 * solver_sap_util.soft_normalize(vc[start:end], epsilon=1e-3)
+        friction * gamma_n0 *
+        -solver_sap_util.soft_normalize(vc[start:end], epsilon=_STICTION_TOL)
       )
 
     return gamma
@@ -232,7 +242,8 @@ class SapContactLaggedConstraint(SapConstraint):
     gamma_n0 = self.gamma_n0
     for start, end, friction in self._blocks_t:
       grad = grad.at[start:end, start:end].set(
-        -friction * gamma_n0 * solver_sap_util.soft_normalize_grad(vc[start:end], epsilon=1e-3)
+        friction * gamma_n0 *
+        -solver_sap_util.soft_normalize_grad(vc[start:end], epsilon=_STICTION_TOL)
       )
 
     return grad
