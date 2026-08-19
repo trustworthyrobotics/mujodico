@@ -25,12 +25,12 @@ class SolverSapTest(parameterized.TestCase):
     x = jp.linspace(-1.0, 1.0, num=1000)
     epsilon = 1e-3
 
-    actual = solver_sap_util.smooth_relu_grad(x, epsilon)
+    grad_actual = solver_sap_util.smooth_relu_grad(x, epsilon)
 
-    expected = jax.vmap(
+    grad_expected = jax.vmap(
       jax.grad(lambda x: solver_sap_util.smooth_relu(x, epsilon))
     )(x)
-    _assert_eq(actual, expected)
+    _assert_eq(grad_actual, grad_expected)
 
   def test_soft_normalize(self):
     r = jp.linspace(0.0, 1.0, num=100)
@@ -43,12 +43,44 @@ class SolverSapTest(parameterized.TestCase):
 
     epsilon = 0.01
 
-    actual = jax.vmap(lambda x: solver_sap_util.soft_normalize_grad(x, epsilon))(x)
+    grad_actual = jax.vmap(lambda x: solver_sap_util.soft_normalize_grad(x, epsilon))(x)
 
-    expected = jax.vmap(
+    grad_expected = jax.vmap(
       jax.jacobian(lambda x: solver_sap_util.soft_normalize(x, epsilon))
     )(x)
-    _assert_eq(actual, expected)
+    _assert_eq(grad_actual, grad_expected)
+
+  def test_sap_fixed_constraint(self):
+    N = 1000
+
+    sap_constraint = solver_sap.SapFixedConstraint(
+      phi0=jp.zeros(N),
+      delassus_estimation=jp.ones(N),
+      dt=jp.array(0.01),
+    )
+
+    vc = jp.linspace(-1.0, 1.0, N)
+
+    grad_grad_actual = jp.diag(sap_constraint.calc_impulse_grad(vc))
+
+    grad_grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vc)
+    _assert_eq(grad_grad_actual, grad_grad_expected)
+
+  def test_sap_limit_constraint(self):
+    N = 1000
+
+    sap_constraint = solver_sap.SapLimitConstraint(
+      phi0=jp.full(N, 0.001),
+      delassus_estimation=jp.ones(N),
+      dt=jp.array(0.01),
+    )
+
+    vc = jp.linspace(-1.0, 1.0, N)
+
+    grad_grad_actual = jp.diag(sap_constraint.calc_impulse_grad(vc))
+
+    grad_grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vc)
+    _assert_eq(grad_grad_actual, grad_grad_expected)
 
   def test_sap_friction_constraint(self):
     N = 1000
@@ -60,10 +92,10 @@ class SolverSapTest(parameterized.TestCase):
 
     vc = jp.linspace(-1.0, 1.0, N)
 
-    actual = jp.diag(sap_constraint.calc_impulse_grad(vc))
+    grad_actual = jp.diag(sap_constraint.calc_impulse_grad(vc))
 
-    expected = jax.jacobian(sap_constraint.calc_impulse)(vc)
-    _assert_eq(actual, expected)
+    grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vc)
+    _assert_eq(grad_actual, grad_expected)
 
   def test_sap_normal_contact_constraint(self):
     N = 1000
@@ -77,10 +109,10 @@ class SolverSapTest(parameterized.TestCase):
 
     vn = jp.linspace(-1.0, 1.0, N)
 
-    actual = jp.diag(sap_constraint.calc_impulse_grad(vn))
+    grad_actual = jp.diag(sap_constraint.calc_impulse_grad(vn))
 
-    expected = jax.jacobian(sap_constraint.calc_impulse)(vn)
-    _assert_eq(actual, expected)
+    grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vn)
+    _assert_eq(grad_actual, grad_expected)
 
   def test_sap_contact_lagged_constraint(self):
     sap_constraint = solver_sap.SapContactLaggedConstraint(
@@ -92,7 +124,7 @@ class SolverSapTest(parameterized.TestCase):
       dt=jp.array(0.01),
     )
 
-    vc = jp.linspace(-0.1, 0.1, num=11)
+    vc = jp.linspace(-1.0, 1.0, num=11)
     vn, vt1, vt2 = jp.meshgrid(vc, vc, vc)
     vc = jp.stack((
       vn.ravel(),
@@ -100,10 +132,10 @@ class SolverSapTest(parameterized.TestCase):
       vt2.ravel(),
     ), axis=1)
 
-    actual = jax.vmap(sap_constraint.calc_impulse_grad)(vc)
+    grad_actual = jax.vmap(sap_constraint.calc_impulse_grad)(vc)
 
-    expected = jax.vmap(jax.jacobian(sap_constraint.calc_impulse))(vc)
-    _assert_eq(actual, expected)
+    grad_expected = jax.vmap(jax.jacobian(sap_constraint.calc_impulse))(vc)
+    _assert_eq(grad_actual, grad_expected)
 
   @parameterized.parameters(
       *product(

@@ -37,6 +37,8 @@ import numpy as np
 
 
 class SapConstraint(PyTreeNode, ABC):
+  dt: jax.Array
+
   @abstractmethod
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
     pass
@@ -47,44 +49,54 @@ class SapConstraint(PyTreeNode, ABC):
 
 
 class SapFixedConstraint(SapConstraint):
-  def __init__(
-      self,
-      phi0: jax.Array,
-      dt: float,
-      delassus_estimation: jax.Array
-    ):
-    pass
+  phi0: jax.Array
+  delassus_estimation: jax.Array
+
+  def __post_init__(self):
+    assert self.phi0.shape == self.delassus_estimation.shape
+
+  @property
+  def _R_inv(self):
+    beta = 0.1
+    R = (beta / (2 * jp.pi))**2 * jax.lax.stop_gradient(self.delassus_estimation)
+    return jp.minimum(1 / R, 1e6)
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
+    assert vc.shape == self.phi0.shape
+    return -self._R_inv * (vc + self.phi0 / self.dt)
 
   def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
+    assert vc.shape == self.phi0.shape
+    return -self._R_inv
 
 
 class SapLimitConstraint(SapConstraint):
-  def __init__(
-      self,
-      phi0: jax.Array,
-      dt: float,
-      delassus_estimation: jax.Array
-    ):
-    pass
+  phi0: jax.Array
+  delassus_estimation: jax.Array
+
+  def __post_init__(self):
+    assert self.phi0.shape == self.delassus_estimation.shape
+
+  @property
+  def _R_inv(self):
+    beta = 0.1
+    R = (beta / (2 * jp.pi))**2 * jax.lax.stop_gradient(self.delassus_estimation)
+    return jp.minimum(1 / R, 1e6)
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
+    assert vc.shape == self.phi0.shape
+    return -self._R_inv * jp.minimum(vc + self.phi0 / self.dt, 0.0)
 
   def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
+    assert vc.shape == self.phi0.shape
+    return -self._R_inv * (vc + self.phi0 / self.dt < 0)
 
 
 class SapFrictionConstraint(SapConstraint):
   frictionloss: jax.Array
-  dt: jax.Array
 
   def __post_init__(self):
     assert self.frictionloss.ndim == 1
-    assert self.dt.ndim == 0
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
     assert vc.shape == self.frictionloss.shape
@@ -105,12 +117,10 @@ class SapNormalContactConstraint(SapConstraint):
   phi0: jax.Array
   stiffness: jax.Array
   hunt_crossley_damping: jax.Array
-  dt: jax.Array
 
   def __post_init__(self):
     assert self.phi0.shape == self.stiffness.shape
     assert self.phi0.shape == self.hunt_crossley_damping.shape
-    assert self.dt.ndim == 0
 
   @property
   def _params(self):
@@ -138,7 +148,6 @@ class SapContactLaggedConstraint(SapConstraint):
   stiffness: jax.Array
   hunt_crossley_damping: jax.Array
   friction: jax.Array
-  dt: jax.Array
 
   def __post_init__(self):
     assert self.phi0.ndim == 0
@@ -146,7 +155,6 @@ class SapContactLaggedConstraint(SapConstraint):
     assert self.stiffness.ndim == 0
     assert self.hunt_crossley_damping.ndim == 0
     assert self.friction.ndim == 1
-    assert self.dt.ndim == 0
 
   @property
   def _params_n(self):
@@ -223,8 +231,8 @@ class Context(PyTreeNode):
   Attributes:
     qvel: next step velocity                                (nv,)
     delta_qvel: step direction for qvel                     (nv,)
-    qm: mass matrix                                         (nv, nv)
-    qm_qvel_smooth: mass matrix times free-motion velocity  (nv,)
+    qM: mass matrix                                         (nv, nv)
+    qM_qvel_smooth: mass matrix times free-motion velocity  (nv,)
     efc_J: constraint Jacobian                              (nefc, nv)
     efc_pos: constraint position                            (nefc,)
     sap_constraints: objects of type SapConstraint
@@ -233,27 +241,33 @@ class Context(PyTreeNode):
 
   qvel: jax.Array
   delta_qvel: jax.Array
-  qm: jax.Array
-  qm_qvel_smooth: jax.Array
+  qM: jax.Array
+  qM_qvel_smooth: jax.Array
   efc_J: jax.Array
   efc_pos: jax.Array
-  sap_constraints: list[tuple[jax.Array, ...]]
+  sap_constraints: list[SapConstraint]
   efc_masks: list[np.ndarray]
 
   @classmethod
   def create(cls, m: Model, d: Data) -> 'Context':
-    qm, qm_qvel_smooth = cls._linearize_unconstrained_dynamics(m, d)
+    qM, qM_qvel_smooth = cls._linearize_unconstrained_dynamics(m, d)
 
-    sap_constraints, efc_masks = cls._build_constraints(m, d)
+    cho_qM = jax.scipy.linalg.cho_factor(qM)
+
+    sap_constraints, efc_masks = cls._build_constraints(m, d, cho_qM)
 
     warm_start = not m.opt.disableflags & DisableBit.WARMSTART
-    qvel_init = d.qvel if warm_start else jp.zeros(m.nv)
+    qvel_init = (
+      d.qvel
+      if warm_start
+      else jax.scipy.linalg.cho_solve(cho_qM, qM_qvel_smooth)
+    )
 
     ctx = Context(
       qvel=qvel_init,
       delta_qvel=jp.zeros_like(qvel_init),
-      qm=qm,
-      qm_qvel_smooth=qm_qvel_smooth,
+      qM=qM,
+      qM_qvel_smooth=qM_qvel_smooth,
       efc_J=d._impl.efc_J,
       efc_pos=d._impl.efc_pos,
       sap_constraints=sap_constraints,
@@ -270,16 +284,18 @@ class Context(PyTreeNode):
 
     dt = m.opt.timestep
 
-    qm = support.full_m(m, d) if support.is_sparse(m) else d._impl.M
+    qM = support.full_m(m, d) if support.is_sparse(m) else d._impl.M
     if m.opt.integrator == IntegratorType.IMPLICITFAST:
-      qm -= derivative.deriv_smooth_vel(m, d) * dt
+      qM -= derivative.deriv_smooth_vel(m, d) * dt
 
-    qm_qvel_smooth = qm @ d.qvel + d.qfrc_smooth * dt
+    qM_qvel_smooth = qM @ d.qvel + d.qfrc_smooth * dt
 
-    return qm, qm_qvel_smooth
+    return qM, qM_qvel_smooth
 
   @staticmethod
-  def _build_constraints(m: Model, d: Data):
+  def _build_constraints(m: Model, d: Data, cho_qM: tuple[jax.Array, bool]):
+    '''Create the SAP constraints and their correcponding efc masks.
+    '''
     dt = m.opt.timestep
 
     efc_type = constraint.make_efc_type(m)
@@ -288,39 +304,50 @@ class Context(PyTreeNode):
     constraints = []
 
     # Fixed constraint
-    mask = (efc_type == ConstraintType.EQUALITY)
-    if mask.any():
+    mask = np.nonzero(
+      efc_type == ConstraintType.EQUALITY
+    )[0]
+    if mask.size:
       efc_masks.append(mask)
+
+      Jc = d._impl.efc_J[mask]
+      delassus = Jc @ jax.scipy.linalg.cho_solve(cho_qM, Jc.T)
+
       constraints.append(
         SapFixedConstraint(
           phi0=d._impl.efc_pos[mask],
+          delassus_estimation=jp.diag(delassus),
           dt=dt,
-          delassus_estimation=None,
         )
       )
 
     # Limit constraint
-    mask = (
+    mask = np.nonzero(
       (efc_type == ConstraintType.LIMIT_JOINT) |
       (efc_type == ConstraintType.LIMIT_TENDON)
-    )
-    if mask.any():
+    )[0]
+    if mask.size:
       efc_masks.append(mask)
+
+      Jc = d._impl.efc_J[mask]
+      delassus = Jc @ jax.scipy.linalg.cho_solve(cho_qM, Jc.T)
+
       constraints.append(
         SapLimitConstraint(
           phi0=d._impl.efc_pos[mask],
+          delassus_estimation=jp.diag(delassus),
           dt=dt,
-          delassus_estimation=None,
         )
       )
 
     # Friction constraint
-    mask = (
+    mask = np.nonzero(
       (efc_type == ConstraintType.FRICTION_DOF) |
       (efc_type == ConstraintType.FRICTION_TENDON)
-    )
-    if mask.any():
+    )[0]
+    if mask.size:
       efc_masks.append(mask)
+
       constraints.append(
         SapFrictionConstraint(
           frictionloss=d._impl.efc_frictionloss[mask],
@@ -329,12 +356,13 @@ class Context(PyTreeNode):
       )
 
     # Normal contact constraint
-    mask = (
+    mask = np.nonzero(
       (efc_type == ConstraintType.CONTACT_FRICTIONLESS) |
       (efc_type == ConstraintType.CONTACT_PYRAMIDAL)
-    )
-    if mask.any():
+    )[0]
+    if mask.size:
       efc_masks.append(mask)
+
       constraints.append(
         SapNormalContactConstraint(
           phi0=d._impl.efc_pos[mask],
@@ -355,8 +383,7 @@ class Context(PyTreeNode):
       dim = contact_dim[k]
       efc_address = contact_efc_address[k]
 
-      mask = mask & False
-      mask[efc_address: efc_address + dim] = True
+      mask = np.arange(efc_address, efc_address + dim)
       efc_masks.append(mask)
 
       if m.opt._impl.contact_approx == ContactApproxType.LAGGED:
@@ -392,7 +419,7 @@ def _calc_constraint_impulse(ctx: Context) -> jax.Array:
 
 def _calc_cost_gradient(ctx: Context) -> jax.Array:
   qvel = ctx.qvel
-  grad = ctx.qm @ qvel - ctx.qm_qvel_smooth
+  grad = ctx.qM @ qvel - ctx.qM_qvel_smooth
 
   for efc_mask, sap_constraint in zip(ctx.efc_masks, ctx.sap_constraints):
     Jc = ctx.efc_J[efc_mask]
@@ -406,7 +433,7 @@ def _calc_cost_gradient(ctx: Context) -> jax.Array:
 
 def _calc_cost_hessian(ctx: Context) -> jax.Array:
   qvel = ctx.qvel
-  hess = ctx.qm
+  hess = ctx.qM
 
   for efc_mask, sap_constraint in zip(ctx.efc_masks, ctx.sap_constraints):
     Jc = ctx.efc_J[efc_mask]
@@ -439,9 +466,9 @@ def _eval_line_search_derivatives(
   qvel = ctx.qvel
 
   delta_qvel = ctx.delta_qvel
-  delta_p = ctx.qm @ delta_qvel
+  delta_p = ctx.qM @ delta_qvel
 
-  dell_dalpha = delta_p.dot(qvel + alpha * delta_qvel) - delta_qvel.dot(ctx.qm_qvel_smooth)
+  dell_dalpha = delta_p.dot(qvel + alpha * delta_qvel) - delta_qvel.dot(ctx.qM_qvel_smooth)
 
   d2ell_dalpha2 = delta_qvel.dot(delta_p)
 
