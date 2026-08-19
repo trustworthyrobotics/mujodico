@@ -79,18 +79,26 @@ class SapLimitConstraint(SapConstraint):
 
 
 class SapFrictionConstraint(SapConstraint):
-  def __init__(
-      self,
-      dt: float,
-      frictionloss: jax.Array
-    ):
-    pass
+  frictionloss: jax.Array
+  dt: jax.Array
+
+  def __post_init__(self):
+    assert self.frictionloss.ndim == 1
+    assert self.dt.ndim == 0
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
+    assert vc.shape == self.frictionloss.shape
+    return (
+      self.dt * self.frictionloss *
+      -jax.vmap(lambda x: solver_sap_util.soft_normalize(x, epsilon=1e-3))(vc).ravel()
+    )
 
   def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
-    raise NotImplementedError()
+    assert vc.shape == self.frictionloss.shape
+    return (
+      self.dt * self.frictionloss *
+      -jax.vmap(lambda x: solver_sap_util.soft_normalize_grad(x, epsilon=1e-3))(vc).ravel()
+    )
 
 
 class SapNormalContactConstraint(SapConstraint):
@@ -315,8 +323,8 @@ class Context(PyTreeNode):
       efc_masks.append(mask)
       constraints.append(
         SapFrictionConstraint(
-          dt=dt,
           frictionloss=d._impl.efc_frictionloss[mask],
+          dt=dt,
         )
       )
 
@@ -330,9 +338,9 @@ class Context(PyTreeNode):
       constraints.append(
         SapNormalContactConstraint(
           phi0=d._impl.efc_pos[mask],
-          dt=dt,
           stiffness=d._impl.efc_k[mask],
           hunt_crossley_damping=d._impl.efc_b[mask],
+          dt=dt,
         )
       )
 
@@ -356,10 +364,10 @@ class Context(PyTreeNode):
           SapContactLaggedConstraint(
             phi0=d._impl.efc_pos[efc_address],
             vn0=d._impl.efc_J[efc_address] @ d.qvel,
-            dt=dt,
             stiffness=d._impl.efc_k[efc_address],
             hunt_crossley_damping=d._impl.efc_b[efc_address],
             friction=d._impl.contact.friction[k][:dim-1],
+            dt=dt,
           )
         )
 

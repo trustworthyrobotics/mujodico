@@ -50,6 +50,21 @@ class SolverSapTest(parameterized.TestCase):
     )(x)
     _assert_eq(actual, expected)
 
+  def test_sap_friction_constraint(self):
+    N = 1000
+
+    sap_constraint = solver_sap.SapFrictionConstraint(
+      frictionloss=jp.ones(N),
+      dt=jp.array(0.01),
+    )
+
+    vc = jp.linspace(-1.0, 1.0, N)
+
+    actual = jp.diag(sap_constraint.calc_impulse_grad(vc))
+
+    expected = jax.jacobian(sap_constraint.calc_impulse)(vc)
+    _assert_eq(actual, expected)
+
   def test_sap_normal_contact_constraint(self):
     N = 1000
 
