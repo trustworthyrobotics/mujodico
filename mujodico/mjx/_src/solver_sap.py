@@ -14,6 +14,7 @@ we can write the dynamics as
 """
 
 from abc import ABC, abstractmethod
+from functools import partial
 import jax
 from jax import numpy as jp
 from mujodico.mjx._src import collision_driver
@@ -212,8 +213,8 @@ class Context(PyTreeNode):
     qm_qvel_smooth: mass matrix times free-motion velocity  (nv,)
     efc_J: constraint Jacobian                              (nefc, nv)
     efc_pos: constraint position                            (nefc,)
-    efc_masks: efc mask of each constraint
     sap_constraints: objects of type SapConstraint
+    efc_masks: efc mask of each constraint
   """
 
   qvel: jax.Array
@@ -222,14 +223,14 @@ class Context(PyTreeNode):
   qm_qvel_smooth: jax.Array
   efc_J: jax.Array
   efc_pos: jax.Array
+  sap_constraints: list[tuple[jax.Array, ...]]
   efc_masks: list[np.ndarray]
-  sap_constraints: list[tuple[jax.Array]]
 
   @classmethod
   def create(cls, m: Model, d: Data) -> 'Context':
     qm, qm_qvel_smooth = cls._linearize_unconstrained_dynamics(m, d)
 
-    efc_masks, sap_constraints = cls._build_constraints(m, d)
+    sap_constraints, efc_masks = cls._build_constraints(m, d)
 
     warm_start = not m.opt.disableflags & DisableBit.WARMSTART
     qvel_init = d.qvel if warm_start else jp.zeros(m.nv)
@@ -241,8 +242,8 @@ class Context(PyTreeNode):
       qm_qvel_smooth=qm_qvel_smooth,
       efc_J=d._impl.efc_J,
       efc_pos=d._impl.efc_pos,
-      efc_masks=efc_masks,
       sap_constraints=sap_constraints,
+      efc_masks=efc_masks,
     )
 
     return ctx
@@ -331,7 +332,7 @@ class Context(PyTreeNode):
 
     # Elliptic contact constraint
     if m.opt.cone == ConeType.PYRAMIDAL:
-      return efc_masks, constraints
+      return constraints, efc_masks
 
     contact_dim = collision_driver.make_condim(m)
     contact_efc_address = constraint.make_efc_address(m, contact_dim, efc_type)
@@ -360,7 +361,7 @@ class Context(PyTreeNode):
         raise ValueError(f'Contact approximation {m.opt._impl.contact_approx} '
                          f'is not supported by SAP solver')
 
-    return efc_masks, constraints
+    return constraints, efc_masks
 
 
 def _calc_constraint_impulse(ctx: Context) -> jax.Array:
@@ -450,7 +451,7 @@ def _eval_line_search_derivatives(
 def _perform_line_search(
     ctx: Context,
     ls_tolerance: float,
-    ls_iter: int,
+    ls_iterations: int,
 ) -> jax.Array:
   """Finds α where dℓ(v + α Δv) / dα = 0
   """
@@ -481,7 +482,7 @@ def _perform_line_search(
 
     def cond_fn(carry):
       i, _, _, _, _, _, g, _ = carry
-      return (i < ls_iter) & (jp.abs(g) >= ls_tolerance)
+      return (i < ls_iterations) & (jp.abs(g) >= ls_tolerance)
 
     def body_fn(carry):
       (
@@ -553,14 +554,15 @@ def _perform_line_search(
 def _solve_impl(
     ctx: Context,
     tolerance: float,
-    iter: int,
+    iterations: int,
     ls_tolerance: float,
-    ls_iter: int,
+    ls_iterations: int,
 ) -> Context:
 
   def cond_fn(carry):
     ctx, i = carry
-    return (i < iter) & (jp.linalg.norm(ctx.delta_qvel, ord=jp.inf) > tolerance) | (i == 0)
+    not_converged = jp.linalg.norm(ctx.delta_qvel, ord=jp.inf) > tolerance
+    return (i == 0) | ((i < iterations) & not_converged)
 
   def body_fn(carry):
     ctx, i = carry
@@ -570,7 +572,7 @@ def _solve_impl(
     alpha = _perform_line_search(
         ctx,
         ls_tolerance=ls_tolerance,
-        ls_iter=ls_iter,
+        ls_iterations=ls_iterations,
     )
 
     ctx = ctx.replace(qvel=ctx.qvel + alpha * ctx.delta_qvel)
@@ -582,6 +584,59 @@ def _solve_impl(
   return ctx
 
 
+@partial(jax.custom_jvp, nondiff_argnums=(1,2,3,4))
+def _solve(
+    ctx: Context,
+    tolerance: float,
+    iterations: int,
+    ls_tolerance: float,
+    ls_iterations: int,
+) -> jax.Array:
+
+  ctx = _solve_impl(
+    ctx=ctx,
+    tolerance=tolerance,
+    iterations=iterations,
+    ls_tolerance=ls_tolerance,
+    ls_iterations=ls_iterations,
+  )
+  qvel = ctx.qvel
+
+  return qvel
+
+
+@_solve.defjvp
+def _solve_jvp(
+    tolerance: float,
+    iterations: int,
+    ls_tolerance: float,
+    ls_iterations: int,
+    primals,
+    tangents,
+) -> tuple[jax.Array, jax.Array]:
+
+  ctx = _solve_impl(
+    ctx=primals[0],
+    tolerance=tolerance,
+    iterations=iterations,
+    ls_tolerance=ls_tolerance,
+    ls_iterations=ls_iterations,
+  )
+  qvel = ctx.qvel
+
+  def f(*primals):
+    return _calc_cost_gradient(ctx=primals[0].replace(qvel=qvel))
+
+  _, df = jax.jvp(f, primals, tangents)
+
+  H = _calc_cost_hessian(ctx)
+  choH = jax.scipy.linalg.cho_factor(H)
+
+  dqvel = jax.scipy.linalg.cho_solve(choH, -df)
+
+  return qvel, dqvel
+
+
 def solve(m: Model, d: Data) -> Data:
   if not isinstance(m.opt._impl, OptionJAX):
     raise ValueError('solve requires JAX backend implementation.')
@@ -591,13 +646,14 @@ def solve(m: Model, d: Data) -> Data:
 
   ctx = Context.create(m, d)
 
-  ctx = _solve_impl(
+  qvel = _solve(
     ctx=ctx,
     tolerance=m.opt.tolerance,
-    iter=m.opt.iterations,
+    iterations=m.opt.iterations,
     ls_tolerance=m.opt.ls_tolerance,
-    ls_iter=m.opt.ls_iterations,
+    ls_iterations=m.opt.ls_iterations,
   )
+  ctx = ctx.replace(qvel=qvel)
 
   dt = m.opt.timestep
 

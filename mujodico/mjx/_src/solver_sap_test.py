@@ -1,19 +1,15 @@
 from absl.testing import absltest
 from absl.testing import parameterized
+from functools import partial
+from itertools import product
 import jax
 from jax import numpy as jp
+from jax._src import test_util
+import mujoco
+from mujodico import mjx
+from mujodico.mjx._src import solver_sap_util
+from mujodico.mjx._src import solver_sap
 import numpy as np
-
-from mujodico.mjx._src.solver_sap_util import (
-  smooth_relu,
-  smooth_relu_grad,
-  soft_normalize,
-  soft_normalize_grad,
-)
-from mujodico.mjx._src.solver_sap import (
-  SapNormalContactConstraint,
-  SapContactLaggedConstraint,
-)
 
 
 _TOLERANCE = 1e-5
@@ -23,15 +19,17 @@ def _assert_eq(a, b):
   np.testing.assert_allclose(a, b, atol=_TOLERANCE, rtol=_TOLERANCE)
 
 
-class ContactTest(parameterized.TestCase):
+class SolverSapTest(parameterized.TestCase):
 
   def test_smooth_relu(self):
     x = jp.linspace(-1.0, 1.0, num=1000)
     epsilon = 1e-3
 
-    actual = smooth_relu_grad(x, epsilon)
+    actual = solver_sap_util.smooth_relu_grad(x, epsilon)
 
-    expected = jax.vmap(jax.grad(lambda x: smooth_relu(x, epsilon)))(x)
+    expected = jax.vmap(
+      jax.grad(lambda x: solver_sap_util.smooth_relu(x, epsilon))
+    )(x)
     _assert_eq(actual, expected)
 
   def test_soft_normalize(self):
@@ -45,15 +43,17 @@ class ContactTest(parameterized.TestCase):
 
     epsilon = 0.01
 
-    actual = jax.vmap(lambda x: soft_normalize_grad(x, epsilon))(x)
+    actual = jax.vmap(lambda x: solver_sap_util.soft_normalize_grad(x, epsilon))(x)
 
-    expected = jax.vmap(jax.jacobian(lambda x: soft_normalize(x, epsilon)))(x)
+    expected = jax.vmap(
+      jax.jacobian(lambda x: solver_sap_util.soft_normalize(x, epsilon))
+    )(x)
     _assert_eq(actual, expected)
 
   def test_sap_normal_contact_constraint(self):
     N = 1000
 
-    sap_constraint = SapNormalContactConstraint(
+    sap_constraint = solver_sap.SapNormalContactConstraint(
       phi0=jp.full(N, 0.0),
       stiffness=jp.full(N, 1e5),
       hunt_crossley_damping=jp.full(N, 50.0),
@@ -68,7 +68,7 @@ class ContactTest(parameterized.TestCase):
     _assert_eq(actual, expected)
 
   def test_sap_contact_lagged_constraint(self):
-    sap_constraint = SapContactLaggedConstraint(
+    sap_constraint = solver_sap.SapContactLaggedConstraint(
       phi0=jp.array(-0.001),
       vn0=jp.array(0.0),
       stiffness=jp.array(1e5),
@@ -89,6 +89,120 @@ class ContactTest(parameterized.TestCase):
 
     expected = jax.vmap(jax.jacobian(sap_constraint.calc_impulse))(vc)
     _assert_eq(actual, expected)
+
+  @parameterized.parameters(
+      *product(
+        ['pyramidal', 'elliptic'],
+        [1, 3, 4, 6],
+      )
+  )
+  def test_solve(self, cone, condim):
+    # Elliptic cone does not support condim=1.
+    if cone == 'elliptic' and condim == 1:
+      return
+
+    xml = f'''
+<mujoco model="1d_pusher">
+
+    <option cone="{cone}" />
+    <option integrator="implicitfast" />
+    <option timestep="0.02"  />
+
+    <default>
+        <joint damping="5"/>
+        <geom solref="-1e5 -50.0" condim="{condim}" />
+    </default>
+
+    <worldbody>
+
+        <!-- Red sphere pusher -->
+        <body name="pusher" pos="-0.1 0 0">
+            <joint name="pusher_slide"
+                   type="slide"
+                   axis="1 0 0" />
+
+            <geom name="pusher_geom"
+                  type="sphere"
+                  size="0.05"
+                  mass="1"
+                  rgba="1 0 0 1" />
+        </body>
+
+        <!-- Blue capsule object -->
+        <body name="object" pos="0.0 0 0">
+            <joint name="object_slide"
+                   type="slide"
+                   axis="1 0 0" />
+
+            <geom name="object_geom"
+                  type="sphere"
+                  size="0.05"
+                  mass="1"
+                  rgba="0 0 1 1" />
+        </body>
+
+    </worldbody>
+
+    <actuator>
+        <velocity name="pusher_vel"
+                  joint="pusher_slide"
+                  kv="100" />
+    </actuator>
+
+</mujoco>
+'''
+
+    model = mujoco.MjModel.from_xml_string(xml)
+
+    mjx_model = mjx.put_model(
+      model,
+      device=jax.devices()[0],
+      contact_approximation='lagged',
+    )
+    mjx_data = mjx.make_data(mjx_model, impl=mjx_model.impl)
+
+    @jax.jit
+    def step(x, u):
+      m = mjx_model
+      d = mjx_data.replace(
+        qpos=x[:m.nq],
+        qvel=x[m.nq:m.nq+m.nv],
+        act=x[m.nq+m.nv:],
+        ctrl=u,
+      )
+      d = mjx.step(m, d)
+
+      efc_force = d._impl.efc_force
+      state = jp.concatenate([d.qpos, d.qvel, d.act])
+
+      return efc_force, state
+
+    x = jp.array([0.0, 0.01, 0.0, 0.0])
+    u = jp.array([0.1])
+
+    efc_force, _ = step(x, u)
+    self.assertTrue((efc_force > 0.0).any(), 'inactive contact')
+
+    eps = 1e-5  # finite difference step size
+    tol = _TOLERANCE * 30  # looser tolerance when comparing with finite difference
+
+    jax._src.test_util.check_jvp(
+      step,
+      partial(jax.jvp, step),
+      (x, u),
+      eps=eps,
+      atol=tol,
+      rtol=tol,
+    )
+
+    jax._src.test_util.check_vjp(
+      step,
+      partial(jax.vjp, step),
+      (x, u),
+      eps=eps,
+      atol=tol,
+      rtol=tol * 2.5,
+    )
 
 
 if __name__ == "__main__":
