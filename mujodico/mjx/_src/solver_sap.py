@@ -1,16 +1,29 @@
 """
-Solves next step contact force and velocity/acceleration for a log-barrier
-contact approximation. Under the contact approximaiton, the dynamcis are
-  M(q) (v⁺ - v) / δt + c(q⁺, v⁺) = τ(q⁺, v⁺, u) + J(q)ᵀ λ
-  q⁺ = q ⊕ δt v⁺
+Solves next step velocity and constraint impulse, where the contact
+force satisfies the Hunt-Crossley model. The dynamcis satisfy
+    M(q) (v⁺ - v) / δt + c(q⁺, v⁺) = τ(q⁺, v⁺, u) + J(q)ᵀ γ
+    q⁺ = q ⊕ δt v⁺
+where γ is the constraint impulse.
 
 By defining the effective mass matrix
-  Mₑ = M(q) - d[τ(q, v, u) - c(q, v)] / dv δt
-and the mass matrix free-motion velocity product
-  Mₑ v* = Mₑ v + δt [τ(q, v, u) - c(q, v)]
+    A = M(q) - d[τ(q, v, u) - c(q, v)] / dv δt
+and the mass matrix times free-motion velocity as
+    A v* = A v + δt [τ(q, v, u) - c(q, v)]
 we can write the dynamics as
-  Mₑ v⁺ - Mₑ v* = J(q)ᵀ λ δt
-  q⁺ = q ⊕ δt v⁺
+    A v⁺ - A v* = J(q)ᵀ γ
+    q⁺ = q ⊕ δt v⁺
+
+The next step velocity v⁺ is obtained by solving a convex program
+    minimize ½ (v⁺ - v*)ᵀ A (v⁺ - v*) + ℓ_c(v_c)
+with v_c := J(q) v⁺.
+The convex program has optimality
+    A (v⁺ - v*) + (∂ℓ_c / ∂v⁺) = 0
+    ⟹ A (v⁺ - v*) + J(q)ᵀ (∂ℓ_c / ∂v_c) = 0
+Hence the constraint impulse γ and constraint cost ℓ_c are related by
+    γ = -∂ℓ_c / ∂v_c
+It turns out that for some contact constitutive relation γ = γ(v_c),
+Hunt-Crossley contact model included, ℓ_c is convex. Furthermore,
+since A is positive-definite, the convex program is strongly convex.
 """
 
 from abc import ABC, abstractmethod
