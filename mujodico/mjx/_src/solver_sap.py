@@ -152,6 +152,18 @@ class SapContactLaggedConstraint(SapConstraint):
     }
 
   @property
+  def _blocks_t(self):
+    blocks = [(1, 3, self.friction[0])]
+
+    if self.friction.size >= 3:
+      blocks.append((3, 4, self.friction[2]))
+
+    if self.friction.size >= 5:
+      blocks.append((4, 6, self.friction[3]))
+
+    return blocks
+
+  @property
   def gamma_n0(self):
     return solver_sap_util.hunt_crossley_contact_force(
       phi=self.phi0,
@@ -165,19 +177,17 @@ class SapContactLaggedConstraint(SapConstraint):
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
     assert vc.size == self.friction.size + 1
 
-    gamma_n = solver_sap_util.contact_normal_impulse(vn=vc[0], **self._params_n)
-    gamma = jp.array([gamma_n])
+    gamma = jp.zeros(vc.size)
+
+    gamma = gamma.at[0].set(
+      solver_sap_util.contact_normal_impulse(vn=vc[0], **self._params_n)
+    )
 
     gamma_n0 = self.gamma_n0
-    if self.friction.size >= 2:
-      gamma_t = -self.friction[0] * gamma_n0 * solver_sap_util.soft_normalize(vc[1:3], epsilon=1e-3)
-      gamma = jp.concatenate((gamma, gamma_t))
-    if self.friction.size >= 3:
-      gamma_t = -self.friction[2] * gamma_n0 * solver_sap_util.soft_normalize(vc[3:4], epsilon=1e-3)
-      gamma = jp.concatenate((gamma, gamma_t))
-    if self.friction.size >= 5:
-      gamma_t = -self.friction[3] * gamma_n0 * solver_sap_util.soft_normalize(vc[4:6], epsilon=1e-3)
-      gamma = jp.concatenate((gamma, gamma_t))
+    for start, end, friction in self._blocks_t:
+      gamma = gamma.at[start:end].set(
+        -friction * gamma_n0 * solver_sap_util.soft_normalize(vc[start:end], epsilon=1e-3)
+      )
 
     return gamma
 
@@ -186,19 +196,15 @@ class SapContactLaggedConstraint(SapConstraint):
 
     grad = jp.zeros((vc.size, vc.size))
 
-    gamma_n_grad = solver_sap_util.contact_normal_impulse_grad(vn=vc[0], **self._params_n)
-    grad = grad.at[0, 0].set(gamma_n_grad)
+    grad = grad.at[0, 0].set(
+      solver_sap_util.contact_normal_impulse_grad(vn=vc[0], **self._params_n)
+    )
 
     gamma_n0 = self.gamma_n0
-    if self.friction.size >= 2:
-      gamma_t_grad = -self.friction[0] * gamma_n0 * solver_sap_util.soft_normalize_grad(vc[1:3], epsilon=1e-3)
-      grad = grad.at[1:3, 1:3].set(gamma_t_grad)
-    if self.friction.size >= 3:
-      gamma_t_grad = -self.friction[2] * gamma_n0 * solver_sap_util.soft_normalize_grad(vc[3:4], epsilon=1e-3)
-      grad = grad.at[3:4, 3:4].set(gamma_t_grad)
-    if self.friction.size >= 5:
-      gamma_t_grad = -self.friction[3] * gamma_n0 * solver_sap_util.soft_normalize_grad(vc[4:6], epsilon=1e-3)
-      grad = grad.at[4:6, 4:6].set(gamma_t_grad)
+    for start, end, friction in self._blocks_t:
+      grad = grad.at[start:end, start:end].set(
+        -friction * gamma_n0 * solver_sap_util.soft_normalize_grad(vc[start:end], epsilon=1e-3)
+      )
 
     return grad
 
