@@ -21,15 +21,21 @@ def _assert_eq(a, b):
 
 class SolverSapTest(parameterized.TestCase):
 
-  def test_smooth_relu(self):
+  @parameterized.parameters([
+    'softplus',
+    'algebraic_smooth_relu',
+    'piecewise_smooth_relu'
+  ])
+  def test_smooth_relu(self, name):
+    val_fun = eval(f'solver_sap_util.{name}')
+    grad_fun = eval(f'solver_sap_util.{name}_grad')
+
     x = jp.linspace(-1.0, 1.0, num=1000)
     epsilon = 1e-3
 
-    grad_actual = solver_sap_util.smooth_relu_grad(x, epsilon)
+    grad_actual = grad_fun(x, epsilon)
 
-    grad_expected = jax.vmap(
-      jax.grad(lambda x: solver_sap_util.smooth_relu(x, epsilon))
-    )(x)
+    grad_expected = jax.vmap(jax.grad(lambda x: val_fun(x, epsilon)))(x)
     _assert_eq(grad_actual, grad_expected)
 
   def test_soft_normalize(self):

@@ -1,7 +1,28 @@
+import jax
 import jax.numpy as jp
 
 
-def smooth_relu(x, epsilon):
+def softplus(x, epsilon):
+  assert epsilon > 0
+  epsilon = epsilon / (4 * jp.log(2))
+  return epsilon * jax.nn.softplus(x / epsilon)
+
+def softplus_grad(x, epsilon):
+  assert epsilon > 0
+  epsilon = epsilon / (4 * jp.log(2))
+  return jax.nn.sigmoid(x / epsilon)
+
+
+def algebraic_smooth_relu(x, epsilon):
+    assert epsilon > 0
+    return 0.5 * (x + jp.sqrt(x**2 + (0.5 * epsilon)**2))
+
+def algebraic_smooth_relu_grad(x, epsilon):
+    assert epsilon > 0
+    return 0.5 * (1.0 + x / jp.sqrt(x**2 + (0.5 * epsilon)**2))
+
+
+def piecewise_smooth_relu(x, epsilon):
   assert epsilon > 0
   return jp.where(
     x <= -epsilon,
@@ -13,8 +34,7 @@ def smooth_relu(x, epsilon):
     ),
   )
 
-
-def smooth_relu_grad(x, epsilon):
+def piecewise_smooth_relu_grad(x, epsilon):
   assert epsilon > 0
   return jp.where(
     x <= -epsilon,
@@ -37,8 +57,8 @@ def hunt_crossley_contact_force(phi, vn, k, d, epsilon1, epsilon2):
             x                    if x >= ε.
     """
 
-    g1 = smooth_relu(-phi, epsilon1)
-    g2 = smooth_relu(1.0 / d - vn, epsilon2)
+    g1 = piecewise_smooth_relu(-phi, epsilon1)
+    g2 = piecewise_smooth_relu(1.0 / d - vn, epsilon2)
 
     return k * d * g1 * g2
 
@@ -58,11 +78,11 @@ def contact_normal_impulse_grad(vn, phi0, k, d, dt, epsilon1, epsilon2):
   x1 = -phi0 - dt * vn
   x2 = 1.0 / d - vn
 
-  g1 = smooth_relu(x1, epsilon1)
-  g2 = smooth_relu(x2, epsilon2)
+  g1 = piecewise_smooth_relu(x1, epsilon1)
+  g2 = piecewise_smooth_relu(x2, epsilon2)
 
-  dg1_dvn = smooth_relu_grad(x1, epsilon1) * -dt
-  dg2_dvn = smooth_relu_grad(x2, epsilon2) * -1.0
+  dg1_dvn = piecewise_smooth_relu_grad(x1, epsilon1) * -dt
+  dg2_dvn = piecewise_smooth_relu_grad(x2, epsilon2) * -1.0
 
   return dt * k * d * (dg1_dvn * g2 + g1 * dg2_dvn)
 
