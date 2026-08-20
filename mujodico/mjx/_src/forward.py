@@ -29,7 +29,7 @@ from mujodico.mjx._src import scan
 from mujodico.mjx._src import sensor
 from mujodico.mjx._src import smooth
 from mujodico.mjx._src import solver
-from mujodico.mjx._src import solver_logbarrier
+from mujodico.mjx._src import solver_conic
 from mujodico.mjx._src import solver_sap
 from mujodico.mjx._src import support
 # pylint: disable=g-importing-member
@@ -60,7 +60,7 @@ _RK4_B = np.array([1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0])
 # Constraint solvers
 _SOLVE_FUNC = {
     ContactApproxType.MUJOCO: solver.solve,
-    ContactApproxType.LOG_BARRIER: solver_logbarrier.solve,
+    ContactApproxType.CONIC: solver_conic.solve,
     ContactApproxType.LAGGED: solver_sap.solve,
 }
 

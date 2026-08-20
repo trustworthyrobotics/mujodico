@@ -5,7 +5,7 @@ from mujodico import mjx
 from mujodico.examples.tasks import Task
 from mujodico.examples.methods import support
 from mujodico.mjx._src import constraint
-from mujodico.mjx._src import solver_logbarrier
+from mujodico.mjx._src import solver_conic
 import numpy as np
 
 try:
@@ -18,7 +18,7 @@ except ImportError as e:
 
 
 _CONSTITUTIVE_RELATIONS_FUNC = {
-    mjx.ContactApproxType.LOG_BARRIER: solver_logbarrier.constitutive_relations,
+    mjx.ContactApproxType.CONIC: solver_conic.constitutive_relations,
 }
 
 

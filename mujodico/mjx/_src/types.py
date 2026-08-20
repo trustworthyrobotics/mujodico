@@ -47,14 +47,10 @@ class Impl(enum.Enum):
 
 class ContactApproxType(enum.Enum):
   """Type of contact approximation.
-
-  Attributes:
-    MUJOCO: original mujoco contact approximation
-    LOG_BARRIER: log-barrier contact approximation
   """
 
   MUJOCO = "mujoco"
-  LOG_BARRIER = "logbarrier"
+  CONIC = "conic"
   LAGGED = "lagged"
 
   @classmethod
