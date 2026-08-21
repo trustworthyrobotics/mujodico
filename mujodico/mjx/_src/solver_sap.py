@@ -52,6 +52,8 @@ import numpy as np
 _SIGNED_DIST_TOL = 1e-2   # Unit: m
 _BOUNCE_SPEED_TOL = 1e-3  # Unit: m/s
 _STICTION_TOL = 1e-3      # Unit: m/s or rad/s
+_HC_STIFFNESS_SCALE = 1e2  # Scale from mujoco stiffness to Hunt-Crossley stiffness
+_HC_DAMPING_SCALE = 1e-1   # Scale from mujoco damping to Hunt-Crossley damping
 
 
 class SapConstraint(PyTreeNode, ABC):
@@ -325,7 +327,7 @@ class Context(PyTreeNode):
     efc_type = constraint.make_efc_type(m)
 
     efc_masks = []
-    constraints = []
+    sap_constraints = []
 
     # Fixed constraint
     mask = np.nonzero(
@@ -337,7 +339,7 @@ class Context(PyTreeNode):
       Jc = d._impl.efc_J[mask]
       delassus = Jc @ jax.scipy.linalg.cho_solve(cho_qM, Jc.T)
 
-      constraints.append(
+      sap_constraints.append(
         SapFixedConstraint(
           phi0=d._impl.efc_pos[mask],
           delassus_estimation=jp.diag(delassus),
@@ -356,7 +358,7 @@ class Context(PyTreeNode):
       Jc = d._impl.efc_J[mask]
       delassus = Jc @ jax.scipy.linalg.cho_solve(cho_qM, Jc.T)
 
-      constraints.append(
+      sap_constraints.append(
         SapLimitConstraint(
           phi0=d._impl.efc_pos[mask],
           delassus_estimation=jp.diag(delassus),
@@ -372,7 +374,7 @@ class Context(PyTreeNode):
     if mask.size:
       efc_masks.append(mask)
 
-      constraints.append(
+      sap_constraints.append(
         SapFrictionConstraint(
           frictionloss=d._impl.efc_frictionloss[mask],
           dt=dt,
@@ -380,6 +382,7 @@ class Context(PyTreeNode):
       )
 
     # Normal contact constraint
+    contact_approx = m.opt._impl.contact_approx
     mask = np.nonzero(
       (efc_type == ConstraintType.CONTACT_FRICTIONLESS) |
       (efc_type == ConstraintType.CONTACT_PYRAMIDAL)
@@ -387,18 +390,22 @@ class Context(PyTreeNode):
     if mask.size:
       efc_masks.append(mask)
 
-      constraints.append(
-        SapNormalContactConstraint(
-          phi0=d._impl.efc_pos[mask],
-          stiffness=d._impl.efc_k[mask],
-          hunt_crossley_damping=d._impl.efc_b[mask],
-          dt=dt,
+      if contact_approx == ContactApproxType.LAGGED:
+        sap_constraints.append(
+          SapNormalContactConstraint(
+            phi0=d._impl.efc_pos[mask],
+            stiffness=d._impl.efc_k[mask] * _HC_STIFFNESS_SCALE,
+            hunt_crossley_damping=d._impl.efc_b[mask] * _HC_DAMPING_SCALE,
+            dt=dt,
+          )
         )
-      )
+
+      else:
+        raise ValueError(f'Contact approximation {contact_approx} not supported by SAP solver')
 
     # Elliptic contact constraint
     if m.opt.cone == ConeType.PYRAMIDAL:
-      return constraints, efc_masks
+      return sap_constraints, efc_masks
 
     contact_dim = collision_driver.make_condim(m)
     contact_efc_address = constraint.make_efc_address(m, contact_dim, efc_type)
@@ -410,23 +417,22 @@ class Context(PyTreeNode):
       mask = np.arange(efc_address, efc_address + dim)
       efc_masks.append(mask)
 
-      if m.opt._impl.contact_approx == ContactApproxType.LAGGED:
-        constraints.append(
+      if contact_approx == ContactApproxType.LAGGED:
+        sap_constraints.append(
           SapContactLaggedConstraint(
             phi0=d._impl.efc_pos[efc_address],
             vn0=d._impl.efc_J[efc_address] @ d.qvel,
-            stiffness=d._impl.efc_k[efc_address],
-            hunt_crossley_damping=d._impl.efc_b[efc_address],
+            stiffness=d._impl.efc_k[efc_address] * _HC_STIFFNESS_SCALE,
+            hunt_crossley_damping=d._impl.efc_b[efc_address] * _HC_DAMPING_SCALE,
             friction=d._impl.contact.friction[k][:dim-1],
             dt=dt,
           )
         )
 
       else:
-        raise ValueError(f'Contact approximation {m.opt._impl.contact_approx} '
-                         f'is not supported by SAP solver')
+        raise ValueError(f'Contact approximation {contact_approx} not supported by SAP solver')
 
-    return constraints, efc_masks
+    return sap_constraints, efc_masks
 
 
 def _calc_constraint_impulse(ctx: Context) -> jax.Array:

@@ -163,7 +163,7 @@ class SolverSapTest(parameterized.TestCase):
 
     <default>
         <joint damping="5"/>
-        <geom solref="-1e5 -50.0" condim="{condim}" />
+        <geom condim="{condim}" />
     </default>
 
     <worldbody>
