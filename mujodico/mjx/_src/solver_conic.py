@@ -1,22 +1,28 @@
 """
 Solves next step contact force and velocity/acceleration for a log-barrier
 contact approximation. Under the contact approximaiton, the dynamcis are
-  M(q) (v⁺ - v) + δt c(q⁺, v⁺) = δt τ(q⁺, v⁺, u) + J(q)ᵀ γ
-  q⁺ = q ⊕ δt v⁺
-  ν := J(q) v⁺ + ϕ(q) / (δt + τ) ∈ ℱ*
-  γ ∈ ℱ
-  ν ∘ γ = μ e
+    M(q) (v⁺ - v) + δt c(q⁺, v⁺) = δt τ(q⁺, v⁺, u) + J(q)ᵀ γ
+    q⁺ = q ⊕ δt v⁺
+    ν := J(q) v⁺ + ϕ(q) / (δt + τ) ∈ ℱ*
+    γ ∈ ℱ
+    ν ∘ γ = μ e
 
 By defining the effective mass matrix
-  A = M(q) - d[τ(q, v, u) - c(q, v)] / dv δt
+    A = M(q) - d[τ(q, v, u) - c(q, v)] / dv δt
 and the mass matrix times free-motion velocity
-  A v* = A v + δt [τ(q, v, u) - c(q, v)]
+    A v* = A v + δt [τ(q, v, u) - c(q, v)]
 we can write the dynamics as
-  A v⁺ - A v* = J(q)ᵀ γ
-  q⁺ = q ⊕ h v⁺
-  ν := J(q) v⁺ + ϕ(q) / (δt + τ)  ∈ ℱ*
-  γ ∈ ℱ
-  ν ∘ γ = μ e
+    A v⁺ - A v* = J(q)ᵀ γ
+    q⁺ = q ⊕ h v⁺
+    ν := J(q) v⁺ + ϕ(q) / (δt + τ)  ∈ ℱ*
+    γ ∈ ℱ
+    ν ∘ γ = μ e
+
+The complementarity condition can be written as
+    ν δt ∘ γ/δt = μ e
+where ν δt has unit of length and γ/δt has unit of force.
+Thus, provided that μ ∝ (δt)⁰, the contact force is μ divided by the
+signed distance and is indepedent of timestep.
 """
 
 import jax
@@ -85,7 +91,7 @@ def solve(m: Model, d: Data) -> Data:
       A=A,
       b=b,
       cones=tuple(cones),
-      complementarities=comps * dt,
+      complementarities=comps,
       x_init=x_init,
       z_init=z_init,
       iterations=m.opt.iterations,
