@@ -1,29 +1,22 @@
 """
 Solves next step contact force and velocity/acceleration for a log-barrier
 contact approximation. Under the contact approximaiton, the dynamcis are
-  M(q) (v⁺ - v) / δt + c(q⁺, v⁺) = τ(q⁺, v⁺, u) + J(q)ᵀ λ
+  M(q) (v⁺ - v) + δt c(q⁺, v⁺) = δt τ(q⁺, v⁺, u) + J(q)ᵀ γ
   q⁺ = q ⊕ δt v⁺
   ν := J(q) v⁺ + ϕ(q) / (δt + τ) ∈ ℱ*
-  λ ∈ ℱ
-  ν ∘ λ = μ e
+  γ ∈ ℱ
+  ν ∘ γ = μ e
 
 By defining the effective mass matrix
-  Mₑ = M(q) - d[τ(q, v, u) - c(q, v)] / dv δt
-and free-motion velocity
-  v* = v + δt Mₑ⁻¹ [τ(q, v, u) - c(q, v)]
+  A = M(q) - d[τ(q, v, u) - c(q, v)] / dv δt
+and the mass matrix times free-motion velocity
+  A v* = A v + δt [τ(q, v, u) - c(q, v)]
 we can write the dynamics as
-  Mₑ (v⁺ - v*) / δt = J(q)ᵀ λ
+  A v⁺ - A v* = J(q)ᵀ γ
   q⁺ = q ⊕ h v⁺
   ν := J(q) v⁺ + ϕ(q) / (δt + τ)  ∈ ℱ*
-  λ ∈ ℱ
-  ν ∘ λ = μ e
-
-Or in acceleration where a⁺ = (v⁺ - v) / δt and a* = (v* - v) / δt as
-  Mₑ (a⁺ - a*) = J(q)ᵀ λ
-  q⁺ = q ⊕ h (v + δt a⁺)
-  ν' := J(q) a⁺ + [J(q) v + ϕ(q) / (δt + τ)] / δt ∈ ℱ*
-  λ ∈ ℱ
-  ν' ∘ λ = μ e / δt
+  γ ∈ ℱ
+  ν ∘ γ = μ e
 """
 
 import jax
@@ -45,23 +38,19 @@ from mujodico.mjx._src.types import OptionJAX
 
 
 def _linearize_unconstrained_dynamics(m: Model, d: Data) -> tuple[jax.Array, jax.Array]:
-  """Computes the effective mass matrix and qvel_smooth for the integrator type."""
+  """Computes the effective mass matrix and its product with the free-motion velocity
+  for the integrator type.
+  """
 
   dt = m.opt.timestep
 
-  qm = support.full_m(m, d) if support.is_sparse(m) else d._impl.M
-  qacc_smooth = d.qacc_smooth
-
+  qM = support.full_m(m, d) if support.is_sparse(m) else d._impl.M
   if m.opt.integrator == IntegratorType.IMPLICITFAST:
-    qderiv = derivative.deriv_smooth_vel(m, d)
-    qm -= qderiv * dt
+    qM -= derivative.deriv_smooth_vel(m, d) * dt
 
-    qh, _ = jax.scipy.linalg.cho_factor(qm)
-    qacc_smooth = jax.scipy.linalg.cho_solve((qh, False), d.qfrc_smooth)
+  qM_qvel_smooth = qM @ d.qvel + d.qfrc_smooth * dt
 
-  qvel_smooth = d.qvel + qacc_smooth * dt
-
-  return qm, qvel_smooth
+  return qM, qM_qvel_smooth
 
 
 def solve(m: Model, d: Data) -> Data:
@@ -70,7 +59,7 @@ def solve(m: Model, d: Data) -> Data:
 
   dt = m.opt.timestep
 
-  qm, qvel_smooth = _linearize_unconstrained_dynamics(m, d)
+  qM, qM_qvel_smooth = _linearize_unconstrained_dynamics(m, d)
 
   efc_J = d._impl.efc_J
   efc_pos = d._impl.efc_pos
@@ -80,15 +69,15 @@ def solve(m: Model, d: Data) -> Data:
   dt = m.opt.timestep
   tau = d._impl.efc_b / jp.maximum(d._impl.efc_k, 1e-8)
 
-  P = qm / dt
-  q = -qm @ qvel_smooth / dt
+  P = qM
+  q = -qM_qvel_smooth
   A = -efc_J * friction_scale[:, None]
   b = efc_pos / (dt + tau) * friction_scale
 
   warm_start = not m.opt.disableflags & DisableBit.WARMSTART
 
   x_init = d.qvel if warm_start else None
-  z_init = d._impl.efc_force if warm_start else None
+  z_init = d._impl.efc_force * dt if warm_start else None
 
   x, z, s = conic.solve(
       P=P,
@@ -96,7 +85,7 @@ def solve(m: Model, d: Data) -> Data:
       A=A,
       b=b,
       cones=tuple(cones),
-      complementarities=comps,
+      complementarities=comps * dt,
       x_init=x_init,
       z_init=z_init,
       iterations=m.opt.iterations,
@@ -104,15 +93,16 @@ def solve(m: Model, d: Data) -> Data:
   )
 
   qvel = x
-  efc_force = z
+  efc_impulse = z
 
-  qfrc_constraint = efc_J.T @ efc_force
   qacc = (qvel - d.qvel) / dt
+  efc_force = efc_impulse / dt
+  qfrc_constraint = efc_J.T @ efc_force
 
   d = d.tree_replace({
-      'qfrc_constraint': qfrc_constraint,
       'qacc': qacc,
       '_impl.efc_force': efc_force,
+      'qfrc_constraint': qfrc_constraint,
   })
 
   return d
