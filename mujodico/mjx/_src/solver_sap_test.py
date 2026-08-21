@@ -103,6 +103,23 @@ class SolverSapTest(parameterized.TestCase):
     grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vc)
     _assert_eq(grad_actual, grad_expected)
 
+  def test_sap_logbarrier_normal_contact_constraint(self):
+    N = 1000
+
+    sap_constraint = solver_sap.SapLogbarrierNormalContactConstraint(
+      phi0=jp.full(N, 0.0),
+      tau=jp.zeros(N),
+      dt=jp.array(0.01),
+      contact_smoothing=1e-1,
+    )
+
+    vn = jp.linspace(-1.0, 1.0, N)
+
+    grad_actual = jp.diag(sap_constraint.calc_impulse_grad(vn))
+
+    grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vn)
+    _assert_eq(grad_actual, grad_expected)
+
   def test_sap_normal_contact_constraint(self):
     N = 1000
 

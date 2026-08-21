@@ -1,6 +1,6 @@
 """
 Solves next step velocity and constraint impulse, where the contact
-force satisfies the Hunt-Crossley model. The dynamcis satisfy
+force satisfies e.g. e.g. the Hunt-Crossley model. The dynamcis satisfy
     M(q) (v⁺ - v) / δt + c(q⁺, v⁺) = τ(q⁺, v⁺, u) + J(q)ᵀ γ
     q⁺ = q ⊕ δt v⁺
 where γ is the constraint impulse.
@@ -134,6 +134,50 @@ class SapFrictionConstraint(SapConstraint):
       -jax.vmap(
         lambda x: solver_sap_util.soft_normalize_grad(x, epsilon=_STICTION_TOL)
       )(vc).ravel()
+    )
+
+
+class SapLogbarrierNormalContactConstraint(SapConstraint):
+  phi0: jax.Array
+  tau: jax.Array
+  dt: jax.Array
+  contact_smoothing: jax.Array
+
+  def __post_init__(self):
+    assert self.phi0.shape == self.tau.shape
+    assert self.dt.ndim == 0
+    assert jp.isscalar(self.contact_smoothing)
+
+  @property
+  def _delta(self):
+    return self.contact_smoothing
+
+  def calc_impulse(self, vc: jax.Array) -> jax.Array:
+    assert vc.shape == self.phi0.shape
+
+    x = vc + self.phi0 / (self.dt + self.tau)
+    eps = self.contact_smoothing
+    delta = self._delta
+    k = eps / delta / delta
+
+    return jp.where(
+      x >= delta,
+      eps / x,
+      eps / delta - k * (x - delta),
+    )
+
+  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
+    assert vc.shape == self.phi0.shape
+
+    x = vc + self.phi0 / (self.dt + self.tau)
+    eps = self.contact_smoothing
+    delta = self._delta
+    k = eps / delta / delta
+
+    return jp.where(
+      x >= delta,
+      -eps / x**2,
+      -k,
     )
 
 
@@ -400,6 +444,16 @@ class Context(PyTreeNode):
           )
         )
 
+      elif contact_approx == ContactApproxType.LOG_BARRIER:
+        sap_constraints.append(
+          SapLogbarrierNormalContactConstraint(
+            phi0=d._impl.efc_pos[mask],
+            tau=d._impl.efc_b[mask] / jp.maximum(d._impl.efc_k[mask], 1e-8),
+            dt=dt,
+            contact_smoothing=m.opt._impl.contact_smoothing,
+          )
+        )
+
       else:
         raise ValueError(f'Contact approximation {contact_approx} not supported by SAP solver')
 
@@ -428,6 +482,9 @@ class Context(PyTreeNode):
             dt=dt,
           )
         )
+
+      elif contact_approx == ContactApproxType.LOG_BARRIER:
+        raise NotImplementedError()
 
       else:
         raise ValueError(f'Contact approximation {contact_approx} not supported by SAP solver')

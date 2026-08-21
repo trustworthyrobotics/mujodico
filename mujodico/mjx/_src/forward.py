@@ -62,6 +62,7 @@ _SOLVE_FUNC = {
     ContactApproxType.MUJOCO: solver.solve,
     ContactApproxType.CONIC: solver_conic.solve,
     ContactApproxType.LAGGED: solver_sap.solve,
+    ContactApproxType.LOG_BARRIER: solver_sap.solve,
 }
 
 

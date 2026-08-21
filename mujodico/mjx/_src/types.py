@@ -49,9 +49,10 @@ class ContactApproxType(enum.Enum):
   """Type of contact approximation.
   """
 
-  MUJOCO = "mujoco"
-  CONIC = "conic"
-  LAGGED = "lagged"
+  MUJOCO = 'mujoco'
+  CONIC = 'conic'
+  LAGGED = 'lagged'
+  LOG_BARRIER = "logbarrier"
 
   @classmethod
   def _resolve(cls, value: str | None):
