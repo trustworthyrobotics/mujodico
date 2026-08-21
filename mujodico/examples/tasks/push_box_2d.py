@@ -69,7 +69,7 @@ class PushBox2d(Task):
     u_ref = np.array([0.0, 0.0])
     R = np.eye(2) * 0.01
 
-    contact_smoothing = 1.0
+    contact_smoothing = 0.02
 
     super().__init__(
         model=model,
