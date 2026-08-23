@@ -58,6 +58,30 @@ def piecewise_smooth_relu_grad(x, epsilon):
   )
 
 
+def kelvin_voigt_normal_impulse(
+    vn, phi0, dt, k, tau, epsilon, next_step=True
+):
+  """Computes the Kelvin-Voigt normal contact impulse:
+      γ(φ, vₙ) = δt k relu_ε(-φ - τ vₙ),
+  where φ =
+            φ₀ + δt vₙ  if next_step,
+            φ₀          otherwise,
+  and relu_ε is a smooth approximation of ReLU.
+  """
+
+  phi = (phi0 + dt * vn) if next_step else (phi0)
+
+  return dt * k * piecewise_smooth_relu(-phi - tau * vn, epsilon)
+
+
+def kelvin_voigt_normal_impulse_grad(
+    vn, phi0, dt, k, tau, epsilon, next_step=True
+):
+  phi = (phi0 + dt * vn) if next_step else (phi0)
+
+  return dt * k * piecewise_smooth_relu_grad(-phi - tau * vn, epsilon) * -(tau + (dt if next_step else 0.0))
+
+
 def hunt_crossley_normal_impulse(
     vn, phi0, dt, k, d, epsilon1, epsilon2, next_step=True
 ):

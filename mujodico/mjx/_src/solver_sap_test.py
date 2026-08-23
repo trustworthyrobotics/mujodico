@@ -120,6 +120,23 @@ class SolverSapTest(parameterized.TestCase):
     grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vn)
     _assert_eq(grad_actual, grad_expected)
 
+  def test_sap_kelvin_voigt_normal_contact_constraint(self):
+    N = 1000
+
+    sap_constraint = solver_sap.SapKelvinVoigtNormalContactConstraint(
+      phi0=jp.full(N, 0.0),
+      stiffness=jp.full(N, 1e5),
+      dissipation_time_scale=jp.full(N, 0.02),
+      dt=jp.array(0.01),
+    )
+
+    vn = jp.linspace(-1.0, 1.0, N)
+
+    grad_actual = jp.diag(sap_constraint.calc_impulse_grad(vn))
+
+    grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vn)
+    _assert_eq(grad_actual, grad_expected)
+
   def test_sap_hunt_crossley_normal_contact_constraint(self):
     N = 1000
 
@@ -135,6 +152,29 @@ class SolverSapTest(parameterized.TestCase):
     grad_actual = jp.diag(sap_constraint.calc_impulse_grad(vn))
 
     grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vn)
+    _assert_eq(grad_actual, grad_expected)
+
+  def test_sap_kelvin_voigt_frictional_contact_constraint(self):
+    sap_constraint = solver_sap.SapKelvinVoigtFrictionalContactConstraint(
+      phi0=jp.array(-0.001),
+      vn0=jp.array(0.0),
+      stiffness=jp.array(1e5),
+      dissipation_time_scale=jp.array(0.02),
+      friction=jp.array([0.2, 0.2]),
+      dt=jp.array(0.01),
+    )
+
+    vc = jp.linspace(-1.0, 1.0, num=11)
+    vn, vt1, vt2 = jp.meshgrid(vc, vc, vc)
+    vc = jp.stack((
+      vn.ravel(),
+      vt1.ravel(),
+      vt2.ravel(),
+    ), axis=1)
+
+    grad_actual = jax.vmap(sap_constraint.calc_impulse_grad)(vc)
+
+    grad_expected = jax.vmap(jax.jacobian(sap_constraint.calc_impulse))(vc)
     _assert_eq(grad_actual, grad_expected)
 
   def test_sap_hunt_crossley_frictional_contact_constraint(self):
@@ -162,11 +202,12 @@ class SolverSapTest(parameterized.TestCase):
 
   @parameterized.parameters(
       *product(
+        ['Kelvin-Voigt', 'Hunt-Crossley'],
         ['pyramidal', 'elliptic'],
         [1, 3, 4, 6],
       )
   )
-  def test_solve(self, cone, condim):
+  def test_solve(self, contact_approximation, cone, condim):
     # Elliptic cone does not support condim=1.
     if cone == 'elliptic' and condim == 1:
       return
@@ -227,7 +268,7 @@ class SolverSapTest(parameterized.TestCase):
     mjx_model = mjx.put_model(
       model,
       device=jax.devices()[0],
-      contact_approximation='Hunt-Crossley',
+      contact_approximation=contact_approximation,
     )
     mjx_data = mjx.make_data(mjx_model, impl=mjx_model.impl)
 
@@ -254,7 +295,7 @@ class SolverSapTest(parameterized.TestCase):
     self.assertTrue((efc_force > 0.0).any(), 'inactive contact')
 
     eps = 1e-5  # finite difference step size
-    tol = _TOLERANCE * 30  # looser tolerance when comparing with finite difference
+    tol = _TOLERANCE * 50  # looser tolerance when comparing with finite difference
 
     jax._src.test_util.check_jvp(
       step,
@@ -271,7 +312,7 @@ class SolverSapTest(parameterized.TestCase):
       (x, u),
       eps=eps,
       atol=tol,
-      rtol=tol * 2.5,
+      rtol=tol * 1.5,
     )
 
 

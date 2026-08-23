@@ -51,8 +51,9 @@ class ContactApproxType(enum.Enum):
 
   MUJOCO = 'mujoco'
   CONIC = 'conic'
-  LOG_BARRIER = 'logbarrier'
-  HUNT_CROSSLEY = 'huntcrossley'
+  LOG_BARRIER = 'log-barrier'
+  KELVIN_VOIGT = 'kelvin-voigt'
+  HUNT_CROSSLEY = 'hunt-crossley'
 
   @classmethod
   def _resolve(cls, value: str | None):
@@ -62,9 +63,10 @@ class ContactApproxType(enum.Enum):
     if value is None:
       return cls.MUJOCO
 
-    name = value.lower().strip().translate(str.maketrans('', '', ' -_'))
+    trans = str.maketrans('', '', ' -_')
+    name = value.lower().translate(trans)
     for member in cls:
-      if member.value.lower() == name:
+      if member.value.lower().translate(trans) == name:
         return member
 
     raise ValueError(
