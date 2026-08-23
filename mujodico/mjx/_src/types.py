@@ -51,8 +51,8 @@ class ContactApproxType(enum.Enum):
 
   MUJOCO = 'mujoco'
   CONIC = 'conic'
-  LAGGED = 'lagged'
-  LOG_BARRIER = "logbarrier"
+  LOG_BARRIER = 'logbarrier'
+  HUNT_CROSSLEY = 'huntcrossley'
 
   @classmethod
   def _resolve(cls, value: str | None):

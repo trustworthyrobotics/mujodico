@@ -21,23 +21,6 @@ def _assert_eq(a, b):
 
 class SolverSapTest(parameterized.TestCase):
 
-  @parameterized.parameters([
-    'softplus',
-    'algebraic_smooth_relu',
-    'piecewise_smooth_relu'
-  ])
-  def test_smooth_relu(self, name):
-    val_fun = eval(f'solver_sap_util.{name}')
-    grad_fun = eval(f'solver_sap_util.{name}_grad')
-
-    x = jp.linspace(-1.0, 1.0, num=1000)
-    epsilon = 1e-3
-
-    grad_actual = grad_fun(x, epsilon)
-
-    grad_expected = jax.vmap(jax.grad(lambda x: val_fun(x, epsilon)))(x)
-    _assert_eq(grad_actual, grad_expected)
-
   def test_soft_normalize(self):
     r = jp.linspace(0.0, 1.0, num=100)
     a = jp.linspace(0.0, 2*jp.pi, num=10)
@@ -54,6 +37,23 @@ class SolverSapTest(parameterized.TestCase):
     grad_expected = jax.vmap(
       jax.jacobian(lambda x: solver_sap_util.soft_normalize(x, epsilon))
     )(x)
+    _assert_eq(grad_actual, grad_expected)
+
+  @parameterized.parameters([
+    'softplus',
+    'algebraic_smooth_relu',
+    'piecewise_smooth_relu'
+  ])
+  def test_smooth_relu(self, name):
+    val_fun = eval(f'solver_sap_util.{name}')
+    grad_fun = eval(f'solver_sap_util.{name}_grad')
+
+    x = jp.linspace(-1.0, 1.0, num=1000)
+    epsilon = 1e-3
+
+    grad_actual = grad_fun(x, epsilon)
+
+    grad_expected = jax.vmap(jax.grad(lambda x: val_fun(x, epsilon)))(x)
     _assert_eq(grad_actual, grad_expected)
 
   def test_sap_fixed_constraint(self):
@@ -88,11 +88,11 @@ class SolverSapTest(parameterized.TestCase):
     grad_grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vc)
     _assert_eq(grad_grad_actual, grad_grad_expected)
 
-  def test_sap_friction_constraint(self):
+  def test_sap_dry_friction_constraint(self):
     N = 1000
 
-    sap_constraint = solver_sap.SapFrictionConstraint(
-      frictionloss=jp.ones(N),
+    sap_constraint = solver_sap.SapDryFrictionConstraint(
+      dryfriction=jp.ones(N),
       dt=jp.array(0.01),
     )
 
@@ -110,7 +110,7 @@ class SolverSapTest(parameterized.TestCase):
       phi0=jp.full(N, 0.0),
       tau=jp.zeros(N),
       dt=jp.array(0.01),
-      contact_smoothing=1e-1,
+      contact_smoothing=jp.array(1e-1),
     )
 
     vn = jp.linspace(-1.0, 1.0, N)
@@ -120,10 +120,10 @@ class SolverSapTest(parameterized.TestCase):
     grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vn)
     _assert_eq(grad_actual, grad_expected)
 
-  def test_sap_normal_contact_constraint(self):
+  def test_sap_hunt_crossley_normal_contact_constraint(self):
     N = 1000
 
-    sap_constraint = solver_sap.SapNormalContactConstraint(
+    sap_constraint = solver_sap.SapHuntCrossleyNormalContactConstraint(
       phi0=jp.full(N, 0.0),
       stiffness=jp.full(N, 1e5),
       hunt_crossley_damping=jp.full(N, 50.0),
@@ -137,8 +137,8 @@ class SolverSapTest(parameterized.TestCase):
     grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vn)
     _assert_eq(grad_actual, grad_expected)
 
-  def test_sap_contact_lagged_constraint(self):
-    sap_constraint = solver_sap.SapContactLaggedConstraint(
+  def test_sap_hunt_crossley_frictional_contact_constraint(self):
+    sap_constraint = solver_sap.SapHuntCrossleyFrictionalContactConstraint(
       phi0=jp.array(-0.001),
       vn0=jp.array(0.0),
       stiffness=jp.array(1e5),
@@ -227,7 +227,7 @@ class SolverSapTest(parameterized.TestCase):
     mjx_model = mjx.put_model(
       model,
       device=jax.devices()[0],
-      contact_approximation='lagged',
+      contact_approximation='Hunt-Crossley',
     )
     mjx_data = mjx.make_data(mjx_model, impl=mjx_model.impl)
 

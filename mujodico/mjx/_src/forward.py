@@ -61,8 +61,8 @@ _RK4_B = np.array([1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0])
 _SOLVE_FUNC = {
     ContactApproxType.MUJOCO: solver.solve,
     ContactApproxType.CONIC: solver_conic.solve,
-    ContactApproxType.LAGGED: solver_sap.solve,
     ContactApproxType.LOG_BARRIER: solver_sap.solve,
+    ContactApproxType.HUNT_CROSSLEY: solver_sap.solve,
 }
 
 

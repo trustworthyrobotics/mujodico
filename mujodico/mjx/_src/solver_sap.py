@@ -112,25 +112,25 @@ class SapLimitConstraint(SapConstraint):
     return -self._R_inv * (vc + self.phi0 / self.dt < 0)
 
 
-class SapFrictionConstraint(SapConstraint):
-  frictionloss: jax.Array
+class SapDryFrictionConstraint(SapConstraint):
+  dryfriction: jax.Array
 
   def __post_init__(self):
-    assert self.frictionloss.ndim == 1
+    assert self.dryfriction.ndim == 1
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
-    assert vc.shape == self.frictionloss.shape
+    assert vc.shape == self.dryfriction.shape
     return (
-      self.dt * self.frictionloss *
+      self.dt * self.dryfriction *
       -jax.vmap(
         lambda x: solver_sap_util.soft_normalize(x, epsilon=_STICTION_TOL)
       )(vc).ravel()
     )
 
   def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
-    assert vc.shape == self.frictionloss.shape
+    assert vc.shape == self.dryfriction.shape
     return (
-      self.dt * self.frictionloss *
+      self.dt * self.dryfriction *
       -jax.vmap(
         lambda x: solver_sap_util.soft_normalize_grad(x, epsilon=_STICTION_TOL)
       )(vc).ravel()
@@ -146,7 +146,7 @@ class SapLogbarrierNormalContactConstraint(SapConstraint):
   def __post_init__(self):
     assert self.phi0.shape == self.tau.shape
     assert self.dt.ndim == 0
-    assert jp.isscalar(self.contact_smoothing)
+    assert self.contact_smoothing.ndim == 0
 
   @property
   def _delta(self):
@@ -181,7 +181,32 @@ class SapLogbarrierNormalContactConstraint(SapConstraint):
     )
 
 
-class SapNormalContactConstraint(SapConstraint):
+class SapLogbarrierFrictionalContactConstraint(SapConstraint):
+  phi0: jax.Array
+  vn0: jax.Array
+  friction: jax.Array
+  tau: jax.Array
+  dt: jax.Array
+  contact_smoothing: jax.Array
+
+  def __post_init__(self):
+    assert self.phi0.ndim == 0
+    assert self.vn0.ndim == 0
+    assert self.friction.ndim == 1
+    assert self.tau.ndim == 0
+    assert self.dt.ndim == 0
+    assert self.contact_smoothing.ndim == 0
+
+  def calc_impulse(self, vc: jax.Array) -> jax.Array:
+    assert vc.size == self.friction.size + 1
+    raise NotImplementedError()
+
+  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
+    assert vc.size == self.friction.size + 1
+    raise NotImplementedError()
+
+
+class SapHuntCrossleyNormalContactConstraint(SapConstraint):
   phi0: jax.Array
   stiffness: jax.Array
   hunt_crossley_damping: jax.Array
@@ -203,14 +228,14 @@ class SapNormalContactConstraint(SapConstraint):
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
     assert vc.shape == self.phi0.shape
-    return solver_sap_util.contact_normal_impulse(vn=vc, **self._params)
+    return solver_sap_util.hunt_crossley_normal_impulse(vn=vc, **self._params)
 
   def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
     assert vc.shape == self.phi0.shape
-    return solver_sap_util.contact_normal_impulse_grad(vn=vc, **self._params)
+    return solver_sap_util.hunt_crossley_normal_impulse_grad(vn=vc, **self._params)
 
 
-class SapContactLaggedConstraint(SapConstraint):
+class SapHuntCrossleyFrictionalContactConstraint(SapConstraint):
   phi0: jax.Array
   vn0: jax.Array
   stiffness: jax.Array
@@ -237,14 +262,16 @@ class SapContactLaggedConstraint(SapConstraint):
 
   @property
   def gamma_n0(self):
-    return solver_sap_util.hunt_crossley_contact_force(
-      phi=self.phi0,
+    return solver_sap_util.hunt_crossley_normal_impulse(
+      phi0=self.phi0,
       vn=self.vn0,
+      dt=self.dt,
       k=self.stiffness,
       d=self.hunt_crossley_damping,
       epsilon1=_SIGNED_DIST_TOL,
       epsilon2=_BOUNCE_SPEED_TOL,
-    ) * self.dt
+      next_step=False,
+    )
 
   @property
   def _blocks_t(self):
@@ -264,7 +291,7 @@ class SapContactLaggedConstraint(SapConstraint):
     gamma = jp.zeros(vc.size)
 
     gamma = gamma.at[0].set(
-      solver_sap_util.contact_normal_impulse(vn=vc[0], **self._params_n)
+      solver_sap_util.hunt_crossley_normal_impulse(vn=vc[0], **self._params_n)
     )
 
     gamma_n0 = self.gamma_n0
@@ -282,7 +309,7 @@ class SapContactLaggedConstraint(SapConstraint):
     grad = jp.zeros((vc.size, vc.size))
 
     grad = grad.at[0, 0].set(
-      solver_sap_util.contact_normal_impulse_grad(vn=vc[0], **self._params_n)
+      solver_sap_util.hunt_crossley_normal_impulse_grad(vn=vc[0], **self._params_n)
     )
 
     gamma_n0 = self.gamma_n0
@@ -419,8 +446,8 @@ class Context(PyTreeNode):
       efc_masks.append(mask)
 
       sap_constraints.append(
-        SapFrictionConstraint(
-          frictionloss=d._impl.efc_frictionloss[mask],
+        SapDryFrictionConstraint(
+          dryfriction=d._impl.efc_frictionloss[mask],
           dt=dt,
         )
       )
@@ -434,9 +461,19 @@ class Context(PyTreeNode):
     if mask.size:
       efc_masks.append(mask)
 
-      if contact_approx == ContactApproxType.LAGGED:
+      if contact_approx == ContactApproxType.LOG_BARRIER:
         sap_constraints.append(
-          SapNormalContactConstraint(
+          SapLogbarrierNormalContactConstraint(
+            phi0=d._impl.efc_pos[mask],
+            tau=d._impl.efc_b[mask] / jp.maximum(d._impl.efc_k[mask], 1e-8),
+            dt=dt,
+            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
+          )
+        )
+
+      elif contact_approx == ContactApproxType.HUNT_CROSSLEY:
+        sap_constraints.append(
+          SapHuntCrossleyNormalContactConstraint(
             phi0=d._impl.efc_pos[mask],
             stiffness=d._impl.efc_k[mask] * _HC_STIFFNESS_SCALE,
             hunt_crossley_damping=d._impl.efc_b[mask] * _HC_DAMPING_SCALE,
@@ -444,23 +481,10 @@ class Context(PyTreeNode):
           )
         )
 
-      elif contact_approx == ContactApproxType.LOG_BARRIER:
-        sap_constraints.append(
-          SapLogbarrierNormalContactConstraint(
-            phi0=d._impl.efc_pos[mask],
-            tau=d._impl.efc_b[mask] / jp.maximum(d._impl.efc_k[mask], 1e-8),
-            dt=dt,
-            contact_smoothing=m.opt._impl.contact_smoothing,
-          )
-        )
-
       else:
         raise ValueError(f'Contact approximation {contact_approx} not supported by SAP solver')
 
     # Elliptic contact constraint
-    if m.opt.cone == ConeType.PYRAMIDAL:
-      return sap_constraints, efc_masks
-
     contact_dim = collision_driver.make_condim(m)
     contact_efc_address = constraint.make_efc_address(m, contact_dim, efc_type)
 
@@ -468,12 +492,27 @@ class Context(PyTreeNode):
       dim = contact_dim[k]
       efc_address = contact_efc_address[k]
 
+      if efc_type[efc_address] != ConstraintType.CONTACT_ELLIPTIC:
+        continue
+
       mask = np.arange(efc_address, efc_address + dim)
       efc_masks.append(mask)
 
-      if contact_approx == ContactApproxType.LAGGED:
+      if contact_approx == ContactApproxType.LOG_BARRIER:
         sap_constraints.append(
-          SapContactLaggedConstraint(
+          SapLogbarrierFrictionalContactConstraint(
+            phi0=d._impl.efc_pos[efc_address],
+            vn0=d._impl.efc_J[efc_address] @ d.qvel,
+            friction=d._impl.contact.friction[k][:dim-1],
+            tau=d._impl.efc_b[efc_address] / jp.maximum(d._impl.efc_k[efc_address], 1e-8),
+            dt=dt,
+            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
+          )
+        )
+
+      elif contact_approx == ContactApproxType.HUNT_CROSSLEY:
+        sap_constraints.append(
+          SapHuntCrossleyFrictionalContactConstraint(
             phi0=d._impl.efc_pos[efc_address],
             vn0=d._impl.efc_J[efc_address] @ d.qvel,
             stiffness=d._impl.efc_k[efc_address] * _HC_STIFFNESS_SCALE,
@@ -482,9 +521,6 @@ class Context(PyTreeNode):
             dt=dt,
           )
         )
-
-      elif contact_approx == ContactApproxType.LOG_BARRIER:
-        raise NotImplementedError()
 
       else:
         raise ValueError(f'Contact approximation {contact_approx} not supported by SAP solver')
