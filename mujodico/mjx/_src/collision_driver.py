@@ -60,13 +60,13 @@ from mujodico.mjx._src.collision_primitive import plane_cylinder
 from mujodico.mjx._src.collision_primitive import plane_ellipsoid
 from mujodico.mjx._src.collision_primitive import plane_sphere
 from mujodico.mjx._src.collision_primitive import sphere_capsule
+from mujodico.mjx._src.collision_primitive import sphere_cylinder
 from mujodico.mjx._src.collision_primitive import sphere_sphere
 from mujodico.mjx._src.collision_sdf import capsule_cylinder
 from mujodico.mjx._src.collision_sdf import capsule_ellipsoid
 from mujodico.mjx._src.collision_sdf import cylinder_cylinder
 from mujodico.mjx._src.collision_sdf import ellipsoid_cylinder
 from mujodico.mjx._src.collision_sdf import ellipsoid_ellipsoid
-from mujodico.mjx._src.collision_sdf import sphere_cylinder
 from mujodico.mjx._src.collision_sdf import sphere_ellipsoid
 from mujodico.mjx._src.collision_types import FunctionKey
 from mujodico.mjx._src.types import Contact

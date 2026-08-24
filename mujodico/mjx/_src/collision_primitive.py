@@ -191,6 +191,126 @@ def sphere_capsule(sphere: GeomInfo, cap: GeomInfo) -> Collision:
   return dist, pos, math.make_frame(n)
 
 
+def _sphere_cylinder(
+    sphere_pos: jax.Array,
+    sphere_radius: jax.Array,
+    cylinder_pos: jax.Array,
+    cylinder_axis: jax.Array,
+    cylinder_radius: jax.Array,
+    cylinder_half_length: jax.Array,
+    fillet_radius: jax.Array,
+) -> Tuple[jax.Array, jax.Array, jax.Array]:
+  """Returns the penetration, contact point, and normal between sphere and
+  filleted cylinder."""
+
+  d = sphere_pos - cylinder_pos
+
+  # cylinder-local coordinates
+  z = jp.dot(d, cylinder_axis)
+  radial = d - z * cylinder_axis
+  radial_dir, rho = math.normalize_with_norm(radial)
+  radial_dir = jp.where(rho == 0.0, jp.array([1.0, 0.0, 0.0]), radial_dir)
+
+  # work with the positive half of the cylinder
+  z_abs = jp.abs(z)
+  z_sign = jp.where(z < 0.0, -1.0, 1.0)
+
+  # center of the fillet in the (rho, |z|) plane
+  rho_f = cylinder_radius - fillet_radius
+  z_f = cylinder_half_length - fillet_radius
+
+  # candidate 1: cylindrical side
+  side_rho = cylinder_radius
+  side_z = jp.clip(z_abs, 0.0, z_f)
+
+  side_dr = rho - side_rho
+  side_dz = z_abs - side_z
+  side_dist2 = side_dr * side_dr + side_dz * side_dz
+
+  # candidate 2: flat cap
+  cap_rho = jp.clip(rho, 0.0, rho_f)
+  cap_z = cylinder_half_length
+
+  cap_dr = rho - cap_rho
+  cap_dz = z_abs - cap_z
+  cap_dist2 = cap_dr * cap_dr + cap_dz * cap_dz
+
+  # candidate 3: filleted edge
+  fillet_dr = rho - rho_f
+  fillet_dz = z_abs - z_f
+
+  fillet_norm = math.norm(jp.array([fillet_dr, fillet_dz]))
+
+  fillet_dir_r = math.safe_div(fillet_dr, fillet_norm)
+  fillet_dir_z = math.safe_div(fillet_dz, fillet_norm)
+
+  fillet_rho = rho_f + fillet_radius * fillet_dir_r
+  fillet_z = z_f + fillet_radius * fillet_dir_z
+
+  fillet_dist2 = (rho - fillet_rho)**2 + (z_abs - fillet_z)**2
+
+  fillet_valid = (rho >= rho_f) & (z_abs >= z_f)
+  fillet_dist2 = jp.where(fillet_valid, fillet_dist2, jp.inf)
+
+  # select surface coordinates
+  use_fillet = (fillet_dist2 <= side_dist2) & (fillet_dist2 <= cap_dist2)
+
+  use_side = (side_dist2 <= cap_dist2) & (~use_fillet)
+
+  surface_rho = jp.where(
+      use_fillet,
+      fillet_rho,
+      jp.where(use_side, side_rho, cap_rho),
+  )
+
+  surface_z = jp.where(
+      use_fillet,
+      fillet_z,
+      jp.where(use_side, side_z, cap_z),
+  )
+
+  # surface normal and position
+  side_normal = radial_dir
+
+  cap_normal = z_sign * cylinder_axis
+
+  fillet_normal = fillet_dir_r * radial_dir + fillet_dir_z * z_sign * cylinder_axis
+
+  surface_normal = jp.where(
+      use_fillet,
+      fillet_normal,
+      jp.where(use_side, side_normal, cap_normal),
+  )
+
+  surface_pos = (
+      cylinder_pos
+      + surface_rho * radial_dir
+      + surface_z * z_sign * cylinder_axis
+  )
+
+  # collision distance and position
+  n = -surface_normal
+  dist = jp.dot(surface_pos - sphere_pos, n) - sphere_radius
+  pos = sphere_pos + n * (sphere_radius + 0.5 * dist)
+
+  return dist, pos, n
+
+
+@collider(ncon=1)
+def sphere_cylinder(sphere: GeomInfo, cylinder: GeomInfo) -> Collision:
+  """Calculates one contact between a sphere and a filleted cylinder."""
+  dist, pos, n = _sphere_cylinder(
+      sphere_pos=sphere.pos,
+      sphere_radius=sphere.size[0],
+      cylinder_pos=cylinder.pos,
+      cylinder_axis=cylinder.mat[:, 2],
+      cylinder_radius=cylinder.size[0],
+      cylinder_half_length=cylinder.size[1],
+      fillet_radius=jp.min(cylinder.size[0:2]) * 0.001,
+  )
+  return dist, pos, math.make_frame(n)
+
+
 @collider(ncon=1)
 def capsule_capsule(cap1: GeomInfo, cap2: GeomInfo) -> Collision:
   """Calculates one contact between two capsules."""
