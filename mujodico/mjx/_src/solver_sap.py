@@ -49,10 +49,10 @@ from mujodico.mjx._src.types import OptionJAX
 import numpy as np
 
 
-_BOUNCE_SPEED_TOL = 1e-3  # Unit: m/s
-_STICTION_TOL = 1e-3      # Unit: m/s or rad/s
-_HC_STIFFNESS_SCALE = 1e2  # Scale from mujoco stiffness to Hunt-Crossley stiffness
-_HC_DAMPING_SCALE = 1e-1   # Scale from mujoco damping to Hunt-Crossley damping
+_STICTION_TOL = 1e-3                    # Unit: m/s or rad/s
+_STIFFNESS_SCALE = 1e2                  # Scale from stiffness in mujoco to force stiffness
+_HUNT_CROSSLEY_BOUNCE_SPEED_TOL = 1e-3  # Unit: m/s
+_HUNT_CROSSLEY_DAMPING_SCALE = 1e-1     # Scale from mujoco damping to Hunt-Crossley damping
 
 
 class SapConstraint(PyTreeNode, ABC):
@@ -258,7 +258,7 @@ class SapHuntCrossleyNormalContactConstraint(SapConstraint):
       'k': self.stiffness,
       'd': self.hunt_crossley_damping,
       'contact_smoothing': self.contact_smoothing,
-      'epsilon2': _BOUNCE_SPEED_TOL,
+      'bounce_speed_tol': _HUNT_CROSSLEY_BOUNCE_SPEED_TOL,
     }
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
@@ -398,7 +398,7 @@ class SapHuntCrossleyFrictionalContactConstraint(SapLaggedContactConstraint):
       'k': self.stiffness,
       'd': self.hunt_crossley_damping,
       'contact_smoothing': self.contact_smoothing,
-      'epsilon2': _BOUNCE_SPEED_TOL,
+      'bounce_speed_tol': _HUNT_CROSSLEY_BOUNCE_SPEED_TOL,
     }
 
   def gamma_n(self, vn: jax.Array) -> jax.Array:
@@ -568,7 +568,7 @@ class Context(PyTreeNode):
         sap_constraints.append(
           SapKelvinVoigtNormalContactConstraint(
             phi0=d._impl.efc_pos[mask],
-            stiffness=d._impl.efc_k[mask] * _HC_STIFFNESS_SCALE,
+            stiffness=d._impl.efc_k[mask] * _STIFFNESS_SCALE,
             dissipation_time_scale=d._impl.efc_b[mask] / jp.maximum(d._impl.efc_k[mask], 1e-8),
             dt=dt,
             contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
@@ -579,8 +579,8 @@ class Context(PyTreeNode):
         sap_constraints.append(
           SapHuntCrossleyNormalContactConstraint(
             phi0=d._impl.efc_pos[mask],
-            stiffness=d._impl.efc_k[mask] * _HC_STIFFNESS_SCALE,
-            hunt_crossley_damping=d._impl.efc_b[mask] * _HC_DAMPING_SCALE,
+            stiffness=d._impl.efc_k[mask] * _STIFFNESS_SCALE,
+            hunt_crossley_damping=d._impl.efc_b[mask] * _HUNT_CROSSLEY_DAMPING_SCALE,
             dt=dt,
             contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
           )
@@ -620,7 +620,7 @@ class Context(PyTreeNode):
           SapKelvinVoigtFrictionalContactConstraint(
             phi0=d._impl.efc_pos[efc_address],
             vn0=d._impl.efc_J[efc_address] @ d.qvel,
-            stiffness=d._impl.efc_k[efc_address] * _HC_STIFFNESS_SCALE,
+            stiffness=d._impl.efc_k[efc_address] * _STIFFNESS_SCALE,
             dissipation_time_scale=d._impl.efc_b[efc_address] / jp.maximum(d._impl.efc_k[efc_address], 1e-8),
             friction=d._impl.contact.friction[k][:dim-1],
             dt=dt,
@@ -633,8 +633,8 @@ class Context(PyTreeNode):
           SapHuntCrossleyFrictionalContactConstraint(
             phi0=d._impl.efc_pos[efc_address],
             vn0=d._impl.efc_J[efc_address] @ d.qvel,
-            stiffness=d._impl.efc_k[efc_address] * _HC_STIFFNESS_SCALE,
-            hunt_crossley_damping=d._impl.efc_b[efc_address] * _HC_DAMPING_SCALE,
+            stiffness=d._impl.efc_k[efc_address] * _STIFFNESS_SCALE,
+            hunt_crossley_damping=d._impl.efc_b[efc_address] * _HUNT_CROSSLEY_DAMPING_SCALE,
             friction=d._impl.contact.friction[k][:dim-1],
             dt=dt,
             contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
