@@ -34,7 +34,7 @@ _XML = """
     <body name="object" pos="0 0 0">
       <joint name="object_slide_x" type="slide" axis="1 0 0" range="-1 1" />
       <joint name="object_slide_y" type="slide" axis="0 1 0" range="-1 1" />
-      <joint name="object_rotate" type="hinge" damping="0.01" />
+      <joint name="object_rotate" type="hinge" damping="0.08" />
 
       <geom name="object_geom"
             type="cylinder"
@@ -59,12 +59,12 @@ class PushBox2d(Task):
 
   def __init__(self):
     model = mujoco.MjModel.from_xml_string(_XML)
-    horizon = 500
+    horizon = 200
 
     x_0 = np.array([-0.1, -0.15, 0.1, 0.15, 1.0] + [0.0] * 5)
     x_goal = np.array([0.0, 0.0, 0.0, 0.0, 0.0] + [0.0] * 5)
-    Q = np.diag([0.0, 0.0, 1.0, 1.0, 0.1, 0.0, 0.0, 0.01, 0.01, 0.001])
-    Qf = Q * 500
+    Q = np.diag([0.0, 0.0, 5.0, 5.0, 0.1, 0.0, 0.0, 0.01, 0.01, 0.001])
+    Qf = Q * 200
 
     u_ref = np.array([0.0, 0.0])
     R = np.eye(2) * 0.01
