@@ -214,10 +214,12 @@ class SapKelvinVoigtNormalContactConstraint(SapConstraint):
   phi0: jax.Array
   stiffness: jax.Array
   dissipation_time_scale: jax.Array
+  contact_smoothing: jax.Array
 
   def __post_init__(self):
     assert self.phi0.shape == self.stiffness.shape
     assert self.phi0.shape == self.dissipation_time_scale.shape
+    assert self.contact_smoothing.ndim == 0
 
   @property
   def _params(self):
@@ -226,7 +228,7 @@ class SapKelvinVoigtNormalContactConstraint(SapConstraint):
       'dt': self.dt,
       'k': self.stiffness,
       'tau': self.dissipation_time_scale,
-      'epsilon': _SIGNED_DIST_TOL,
+      'contact_smoothing': self.contact_smoothing,
     }
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
@@ -366,6 +368,7 @@ class SapKelvinVoigtFrictionalContactConstraint(SapLaggedContactConstraint):
   vn0: jax.Array
   stiffness: jax.Array
   dissipation_time_scale: jax.Array
+  contact_smoothing: jax.Array
 
   def __post_init__(self):
     super().__post_init__()
@@ -373,6 +376,7 @@ class SapKelvinVoigtFrictionalContactConstraint(SapLaggedContactConstraint):
     assert self.vn0.ndim == 0
     assert self.stiffness.ndim == 0
     assert self.dissipation_time_scale.ndim == 0
+    assert self.contact_smoothing.ndim == 0
 
   @property
   def _params(self):
@@ -381,7 +385,7 @@ class SapKelvinVoigtFrictionalContactConstraint(SapLaggedContactConstraint):
       'dt': self.dt,
       'k': self.stiffness,
       'tau': self.dissipation_time_scale,
-      'epsilon': _SIGNED_DIST_TOL,
+      'contact_smoothing': self.contact_smoothing,
     }
 
   def gamma_n(self, vn: jax.Array) -> jax.Array:
@@ -631,6 +635,7 @@ class Context(PyTreeNode):
             stiffness=d._impl.efc_k[mask] * _HC_STIFFNESS_SCALE,
             dissipation_time_scale=d._impl.efc_b[mask] / jp.maximum(d._impl.efc_k[mask], 1e-8),
             dt=dt,
+            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
           )
         )
 
@@ -693,6 +698,7 @@ class Context(PyTreeNode):
             dissipation_time_scale=d._impl.efc_b[efc_address] / jp.maximum(d._impl.efc_k[efc_address], 1e-8),
             friction=d._impl.contact.friction[k][:dim-1],
             dt=dt,
+            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
           )
         )
 

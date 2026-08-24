@@ -58,7 +58,6 @@ def local_smooth_relu_grad(x, epsilon):
 
 
 def reciprocal_approx_relu(x, epsilon):
-  assert epsilon > 0
   return jp.where(
     x <= 0.5 * epsilon,
     0.25 * epsilon**2 / (-x + epsilon),
@@ -66,7 +65,6 @@ def reciprocal_approx_relu(x, epsilon):
   )
 
 def reciprocal_approx_relu_grad(x, epsilon):
-  assert epsilon > 0
   return jp.where(
     x <= 0.5 * epsilon,
     0.25 * epsilon**2 / (-x + epsilon)**2,
@@ -75,7 +73,7 @@ def reciprocal_approx_relu_grad(x, epsilon):
 
 
 def kelvin_voigt_normal_impulse(
-    vn, phi0, dt, k, tau, epsilon, next_step=True
+    vn, phi0, dt, k, tau, contact_smoothing, next_step=True
 ):
   """Computes the Kelvin-Voigt normal contact impulse:
       γ(φ, vₙ) = δt k relu_ε(-φ - τ vₙ),
@@ -85,17 +83,20 @@ def kelvin_voigt_normal_impulse(
   and relu_ε is a smooth approximation of ReLU.
   """
 
-  phi = (phi0 + dt * vn) if next_step else (phi0)
+  time_scale = (dt + tau) if next_step else (tau)
+  eps = jp.sqrt(contact_smoothing / (k * dt * time_scale)) * 2
 
-  return dt * k * local_smooth_relu(-phi - tau * vn, epsilon)
+  return dt * k * time_scale * reciprocal_approx_relu(-phi0 / time_scale - vn, eps)
 
 
 def kelvin_voigt_normal_impulse_grad(
-    vn, phi0, dt, k, tau, epsilon, next_step=True
+    vn, phi0, dt, k, tau, contact_smoothing, next_step=True
 ):
-  phi = (phi0 + dt * vn) if next_step else (phi0)
 
-  return dt * k * local_smooth_relu_grad(-phi - tau * vn, epsilon) * -(tau + (dt if next_step else 0.0))
+  time_scale = (dt + tau) if next_step else (tau)
+  eps = jp.sqrt(contact_smoothing / (k * dt * time_scale)) * 2
+
+  return -dt * k * time_scale * reciprocal_approx_relu_grad(-phi0 / time_scale - vn, eps)
 
 
 def hunt_crossley_normal_impulse(

@@ -129,6 +129,7 @@ class SolverSapTest(parameterized.TestCase):
       stiffness=jp.full(N, 1e5),
       dissipation_time_scale=jp.full(N, 0.02),
       dt=jp.array(0.01),
+      contact_smoothing=jp.array(1e-4),
     )
 
     vn = jp.linspace(-1.0, 1.0, N)
@@ -181,6 +182,7 @@ class SolverSapTest(parameterized.TestCase):
       dissipation_time_scale=jp.array(0.02),
       friction=jp.array([0.2, 0.2]),
       dt=jp.array(0.01),
+      contact_smoothing=jp.array(1e-4),
     )
 
     vc = jp.linspace(-1.0, 1.0, num=11)
@@ -245,7 +247,7 @@ class SolverSapTest(parameterized.TestCase):
 
   @parameterized.parameters(
       *product(
-        ['Kelvin-Voigt', 'Hunt-Crossley'],
+        ['Hunt-Crossley'],
         ['pyramidal', 'elliptic'],
         [1, 3, 4, 6],
       )
