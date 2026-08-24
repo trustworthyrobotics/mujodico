@@ -42,7 +42,8 @@ class SolverSapTest(parameterized.TestCase):
   @parameterized.parameters([
     'softplus',
     'algebraic_smooth_relu',
-    'piecewise_smooth_relu'
+    'local_smooth_relu',
+    'reciprocal_approx_relu',
   ])
   def test_smooth_relu(self, name):
     val_fun = eval(f'solver_sap_util.{name}')

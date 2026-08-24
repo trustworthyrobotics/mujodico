@@ -6,7 +6,6 @@ def soft_normalize(x, epsilon):
   x_soft_norm = jp.sqrt(x.dot(x) + epsilon**2)
   return x / x_soft_norm
 
-
 def soft_normalize_grad(x, epsilon):
   x_soft_norm = jp.sqrt(x.dot(x) + epsilon**2)
   x_soft_normalize = x / x_soft_norm
@@ -33,7 +32,7 @@ def algebraic_smooth_relu_grad(x, epsilon):
   return 0.5 * (1.0 + x / jp.sqrt(x**2 + (0.5 * epsilon)**2))
 
 
-def piecewise_smooth_relu(x, epsilon):
+def local_smooth_relu(x, epsilon):
   assert epsilon > 0
   return jp.where(
     x <= -epsilon,
@@ -45,7 +44,7 @@ def piecewise_smooth_relu(x, epsilon):
     ),
   )
 
-def piecewise_smooth_relu_grad(x, epsilon):
+def local_smooth_relu_grad(x, epsilon):
   assert epsilon > 0
   return jp.where(
     x <= -epsilon,
@@ -55,6 +54,23 @@ def piecewise_smooth_relu_grad(x, epsilon):
       (x + epsilon) / (2.0 * epsilon),
       1.0,
     ),
+  )
+
+
+def reciprocal_approx_relu(x, epsilon):
+  assert epsilon > 0
+  return jp.where(
+    x <= 0.5 * epsilon,
+    0.25 * epsilon**2 / (-x + epsilon),
+    x,
+  )
+
+def reciprocal_approx_relu_grad(x, epsilon):
+  assert epsilon > 0
+  return jp.where(
+    x <= 0.5 * epsilon,
+    0.25 * epsilon**2 / (-x + epsilon)**2,
+    1.0,
   )
 
 
@@ -71,7 +87,7 @@ def kelvin_voigt_normal_impulse(
 
   phi = (phi0 + dt * vn) if next_step else (phi0)
 
-  return dt * k * piecewise_smooth_relu(-phi - tau * vn, epsilon)
+  return dt * k * local_smooth_relu(-phi - tau * vn, epsilon)
 
 
 def kelvin_voigt_normal_impulse_grad(
@@ -79,7 +95,7 @@ def kelvin_voigt_normal_impulse_grad(
 ):
   phi = (phi0 + dt * vn) if next_step else (phi0)
 
-  return dt * k * piecewise_smooth_relu_grad(-phi - tau * vn, epsilon) * -(tau + (dt if next_step else 0.0))
+  return dt * k * local_smooth_relu_grad(-phi - tau * vn, epsilon) * -(tau + (dt if next_step else 0.0))
 
 
 def hunt_crossley_normal_impulse(
@@ -96,8 +112,8 @@ def hunt_crossley_normal_impulse(
   x1 = (-phi0 - dt * vn) if next_step else (-phi0)
   x2 = 1.0 / d - vn
 
-  g1 = piecewise_smooth_relu(x1, epsilon1)
-  g2 = piecewise_smooth_relu(x2, epsilon2)
+  g1 = local_smooth_relu(x1, epsilon1)
+  g2 = local_smooth_relu(x2, epsilon2)
 
   return dt * k * d * g1 * g2
 
@@ -108,11 +124,11 @@ def hunt_crossley_normal_impulse_grad(
   x1 = (-phi0 - dt * vn) if next_step else (-phi0)
   x2 = 1.0 / d - vn
 
-  g1 = piecewise_smooth_relu(x1, epsilon1)
-  g2 = piecewise_smooth_relu(x2, epsilon2)
+  g1 = local_smooth_relu(x1, epsilon1)
+  g2 = local_smooth_relu(x2, epsilon2)
 
-  dg1_dvn = piecewise_smooth_relu_grad(x1, epsilon1) * (-dt if next_step else 0.0)
-  dg2_dvn = piecewise_smooth_relu_grad(x2, epsilon2) * -1.0
+  dg1_dvn = local_smooth_relu_grad(x1, epsilon1) * (-dt if next_step else 0.0)
+  dg2_dvn = local_smooth_relu_grad(x2, epsilon2) * -1.0
 
   return dt * k * d * (dg1_dvn * g2 + g1 * dg2_dvn)
 
