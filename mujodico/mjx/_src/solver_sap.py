@@ -240,36 +240,6 @@ class SapKelvinVoigtNormalContactConstraint(SapConstraint):
     return solver_sap_util.kelvin_voigt_normal_impulse_grad(vn=vc, **self._params)
 
 
-class SapMixedBarrierNormalContactConstraint(SapConstraint):
-  phi0: jax.Array
-  stiffness: jax.Array
-  dissipation_time_scale: jax.Array
-  contact_smoothing: jax.Array
-
-  def __post_init__(self):
-    assert self.phi0.shape == self.stiffness.shape
-    assert self.phi0.shape == self.dissipation_time_scale.shape
-    assert self.contact_smoothing.ndim == 0
-
-  @property
-  def _params(self):
-    return {
-      'phi0': self.phi0,
-      'dt': self.dt,
-      'k': self.stiffness,
-      'tau': self.dissipation_time_scale,
-      'contact_smoothing': self.contact_smoothing,
-    }
-
-  def calc_impulse(self, vc: jax.Array) -> jax.Array:
-    assert vc.shape == self.phi0.shape
-    return solver_sap_util.mixed_barrier_normal_impulse(vn=vc, **self._params)
-
-  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
-    assert vc.shape == self.phi0.shape
-    return solver_sap_util.mixed_barrier_normal_impulse_grad(vn=vc, **self._params)
-
-
 class SapHuntCrossleyNormalContactConstraint(SapConstraint):
   phi0: jax.Array
   stiffness: jax.Array
@@ -434,45 +404,6 @@ class SapHuntCrossleyFrictionalContactConstraint(SapLaggedContactConstraint):
 
   def gamma_n0(self) -> jax.Array:
     return solver_sap_util.hunt_crossley_normal_impulse(
-      vn=self.vn0,
-      **self._params,
-      next_step=False,
-    )
-
-
-class SapMixedBarrierFrictionalContactConstraint(SapLaggedContactConstraint):
-  phi0: jax.Array
-  vn0: jax.Array
-  stiffness: jax.Array
-  dissipation_time_scale: jax.Array
-  contact_smoothing: jax.Array
-
-  def __post_init__(self):
-    super().__post_init__()
-    assert self.phi0.ndim == 0
-    assert self.vn0.ndim == 0
-    assert self.stiffness.ndim == 0
-    assert self.dissipation_time_scale.ndim == 0
-    assert self.contact_smoothing.ndim == 0
-
-  @property
-  def _params(self):
-    return {
-      'phi0': self.phi0,
-      'dt': self.dt,
-      'k': self.stiffness,
-      'tau': self.dissipation_time_scale,
-      'contact_smoothing': self.contact_smoothing,
-    }
-
-  def gamma_n(self, vn: jax.Array) -> jax.Array:
-    return solver_sap_util.mixed_barrier_normal_impulse(vn=vn, **self._params)
-
-  def gamma_n_grad(self, vn: jax.Array) -> jax.Array:
-    return solver_sap_util.mixed_barrier_normal_impulse_grad(vn=vn, **self._params)
-
-  def gamma_n0(self) -> jax.Array:
-    return solver_sap_util.mixed_barrier_normal_impulse(
       vn=self.vn0,
       **self._params,
       next_step=False,
@@ -649,17 +580,6 @@ class Context(PyTreeNode):
           )
         )
 
-      elif contact_approx == ContactApproxType.MIXED_BARRIER:
-        sap_constraints.append(
-          SapMixedBarrierNormalContactConstraint(
-            phi0=d._impl.efc_pos[mask],
-            stiffness=d._impl.efc_k[mask] * _HC_STIFFNESS_SCALE,
-            dissipation_time_scale=d._impl.efc_b[mask] / jp.maximum(d._impl.efc_k[mask], 1e-8),
-            dt=dt,
-            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
-          )
-        )
-
       else:
         raise ValueError(f'Contact approximation {contact_approx} not supported by SAP solver')
 
@@ -711,19 +631,6 @@ class Context(PyTreeNode):
             hunt_crossley_damping=d._impl.efc_b[efc_address] * _HC_DAMPING_SCALE,
             friction=d._impl.contact.friction[k][:dim-1],
             dt=dt,
-          )
-        )
-
-      elif contact_approx == ContactApproxType.KELVIN_VOIGT:
-        sap_constraints.append(
-          SapMixedBarrierFrictionalContactConstraint(
-            phi0=d._impl.efc_pos[efc_address],
-            vn0=d._impl.efc_J[efc_address] @ d.qvel,
-            stiffness=d._impl.efc_k[efc_address] * _HC_STIFFNESS_SCALE,
-            dissipation_time_scale=d._impl.efc_b[efc_address] / jp.maximum(d._impl.efc_k[efc_address], 1e-8),
-            friction=d._impl.contact.friction[k][:dim-1],
-            dt=dt,
-            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
           )
         )
 

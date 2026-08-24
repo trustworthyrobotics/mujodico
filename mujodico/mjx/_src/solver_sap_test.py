@@ -156,24 +156,6 @@ class SolverSapTest(parameterized.TestCase):
     grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vn)
     _assert_eq(grad_actual, grad_expected)
 
-  def test_sap_mixed_barrier_normal_contact_constraint(self):
-    N = 1000
-
-    sap_constraint = solver_sap.SapMixedBarrierNormalContactConstraint(
-      phi0=jp.full(N, 0.0),
-      stiffness=jp.full(N, 1e5),
-      dissipation_time_scale=jp.full(N, 0.02),
-      dt=jp.array(0.01),
-      contact_smoothing=jp.array(1e-4),
-    )
-
-    vn = jp.linspace(-1.0, 1.0, N)
-
-    grad_actual = jp.diag(sap_constraint.calc_impulse_grad(vn))
-
-    grad_expected = jax.jacobian(sap_constraint.calc_impulse)(vn)
-    _assert_eq(grad_actual, grad_expected)
-
   def test_sap_kelvin_voigt_frictional_contact_constraint(self):
     sap_constraint = solver_sap.SapKelvinVoigtFrictionalContactConstraint(
       phi0=jp.array(-0.001),
@@ -206,30 +188,6 @@ class SolverSapTest(parameterized.TestCase):
       hunt_crossley_damping=jp.array(50.0),
       friction=jp.array([0.2, 0.2]),
       dt=jp.array(0.01),
-    )
-
-    vc = jp.linspace(-1.0, 1.0, num=11)
-    vn, vt1, vt2 = jp.meshgrid(vc, vc, vc)
-    vc = jp.stack((
-      vn.ravel(),
-      vt1.ravel(),
-      vt2.ravel(),
-    ), axis=1)
-
-    grad_actual = jax.vmap(sap_constraint.calc_impulse_grad)(vc)
-
-    grad_expected = jax.vmap(jax.jacobian(sap_constraint.calc_impulse))(vc)
-    _assert_eq(grad_actual, grad_expected)
-
-  def test_sap_mixed_barrier_frictional_contact_constraint(self):
-    sap_constraint = solver_sap.SapMixedBarrierFrictionalContactConstraint(
-      phi0=jp.array(-0.001),
-      vn0=jp.array(0.0),
-      stiffness=jp.array(1e5),
-      dissipation_time_scale=jp.array(0.02),
-      friction=jp.array([0.2, 0.2]),
-      dt=jp.array(0.01),
-      contact_smoothing=jp.array(1e-4),
     )
 
     vc = jp.linspace(-1.0, 1.0, num=11)
