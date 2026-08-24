@@ -49,7 +49,6 @@ from mujodico.mjx._src.types import OptionJAX
 import numpy as np
 
 
-_SIGNED_DIST_TOL = 1e-2   # Unit: m
 _BOUNCE_SPEED_TOL = 1e-3  # Unit: m/s
 _STICTION_TOL = 1e-3      # Unit: m/s or rad/s
 _HC_STIFFNESS_SCALE = 1e2  # Scale from mujoco stiffness to Hunt-Crossley stiffness
@@ -244,10 +243,12 @@ class SapHuntCrossleyNormalContactConstraint(SapConstraint):
   phi0: jax.Array
   stiffness: jax.Array
   hunt_crossley_damping: jax.Array
+  contact_smoothing: jax.Array
 
   def __post_init__(self):
     assert self.phi0.shape == self.stiffness.shape
     assert self.phi0.shape == self.hunt_crossley_damping.shape
+    assert self.contact_smoothing.ndim == 0
 
   @property
   def _params(self):
@@ -256,17 +257,19 @@ class SapHuntCrossleyNormalContactConstraint(SapConstraint):
       'dt': self.dt,
       'k': self.stiffness,
       'd': self.hunt_crossley_damping,
-      'epsilon1': _SIGNED_DIST_TOL,
+      'contact_smoothing': self.contact_smoothing,
       'epsilon2': _BOUNCE_SPEED_TOL,
     }
 
   def calc_impulse(self, vc: jax.Array) -> jax.Array:
     assert vc.shape == self.phi0.shape
-    return solver_sap_util.hunt_crossley_normal_impulse(vn=vc, **self._params)
+    res = solver_sap_util.hunt_crossley_normal_impulse(vn=vc, **self._params)
+    return res
 
   def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
     assert vc.shape == self.phi0.shape
-    return solver_sap_util.hunt_crossley_normal_impulse_grad(vn=vc, **self._params)
+    res = solver_sap_util.hunt_crossley_normal_impulse_grad(vn=vc, **self._params)
+    return res
 
 
 class SapLaggedContactConstraint(SapConstraint):
@@ -377,6 +380,7 @@ class SapHuntCrossleyFrictionalContactConstraint(SapLaggedContactConstraint):
   vn0: jax.Array
   stiffness: jax.Array
   hunt_crossley_damping: jax.Array
+  contact_smoothing: jax.Array
 
   def __post_init__(self):
     super().__post_init__()
@@ -384,6 +388,7 @@ class SapHuntCrossleyFrictionalContactConstraint(SapLaggedContactConstraint):
     assert self.vn0.ndim == 0
     assert self.stiffness.ndim == 0
     assert self.hunt_crossley_damping.ndim == 0
+    assert self.contact_smoothing.ndim == 0
 
   @property
   def _params(self):
@@ -392,7 +397,7 @@ class SapHuntCrossleyFrictionalContactConstraint(SapLaggedContactConstraint):
       'dt': self.dt,
       'k': self.stiffness,
       'd': self.hunt_crossley_damping,
-      'epsilon1': _SIGNED_DIST_TOL,
+      'contact_smoothing': self.contact_smoothing,
       'epsilon2': _BOUNCE_SPEED_TOL,
     }
 
@@ -577,6 +582,7 @@ class Context(PyTreeNode):
             stiffness=d._impl.efc_k[mask] * _HC_STIFFNESS_SCALE,
             hunt_crossley_damping=d._impl.efc_b[mask] * _HC_DAMPING_SCALE,
             dt=dt,
+            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
           )
         )
 
@@ -631,6 +637,7 @@ class Context(PyTreeNode):
             hunt_crossley_damping=d._impl.efc_b[efc_address] * _HC_DAMPING_SCALE,
             friction=d._impl.contact.friction[k][:dim-1],
             dt=dt,
+            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
           )
         )
 

@@ -11,6 +11,8 @@ from mujodico.mjx._src import solver_sap_util
 from mujodico.mjx._src import solver_sap
 import numpy as np
 
+jax.config.update('jax_enable_x64', True)
+
 
 _TOLERANCE = 1e-5
 
@@ -147,6 +149,7 @@ class SolverSapTest(parameterized.TestCase):
       stiffness=jp.full(N, 1e5),
       hunt_crossley_damping=jp.full(N, 50.0),
       dt=jp.array(0.01),
+      contact_smoothing=jp.array(1e-4),
     )
 
     vn = jp.linspace(-1.0, 1.0, N)
@@ -188,6 +191,7 @@ class SolverSapTest(parameterized.TestCase):
       hunt_crossley_damping=jp.array(50.0),
       friction=jp.array([0.2, 0.2]),
       dt=jp.array(0.01),
+      contact_smoothing=jp.array(1e-4),
     )
 
     vc = jp.linspace(-1.0, 1.0, num=11)
@@ -205,7 +209,7 @@ class SolverSapTest(parameterized.TestCase):
 
   @parameterized.parameters(
       *product(
-        ['Hunt-Crossley'],
+        ['Kelvin-Voigt', 'Hunt-Crossley'],
         ['pyramidal', 'elliptic'],
         [1, 3, 4, 6],
       )
@@ -272,6 +276,7 @@ class SolverSapTest(parameterized.TestCase):
       model,
       device=jax.devices()[0],
       contact_approximation=contact_approximation,
+      contact_smoothing=1e-4,
     )
     mjx_data = mjx.make_data(mjx_model, impl=mjx_model.impl)
 

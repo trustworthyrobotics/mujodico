@@ -84,7 +84,7 @@ def kelvin_voigt_normal_impulse(
   """
 
   time_scale = (dt + tau) if next_step else (tau)
-  eps = jp.sqrt(contact_smoothing / (k * dt * time_scale)) * 2
+  eps = jp.sqrt(4 * contact_smoothing / (k * dt * time_scale))
 
   return dt * k * time_scale * reciprocal_approx_relu(-phi0 / time_scale - vn, eps)
 
@@ -94,13 +94,13 @@ def kelvin_voigt_normal_impulse_grad(
 ):
 
   time_scale = (dt + tau) if next_step else (tau)
-  eps = jp.sqrt(contact_smoothing / (k * dt * time_scale)) * 2
+  eps = jp.sqrt(4 * contact_smoothing / (k * dt * time_scale))
 
   return -dt * k * time_scale * reciprocal_approx_relu_grad(-phi0 / time_scale - vn, eps)
 
 
 def hunt_crossley_normal_impulse(
-    vn, phi0, dt, k, d, epsilon1, epsilon2, next_step=True
+    vn, phi0, dt, k, d, contact_smoothing, epsilon2, next_step=True
 ):
   """Computes the Hunt-Crossley normal contact impulse:
       γ(φ, vₙ) = δt k d relu_ε₁(-φ) relu_ε₂(1/d - vₙ),
@@ -110,25 +110,32 @@ def hunt_crossley_normal_impulse(
   and relu_ε is a smooth approximation of ReLU.
   """
 
-  x1 = (-phi0 - dt * vn) if next_step else (-phi0)
-  x2 = 1.0 / d - vn
+  tau = jp.where(contact_smoothing > 0, 1.0 * dt, 0.0)
+  time_scale = (dt + tau) if next_step else (tau)
 
-  g1 = local_smooth_relu(x1, epsilon1)
-  g2 = local_smooth_relu(x2, epsilon2)
+  x1 = -phi0 - time_scale * vn
+  epsilon1 = jp.sqrt(4 * contact_smoothing * time_scale / (k * dt))
 
-  return dt * k * d * g1 * g2
+  x2 = 1 / d - vn
+
+  return dt * k * d * reciprocal_approx_relu(x1, epsilon1) * local_smooth_relu(x2, epsilon2)
 
 
 def hunt_crossley_normal_impulse_grad(
-    vn, phi0, k, d, dt, epsilon1, epsilon2, next_step=True
+    vn, phi0, dt, k, d, contact_smoothing, epsilon2, next_step=True
 ):
-  x1 = (-phi0 - dt * vn) if next_step else (-phi0)
-  x2 = 1.0 / d - vn
+  tau = jp.where(contact_smoothing > 0, 1.0 * dt, 0.0)
+  time_scale = (dt + tau) if next_step else (tau)
 
-  g1 = local_smooth_relu(x1, epsilon1)
+  x1 = -phi0 - time_scale * vn
+  epsilon1 = jp.sqrt(4 * contact_smoothing * time_scale / (k * dt))
+
+  x2 = 1 / d - vn
+
+  g1 = reciprocal_approx_relu(x1, epsilon1)
   g2 = local_smooth_relu(x2, epsilon2)
 
-  dg1_dvn = local_smooth_relu_grad(x1, epsilon1) * (-dt if next_step else 0.0)
-  dg2_dvn = local_smooth_relu_grad(x2, epsilon2) * -1.0
+  dg1_dvn = reciprocal_approx_relu_grad(x1, epsilon1) * -time_scale
+  dg2_dvn = local_smooth_relu_grad(x2, epsilon2) * -1
 
   return dt * k * d * (dg1_dvn * g2 + g1 * dg2_dvn)
