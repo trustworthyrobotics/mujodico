@@ -54,6 +54,7 @@ class ContactApproxType(enum.Enum):
   LOG_BARRIER = 'log-barrier'
   KELVIN_VOIGT = 'kelvin-voigt'
   HUNT_CROSSLEY = 'hunt-crossley'
+  MIXED_BARRIER = 'mixed-barrier'
 
   @classmethod
   def _resolve(cls, value: str | None):

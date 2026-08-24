@@ -115,3 +115,33 @@ def hunt_crossley_normal_impulse_grad(
   dg2_dvn = piecewise_smooth_relu_grad(x2, epsilon2) * -1.0
 
   return dt * k * d * (dg1_dvn * g2 + g1 * dg2_dvn)
+
+
+def mixed_barrier_normal_impulse(
+    vn, phi0, dt, k, tau, contact_smoothing, next_step=True
+):
+    time_scale = (dt + tau) if next_step else (tau)
+    eps = contact_smoothing
+    delta = jp.sqrt(eps / (k * dt * time_scale))
+    x = vn + phi0 / time_scale + delta * 2
+
+    return jp.where(
+      x >= delta,
+      eps / x,
+      eps / delta - eps / delta**2 * (x - delta),
+    )
+
+
+def mixed_barrier_normal_impulse_grad(
+    vn, phi0, dt, k, tau, contact_smoothing, next_step=True
+):
+    time_scale = (dt + tau) if next_step else (tau)
+    eps = contact_smoothing
+    delta = jp.sqrt(eps / (k * dt * time_scale))
+    x = vn + phi0 / time_scale + delta * 2
+
+    return jp.where(
+      x >= delta,
+      -eps / x**2,
+      -eps / delta**2,
+    )
