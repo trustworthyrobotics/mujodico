@@ -2,6 +2,7 @@ from mujodico.examples.tasks import push_box_2d
 from mujodico.examples.tasks import push_multisphere_2d
 from mujodico.examples.tasks import push_sphere_1d
 from mujodico.examples.tasks import push_sphere_2d
+from mujodico.examples.tasks import turn_square_knob
 from mujodico.examples.tasks.task import Task as Task
 
 
@@ -10,6 +11,7 @@ _TASKS = [
     push_sphere_2d.PushSphere2d,
     push_box_2d.PushBox2d,
     push_multisphere_2d.PushMultiSphere2d,
+    turn_square_knob.TurnSquareKnob,
 ]
 
 
