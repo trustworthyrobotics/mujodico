@@ -98,18 +98,27 @@ class TurnSquareKnob(Task):
     y_range = np.rad2deg([y_min - y_pad, y_max + y_pad])
 
     fig1 = go.Figure()
-
-    fig1.add_trace(go.Scatter(x=ts[:k], y=np.rad2deg(xs[:k, 2]), name='Angle',
-                              mode='lines', line=dict(color='blue')))
-    fig1.add_trace(go.Scatter(x=t_range, y=np.rad2deg([self.x_goal[2]] * 2), name='Angle goal',
-                              mode='lines', line=dict(color='black', dash='dash')))
+    plotly_util.add_line(
+        fig=fig1,
+        x=ts[:k+1],
+        y=np.rad2deg(xs[:k+1, 2]),
+        name='Angle',
+        color='blue',
+    )
+    plotly_util.add_line(
+        fig=fig1,
+        x=t_range,
+        y=np.rad2deg([self.x_goal[2]] * 2),
+        name='Angle goal',
+        color='black',
+        linestyle='dash',
+    )
     fig1.update_layout(
         xaxis_title='Time (sec)',
         yaxis_title='Angle (deg)',
-        xaxis=dict(range=t_range),
-        yaxis=dict(range=y_range, dtick=45),
+        xaxis={'range': t_range},
+        yaxis={'range': y_range, 'dtick': 45},
     )
-
     if not hasattr(self, 'plot1'):
       server.scene.add_grid('grid')
       self.plot1 = server.gui.add_plotly(fig1, aspect=0.8)
@@ -117,26 +126,42 @@ class TurnSquareKnob(Task):
       self.plot1.figure = fig1
 
     fig2 = go.Figure()
-
-    fig2.add_trace(go.Scatter(x=xs[:k, 0], y=xs[:k, 1], name='Finger',
-                              mode='lines', line=dict(color='red')))
-    plotly_util.add_circle(fig2, x=xs[k-1, 0], y=xs[k-1, 1], r=0.02, color='red')
-
-    plotly_util.add_rectangle(fig2, x=0.0, y=0.0, theta=xs[k-1, 2],
-                              w=0.16, h=0.16, color='blue',
-                              name='Knob')
-
-    a = xs[k-1, 2]
-    plotly_util.add_rectangle(fig2, x=0.04 * np.cos(a), y=0.04 * np.sin(a), theta=a,
-                              w=0.08, h=0.003, color='black')
-
+    plotly_util.add_line(
+        fig=fig2,
+        x=xs[:k+1, 0],
+        y=xs[:k+1, 1],
+        name='Finger',
+        color='red',
+    )
+    plotly_util.add_circle(
+        fig=fig2,
+        x=xs[k, 0],
+        y=xs[k, 1],
+        r=0.02,
+        color='red',
+    )
+    plotly_util.add_rectangle(
+        fig=fig2,
+        x=0.0, y=0.0,
+        theta=xs[k, 2],
+        w=0.16, h=0.16,
+        name='Knob',
+        color='blue',
+    )
+    plotly_util.add_rectangle(
+        fig=fig2,
+        x=0.04 * np.cos(xs[k, 2]),
+        y=0.04 * np.sin(xs[k, 2]),
+        theta=xs[k, 2],
+        w=0.08, h=0.003,
+        color='black'
+    )
     fig2.update_layout(
         xaxis_title='x',
         yaxis_title='y',
-        xaxis=dict(range=[-0.5, 0.5], scaleanchor='y', scaleratio=1),
-        yaxis=dict(range=[-0.5, 0.5]),
+        xaxis={'range': [-0.5, 0.5]},
+        yaxis={'range': [-0.5, 0.5], 'scaleanchor': 'x', 'scaleratio': 1},
     )
-
     if not hasattr(self, 'plot2'):
       server.scene.add_grid('grid')
       self.plot2 = server.gui.add_plotly(fig2)

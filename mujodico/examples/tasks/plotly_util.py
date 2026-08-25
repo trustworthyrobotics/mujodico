@@ -10,29 +10,60 @@ except ImportError as e:
   ) from e
 
 
-def add_circle(fig: go.Figure, x, y, r, color="black", name=None, **kwargs):
+def add_line(
+    fig: go.Figure,
+    x, y,
+    color='black',
+    linestyle='solid',
+    name=None,
+    **kwargs
+):
+  fig.add_trace(
+    go.Scatter(
+      x=x,
+      y=y,
+      mode='lines',
+      line={'color': color, 'dash': linestyle},
+      name=name,
+      showlegend=name is not None,
+      **kwargs
+    )
+  )
+
+
+def add_circle(
+    fig: go.Figure,
+    x, y, r,
+    color='black',
+    name=None,
+    **kwargs
+):
   t = np.linspace(0, 2 * np.pi)
   fig.add_trace(
-      go.Scatter(
-          x=x + r * np.cos(t),
-          y=y + r * np.sin(t),
-          fill="toself",
-          mode="lines",
-          line=dict(color=color),
-          fillcolor=color,
-          name=name,
-          showlegend=False if name is None else True,
-          **kwargs,
-      )
+    go.Scatter(
+      x=x + r * np.cos(t),
+      y=y + r * np.sin(t),
+      fill='toself',
+      mode='lines',
+      line={'color': color},
+      fillcolor=color,
+      name=name,
+      showlegend=name is not None,
+      **kwargs,
+    )
   )
 
 
 def add_rectangle(
-    fig: go.Figure, x, y, theta, w, h, color="black", name=None, **kwargs
+    fig: go.Figure,
+    x, y, theta, w, h,
+    color='black',
+    name=None,
+    **kwargs
 ):
   corners = np.array([
-      [-w / 2, w / 2, w / 2, -w / 2, -w / 2],
-      [-h / 2, -h / 2, h / 2, h / 2, -h / 2],
+    [-w / 2, w / 2, w / 2, -w / 2, -w / 2],
+    [-h / 2, -h / 2, h / 2, h / 2, -h / 2],
   ]).T
 
   c, s = np.cos(theta), np.sin(theta)
@@ -43,15 +74,15 @@ def add_rectangle(
   pts[:, 1] += y
 
   fig.add_trace(
-      go.Scatter(
-          x=pts[:, 0],
-          y=pts[:, 1],
-          fill="toself",
-          mode="lines",
-          line=dict(color=color),
-          fillcolor=color,
-          name=name,
-          showlegend=False if name is None else True,
-          **kwargs,
-      )
+    go.Scatter(
+      x=pts[:, 0],
+      y=pts[:, 1],
+      fill='toself',
+      mode='lines',
+      line={'color': color},
+      fillcolor=color,
+      name=name,
+      showlegend=name is not None,
+      **kwargs,
+    )
   )

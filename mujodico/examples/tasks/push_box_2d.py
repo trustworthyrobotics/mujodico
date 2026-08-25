@@ -88,26 +88,51 @@ class PushBox2d(Task):
   ):
     fig = go.Figure()
 
-    fig.add_trace(go.Scatter(x=xs[:k, 0], y=xs[:k, 1], name='Pusher',
-                             mode='lines', line=dict(color='red')))
-    plotly_util.add_circle(fig, x=xs[k-1, 0], y=xs[k-1, 1], r=0.03, color='red')
-
-    fig.add_trace(go.Scatter(x=xs[:k, 2], y=xs[:k, 3], name='Object',
-                             mode='lines', line=dict(color='blue')))
-    plotly_util.add_rectangle(fig, x=xs[k-1, 2], y=xs[k-1, 3], theta=xs[k-1, 4],
-                              w=0.3, h=0.16, color='blue')
-
-    plotly_util.add_rectangle(fig, x=self.x_goal[2], y=self.x_goal[3], theta=self.x_goal[4],
-                              w=0.3, h=0.16, color='blue',
-                              name='Object goal', opacity=0.2)
-
+    plotly_util.add_line(
+        fig=fig,
+        x=xs[:k+1, 0],
+        y=xs[:k+1, 1],
+        name='Pusher',
+        color='red',
+    )
+    plotly_util.add_circle(
+        fig=fig,
+        x=xs[k, 0],
+        y=xs[k, 1],
+        r=0.03,
+        color='red',
+    )
+    plotly_util.add_line(
+        fig=fig,
+        x=xs[:k+1, 2],
+        y=xs[:k+1, 3],
+        name='Object',
+        color='blue',
+    )
+    plotly_util.add_rectangle(
+        fig=fig,
+        x=xs[k, 2],
+        y=xs[k, 3],
+        theta=xs[k, 4],
+        w=0.3, h=0.16,
+        color='blue',
+    )
+    plotly_util.add_rectangle(
+        fig=fig,
+        x=self.x_goal[2],
+        y=self.x_goal[3],
+        theta=self.x_goal[4],
+        w=0.3, h=0.16,
+        name='Object goal',
+        color='blue',
+        opacity=0.2,
+    )
     fig.update_layout(
         xaxis_title='x',
         yaxis_title='y',
-        xaxis=dict(range=[-1, 1], scaleanchor='y', scaleratio=1),
-        yaxis=dict(range=[-1, 1]),
+        xaxis={'range': [-1, 1]},
+        yaxis={'range': [-1, 1], 'scaleanchor': 'x', 'scaleratio': 1},
     )
-
     if not hasattr(self, 'plot'):
       server.scene.add_grid('grid')
       self.plot = server.gui.add_plotly(fig)

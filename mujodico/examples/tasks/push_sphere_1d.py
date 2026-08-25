@@ -91,20 +91,34 @@ class PushSphere1d(Task):
     y_range = [y_min - y_pad, y_max + y_pad]
 
     fig = go.Figure()
-
-    fig.add_trace(go.Scatter(x=ts[:k], y=xs[:k, 0], name='Pusher',
-                             mode='lines', line=dict(color='red')))
-    fig.add_trace(go.Scatter(x=ts[:k], y=xs[:k, 1], name='Object',
-                             mode='lines', line=dict(color='blue')))
-    fig.add_trace(go.Scatter(x=t_range, y=[self.x_goal[1]] * 2, name='Object goal',
-                             mode='lines', line=dict(color='black', dash='dash')))
-    fig.update_layout(
-        xaxis_title='Time',
-        yaxis_title='Position',
-        xaxis=dict(range=t_range),
-        yaxis=dict(range=y_range),
+    plotly_util.add_line(
+        fig=fig,
+        x=ts[:k+1],
+        y=xs[:k+1, 0],
+        name='Pusher',
+        color='red',
     )
-
+    plotly_util.add_line(
+        fig=fig,
+        x=ts[:k+1],
+        y=xs[:k+1, 1],
+        name='Object',
+        color='blue',
+    )
+    plotly_util.add_line(
+        fig=fig,
+        x=t_range,
+        y=[self.x_goal[1]] * 2,
+        name='Object goal',
+        color='black',
+        linestyle='dash',
+    )
+    fig.update_layout(
+        xaxis_title='Time (sec)',
+        yaxis_title='Position (m)',
+        xaxis={'range': t_range},
+        yaxis={'range': y_range},
+    )
     if not hasattr(self, 'plot'):
       server.scene.add_grid('grid')
       self.plot = server.gui.add_plotly(fig)
