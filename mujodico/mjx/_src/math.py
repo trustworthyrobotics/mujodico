@@ -310,11 +310,11 @@ def motion_cross_force(v, f):
 def orthogonals(a: jax.Array) -> Tuple[jax.Array, jax.Array]:
   """Returns orthogonal vectors `b` and `c`, given a vector `a`."""
   y, z = jp.array([0, 1, 0]), jp.array([0, 0, 1])
-  b = jp.where((-0.5 < a[1]) & (a[1] < 0.5), y, z)
-  b = b - a * a.dot(b)
-  # normalize b. however if a is a zero vector, zero b as well.
-  b = normalize(b) * jp.any(a)
-  return b, jp.cross(a, b)
+  c = jp.where((-0.5 < a[2]) & (a[2] < 0.5), z, y)
+  c = c - a * a.dot(c)
+  # normalize c. however if a is a zero vector, zero c as well.
+  c = normalize(c) * jp.any(a)
+  return jp.cross(c, a), c
 
 
 def make_frame(a: jax.Array) -> jax.Array:
