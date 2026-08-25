@@ -1,6 +1,8 @@
+from dataclasses import dataclass
 import time
 import jax
 import jax.numpy as jp
+import mujoco
 from mujodico import mjx
 from mujodico.examples.methods import support
 from mujodico.examples.tasks import Task
@@ -13,6 +15,13 @@ except ImportError as e:
       'Optional solver dependency not installed. Install it with:\n\n'
       '    pip install cyipopt'
   ) from e
+
+
+@dataclass(frozen=True)
+class SOC:
+  start_index: int
+  dim: int
+  friction: jax.Array
 
 
 class IpoptLiftedMultipleShooting:
@@ -34,13 +43,6 @@ class IpoptLiftedMultipleShooting:
         contact_smoothing=task.contact_smoothing * 0.001,
     )
 
-    mjx_smooth_model = mjx.put_model(
-        model,
-        impl=mjx_model.impl,
-        contact_approximation=contact_approx,
-        contact_smoothing=task.contact_smoothing * 0.001,
-    )
-
     mjx_data = mjx.make_data(mjx_model, impl=mjx_model.impl)
 
     N = task.horizon
@@ -53,19 +55,11 @@ class IpoptLiftedMultipleShooting:
     u_ref = jp.array(task.u_ref)
     R = jp.array(task.R)
 
-    efc_type = mjx_data._impl.efc_type
-    if jp.any(efc_type == mjx.ConstraintType.CONTACT_ELLIPTIC):
-      raise NotImplementedError(
-          'IpoptLiftedMultipleShooting does not support ellictic cone yet'
-      )
+    efc_contact_addresses, socs = self._extract_contact_indices(mjx_model, mjx_data)
 
-    efc_contact_mask = jp.bitwise_or(
-        efc_type == mjx.ConstraintType.CONTACT_FRICTIONLESS,
-        efc_type == mjx.ConstraintType.CONTACT_PYRAMIDAL,
-    )
-
-    nc = int(jp.count_nonzero(efc_contact_mask))
-    self.nc = nc
+    ncf = int(efc_contact_addresses.size)
+    self.ncf = ncf
+    nsoc = len(socs)
 
     def forward(x, u):
       nq, nv = mjx_model.nq, mjx_model.nv
@@ -73,24 +67,25 @@ class IpoptLiftedMultipleShooting:
           qpos=x[:nq], qvel=x[nq : nq + nv], act=x[nq + nv :], ctrl=u
       )
 
-      d0 = mjx.forward(mjx_model, d)
-      cf = d0._impl.efc_force[efc_contact_mask]
+      d = mjx.forward(mjx_model, d)
+      cf = d._impl.efc_force[efc_contact_addresses]
 
-      d1 = mjx.forward(mjx_smooth_model, d)
-      cf_smooth = d1._impl.efc_force[efc_contact_mask]
-
-      return (
-          jax.lax.stop_gradient(cf)
-          + cf_smooth
-          - jax.lax.stop_gradient(cf_smooth)
-      )
+      return cf
 
     def advance(x, u, cf):
       # TODO(wei-chen): consider using computed force with stop gradient instead of zero
       efc_force = jp.zeros(mjx_data._impl.nefc)
-      efc_force = efc_force.at[efc_contact_mask].set(cf)
+      efc_force = efc_force.at[efc_contact_addresses].set(cf)
 
       return support.step_given_efc_force(mjx_model, x, u, efc_force)
+
+    def soc_constraint(cf):
+      constraints = jp.zeros(nsoc)
+      for i, soc in enumerate(socs):
+        cf_n = cf[soc.start_index]
+        cf_t = cf[soc.start_index + 1 : soc.start_index + soc.dim] / soc.friction
+        constraints = constraints.at[i].set(cf_n * cf_n - cf_t.dot(cf_t))
+      return constraints
 
     def stage_objective(x, u, cf):
       return (x - x_goal).dot(Q @ (x - x_goal)) + (u - u_ref).dot(R @ (u - u_ref))
@@ -99,21 +94,26 @@ class IpoptLiftedMultipleShooting:
       return jp.concatenate([
           xnext - advance(x, u, cf),
           cf - forward(x, u),
+          soc_constraint(cf),
       ])
 
     def stage_lagrangian(var, scale1, scale0):
-      assert var.size == nx + nu + nc + nx
-      assert scale1.size == nx + nc
+      assert var.size == nx + nu + ncf + nx
+      assert scale1.size == nx + ncf + nsoc
       assert scale0.size == 1
 
       x = var[:nx]
       u = var[nx : nx + nu]
-      cf = var[nx + nu : nx + nu + nc]
-      xnext = var[nx + nu + nc :]
+      cf = var[nx + nu : nx + nu + ncf]
+      xnext = var[nx + nu + ncf :]
 
       lagrangian = stage_objective(x, u, cf) * scale0
+
+      state_constraint_scale1 = stage_constraint(x, u, cf, xnext) * scale1
       if hess_approx == support.HessianApproxType.Full:
-        lagrangian += jp.sum(stage_constraint(x, u, cf, xnext) * scale1)
+        lagrangian += jp.sum(state_constraint_scale1)
+      else:
+        lagrangian += jp.sum(state_constraint_scale1[nx + ncf:])
 
       return lagrangian
 
@@ -136,15 +136,17 @@ class IpoptLiftedMultipleShooting:
 
       def stage_constraints_jac(x, u, cf):
         A, B, C = jax.jacfwd(advance, argnums=(0, 1, 2))(x, u, cf)
-        Ac, Bc = jax.jacfwd(forward, argnums=(0, 1))(x, u)
+        Acf, Bcf = jax.jacfwd(forward, argnums=(0, 1))(x, u)
+        Jsoc = jax.jacfwd(soc_constraint)(cf)
         return jp.concatenate([
             (-A).ravel(),
             (-B).ravel(),
             (-C).ravel(),
             jp.ones(nx),
-            (-Ac).ravel(),
-            (-Bc).ravel(),
-            jp.ones(nc),
+            (-Acf).ravel(),
+            (-Bcf).ravel(),
+            jp.ones(ncf),
+            Jsoc.ravel(),
         ])
 
       per_stage_constraints_jac = jax.vmap(stage_constraints_jac)(xs[:-1], us, cfs)
@@ -153,7 +155,7 @@ class IpoptLiftedMultipleShooting:
     def lagrangian_hessian_entries(vars, lagrange, obj_factor):
       xs, us, cfs = self._unpack(vars)
 
-      lagrange = lagrange.reshape(N, nx + nc)
+      lagrange = lagrange.reshape(N, nx + ncf + nsoc)
       obj_factor = jp.repeat(obj_factor, N)
 
       def stage_lagrangian_hess(x, u, cf, xnext, scale1, scale0):
@@ -173,7 +175,7 @@ class IpoptLiftedMultipleShooting:
     vars_trace = self._pack(
         xs=jp.zeros((N + 1, nx)),
         us=jp.zeros((N, nu)),
-        cfs=jp.zeros((N, nc)),
+        cfs=jp.zeros((N, ncf)),
     )
 
     objective_grad = jax.jit(jax.grad(objective)).lower(vars_trace).compile()
@@ -181,10 +183,10 @@ class IpoptLiftedMultipleShooting:
 
     constraints = jax.jit(constraints).lower(vars_trace).compile()
     constraints_jacobian_entries = jax.jit(constraints_jacobian_entries).lower(vars_trace).compile()
-    constraints_jacobian_structure = self._constraints_jacobian_structure()
+    constraints_jacobian_structure = self._constraints_jacobian_structure(nsoc=nsoc)
 
     lagrangian_hessian_entries = jax.jit(lagrangian_hessian_entries).lower(
-        vars_trace, jp.ones(N * (nx + nc)), jp.array(1.0),
+        vars_trace, jp.ones(N * (nx + ncf + nsoc)), jp.array(1.0),
     ).compile()
     lagrangian_hessian_structure = self._lagrangian_hessian_structure()
 
@@ -248,19 +250,24 @@ class IpoptLiftedMultipleShooting:
     us_lb = np.repeat(u_lb[None, :], N, axis=0)
     us_ub = np.repeat(u_ub[None, :], N, axis=0)
 
-    cfs_lb = np.zeros((N, nc))
-    cfs_ub = np.full((N, nc), np.inf)
+    cf_lb = np.zeros(ncf)
+    cf_ub = np.full(ncf, np.inf)
+    for soc in socs:
+      cf_lb[soc.start_index + 1 : soc.start_index + soc.dim] = -np.inf
+    cfs_lb = np.repeat(cf_lb[None, :], N, axis=0)
+    cfs_ub = np.repeat(cf_ub[None, :], N, axis=0)
 
     vars_lb = self._pack(xs_lb, us_lb, cfs_lb)
     vars_ub = self._pack(xs_ub, us_ub, cfs_ub)
 
-    n_constraints = N * (nx + nc)
-    constraints_lb = np.zeros(n_constraints)
-    constraints_ub = np.zeros(n_constraints)
+    constraint_lb = np.concatenate([np.zeros(nx + ncf), np.zeros(nsoc)])
+    constraint_ub = np.concatenate([np.zeros(nx + ncf), np.full(nsoc, np.inf)])
+    constraints_lb = np.tile(constraint_lb, N)
+    constraints_ub = np.tile(constraint_ub, N)
 
     self.problem = cyipopt.Problem(
         n=vars_lb.size,
-        m=n_constraints,
+        m=constraints_lb.size,
         problem_obj=NLP(),
         lb=vars_lb,
         ub=vars_ub,
@@ -276,7 +283,7 @@ class IpoptLiftedMultipleShooting:
       iterations: int,
       **kwargs,
   ):
-    cfs_init = np.zeros((self.task.horizon, self.nc))
+    cfs_init = np.zeros((self.task.horizon, self.ncf))
     vars_init = self._pack(xs_init, us_init, cfs_init)
 
     self.problem.add_option('max_iter', iterations)
@@ -299,16 +306,60 @@ Method: {self.__class__.__name__}
 
     return np.asarray(xs_opt), np.asarray(us_opt)
 
+  def _extract_contact_indices(
+      self, mjx_model: mjx.Model, mjx_data: mjx.Data
+    ) -> tuple[np.ndarray, list[SOC]]:
+    '''
+    Returns
+      efc_contact_addresses: indices of efc_force that are contact forces
+      socs:
+        start_index: index of efc_contact_addresses that is the soc normal
+        dim: dimension of the soc
+        friction: friction coefficients of the soc
+    '''
+    efc_type = np.array(mjx_data._impl.efc_type)
+    efc_contact_addresses = np.nonzero(
+        (efc_type == mjx.ConstraintType.CONTACT_FRICTIONLESS) |
+        (efc_type == mjx.ConstraintType.CONTACT_PYRAMIDAL) |
+        (efc_type == mjx.ConstraintType.CONTACT_ELLIPTIC)
+    )[0]
+
+    contact_dim = np.array(mjx_data._impl.contact.dim)
+    contact_efc_address = np.array(mjx_data._impl.contact.efc_address)
+    contact_is_elliptic = (
+      efc_type[contact_efc_address] == mjx.ConstraintType.CONTACT_ELLIPTIC
+    )
+
+    if np.any(contact_is_elliptic):
+      mjx_data = mjx.fwd_position(mjx_model, mjx_data)
+    conic_friction = mjx_data._impl.contact.friction
+
+    socs = []
+    for i in np.nonzero(contact_is_elliptic)[0]:
+      start_index = np.nonzero(contact_efc_address[i] == efc_contact_addresses)[0][0]
+      dim = contact_dim[i]
+      soc = SOC(
+          start_index=int(start_index),
+          dim=int(dim),
+          friction=conic_friction[i, :dim-1],
+      )
+      socs.append(soc)
+
+      if not np.all(soc.friction > 1e-6):
+        raise ValueError('Near zero friction not allowed')
+
+    return efc_contact_addresses, socs
+
   def _pack(
       self,
       xs: jax.Array | np.ndarray,
       us: jax.Array | np.ndarray,
       cfs: jax.Array | np.ndarray,
   ):
-    N, nx, nu, nc = self.task.horizon, self.task.nx, self.task.nu, self.nc
+    N, nx, nu, ncf = self.task.horizon, self.task.nx, self.task.nu, self.ncf
     assert xs.shape == (N + 1, nx)
     assert us.shape == (N, nu)
-    assert cfs.shape == (N, nc)
+    assert cfs.shape == (N, ncf)
 
     cp = jp if isinstance(xs, jax.Array) else np
 
@@ -318,35 +369,37 @@ Method: {self.__class__.__name__}
     ])
 
   def _unpack(self, vars: jax.Array | jax.Array):
-    N, nx, nu, nc = self.task.horizon, self.task.nx, self.task.nu, self.nc
-    n_vars = (N + 1) * nx + N * nu + N * nc
+    N, nx, nu, ncf = self.task.horizon, self.task.nx, self.task.nu, self.ncf
+    n_vars = (N + 1) * nx + N * nu + N * ncf
     assert vars.shape == (n_vars,)
 
     cp = jp if isinstance(vars, jax.Array) else np
 
-    xucs = vars[:-nx].reshape(N, nx + nu + nc)
+    xucs = vars[:-nx].reshape(N, nx + nu + ncf)
     xs = cp.vstack((xucs[:, :nx], vars[-nx:]))
     us = xucs[:, nx : nx + nu]
     cfs = xucs[:, nx + nu :]
 
     return xs, us, cfs
 
-  def _constraints_jacobian_structure(self):
-    N, nx, nu, nc = self.task.horizon, self.task.nx, self.task.nu, self.nc
+  def _constraints_jacobian_structure(self, nsoc: int):
+    N, nx, nu, ncf = self.task.horizon, self.task.nx, self.task.nu, self.ncf
 
     xx_rows, xx_cols = np.indices((nx, nx))
     xu_rows, xu_cols = np.indices((nx, nu))
-    xc_rows, xc_cols = np.indices((nx, nc))
+    xc_rows, xc_cols = np.indices((nx, ncf))
     x_eye = np.arange(nx)
-    cx_rows, cx_cols = np.indices((nc, nx))
-    cu_rows, cu_cols = np.indices((nc, nu))
-    c_eye = np.arange(nc)
+    cx_rows, cx_cols = np.indices((ncf, nx))
+    cu_rows, cu_cols = np.indices((ncf, nu))
+    c_eye = np.arange(ncf)
+    sc_rows, sc_cols = np.indices((nsoc, ncf))
 
     xx_rows, xx_cols = xx_rows.ravel(), xx_cols.ravel()
     xu_rows, xu_cols = xu_rows.ravel(), xu_cols.ravel()
     xc_rows, xc_cols = xc_rows.ravel(), xc_cols.ravel()
     cx_rows, cx_cols = cx_rows.ravel(), cx_cols.ravel()
     cu_rows, cu_cols = cu_rows.ravel(), cu_cols.ravel()
+    sc_rows, sc_cols = sc_rows.ravel(), sc_cols.ravel()
 
     stage_rows = np.concatenate([
         xx_rows,
@@ -356,23 +409,25 @@ Method: {self.__class__.__name__}
         nx + cx_rows,
         nx + cu_rows,
         nx + c_eye,
+        nx + ncf + sc_rows,
     ])
     stage_cols = np.concatenate([
         xx_cols,
         nx + xu_cols,
         nx + nu + xc_cols,
-        nx + nu + nc + x_eye,
+        nx + nu + ncf + x_eye,
         cx_cols,
         nx + cu_cols,
         nx + nu + c_eye,
+        nx + nu + sc_cols,
     ])
 
     irow = []
     jcol = []
 
     for k in range(N):
-      row_offset = k * (nx + nc)
-      col_offset = k * (nx + nu + nc)
+      row_offset = k * (nx + ncf + nsoc)
+      col_offset = k * (nx + nu + ncf)
 
       irow.append(stage_rows + row_offset)
       jcol.append(stage_cols + col_offset)
@@ -383,9 +438,9 @@ Method: {self.__class__.__name__}
     )
 
   def _lagrangian_hessian_structure(self):
-    N, nx, nu, nc = self.task.horizon, self.task.nx, self.task.nu, self.nc
+    N, nx, nu, ncf = self.task.horizon, self.task.nx, self.task.nu, self.ncf
 
-    stage_i, stage_j = np.tril_indices(nx + nu + nc + nx)
+    stage_i, stage_j = np.tril_indices(nx + nu + ncf + nx)
     qf_i, qf_j = np.tril_indices(nx)
 
     irow = []
@@ -395,7 +450,7 @@ Method: {self.__class__.__name__}
     for _ in range(N):
       irow.append(stage_i + offset)
       jcol.append(stage_j + offset)
-      offset += nx + nu + nc
+      offset += nx + nu + ncf
 
     irow.append(qf_i + offset)
     jcol.append(qf_j + offset)
