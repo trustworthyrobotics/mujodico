@@ -81,6 +81,60 @@ class CollisionPrimitiveTest(parameterized.TestCase):
 
     _check_collision(xml, test_cases)
 
+  def test_sphere_box(self):
+    xml = """
+<mujoco>
+  <worldbody>
+    <body>
+      <joint type="free"/>
+      <geom size="0.1" type="sphere"/>
+    </body>
+    <body>
+      <joint type="free"/>
+      <geom size="1 1.5 2" type="box"/>
+    </body>
+  </worldbody>
+</mujoco>
+"""
+    test_cases = []
+    test_cases.append({
+      'qpos': _xpos_to_qpos([[1.0, 0, 0], [0, 0, 0]]),
+      'dist': -0.1,
+      'pos': [0.95, 0, 0],
+      'n': [-1, 0, 0],
+    })
+
+    n = _normalize([-1, -1, 0])
+    shift = 0.6e-3
+    sphere_pos = np.array([1.0, 1.5, 0]) + n * shift
+    dist = 1.0e-3 * (np.sqrt(2) - 1) - shift - 0.1
+    test_cases.append({
+      'qpos': _xpos_to_qpos([sphere_pos, [0, 0, 0]]),
+      'dist': dist,
+      'pos': sphere_pos + n * (0.1 + dist / 2),
+      'n': n,
+    })
+
+    n = _normalize([-1, -1, -1])
+    shift = 0.9e-3
+    sphere_pos = np.array([1.0, 1.5, 2.0]) + n * shift
+    dist = 1.0e-3 * (np.sqrt(3) - 1) - shift - 0.1
+    test_cases.append({
+      'qpos': _xpos_to_qpos([sphere_pos, [0, 0, 0]]),
+      'dist': dist,
+      'pos': sphere_pos + n * (0.1 + dist / 2),
+      'n': n,
+    })
+
+    test_cases.append({
+      'qpos': _xpos_to_qpos([[0, 0, 1.5], [0, 0, 0]]),
+      'dist': -0.6,
+      'pos': [0, 0, 1.7],
+      'n': [0, 0, -1],
+    })
+
+    _check_collision(xml, test_cases)
+
   def test_sphere_cylinder(self):
     xml = """
 <mujoco>
@@ -112,11 +166,12 @@ class CollisionPrimitiveTest(parameterized.TestCase):
 
     n = _normalize([-1, -1, 0])
     shift = 0.6e-4
+    sphere_pos = np.array([0.2, 0.1, 0]) + n * shift
     dist = 1.0e-4 * (np.sqrt(2) - 1) - shift - 0.1
     test_cases.append({
-      'qpos': _xpos_to_qpos([np.array([0.2, 0.1, 0]) + n * shift, [0, 0, 0]]),
+      'qpos': _xpos_to_qpos([sphere_pos, [0, 0, 0]]),
       'dist': dist,
-      'pos': np.array([0.2, 0.1, 0]) + n * shift + n * (0.1 + dist / 2),
+      'pos': sphere_pos + n * (0.1 + dist / 2),
       'n': n,
     })
 

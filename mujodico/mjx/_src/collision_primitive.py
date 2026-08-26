@@ -191,6 +191,83 @@ def sphere_capsule(sphere: GeomInfo, cap: GeomInfo) -> Collision:
   return dist, pos, math.make_frame(n)
 
 
+def _sphere_box(
+    sphere_pos: jax.Array,
+    sphere_radius: jax.Array,
+    box_pos: jax.Array,
+    box_mat: jax.Array,
+    box_half_size: jax.Array,
+    fillet_radius: jax.Array,
+) -> Tuple[jax.Array, jax.Array, jax.Array]:
+  """Returns the penetration, contact point, and normal between sphere and
+  filleted box."""
+
+  # sphere center in box-local coordinates
+  p = box_mat.T @ (sphere_pos - box_pos)
+
+  # filleted box = Minkowski sum of a shrunken box and a sphere
+  core_half_size = box_half_size - fillet_radius
+
+  # closest point on/inside the shrunken box.
+  q = jp.clip(p, -core_half_size, core_half_size)
+
+  # vector from the point on/inside shrunken box to the sphere center
+  delta = p - q
+  delta_normalized, delta_norm = math.normalize_with_norm(delta)
+
+  # candidate 1: sphere center outside shrunken box
+  fillet_normal = delta_normalized
+  fillet_pos = q + fillet_radius * fillet_normal
+
+  # candidate 2: sphere center inside shrunken box
+  face_distance = core_half_size - jp.abs(p)
+  face_axis = jp.argmin(face_distance)
+
+  face_sign = jp.where(p[face_axis] >= 0.0, 1.0, -1.0)
+
+  face_normal = jp.zeros(3).at[face_axis].set(face_sign)
+  face_pos = p.at[face_axis].set(face_sign * box_half_size[face_axis])
+
+  # select surface normal and position
+  use_outside = delta_norm > 0.0
+
+  surface_normal = jp.where(
+      use_outside,
+      fillet_normal,
+      face_normal,
+  )
+
+  surface_pos = jp.where(
+      use_outside,
+      fillet_pos,
+      face_pos,
+  )
+
+  # collision distance and position
+  dist = jp.dot(p - surface_pos, surface_normal) - sphere_radius
+  n = box_mat @ -surface_normal
+  pos = sphere_pos + n * (sphere_radius + 0.5 * dist)
+
+  return dist, pos, n
+
+
+@collider(ncon=1)
+def sphere_box(
+    sphere: GeomInfo,
+    box: GeomInfo,
+) -> Collision:
+  """Calculates one contact between a sphere and a filleted box."""
+  dist, pos, n = _sphere_box(
+      sphere_pos=sphere.pos,
+      sphere_radius=sphere.size[0],
+      box_pos=box.pos,
+      box_mat=box.mat,
+      box_half_size=box.size[:3],
+      fillet_radius=jp.min(box.size[:3]) * 0.001,
+  )
+  return dist, pos, math.make_frame(n)
+
+
 def _sphere_cylinder(
     sphere_pos: jax.Array,
     sphere_radius: jax.Array,

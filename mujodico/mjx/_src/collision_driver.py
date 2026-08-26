@@ -59,6 +59,7 @@ from mujodico.mjx._src.collision_primitive import plane_capsule
 from mujodico.mjx._src.collision_primitive import plane_cylinder
 from mujodico.mjx._src.collision_primitive import plane_ellipsoid
 from mujodico.mjx._src.collision_primitive import plane_sphere
+from mujodico.mjx._src.collision_primitive import sphere_box
 from mujodico.mjx._src.collision_primitive import sphere_capsule
 from mujodico.mjx._src.collision_primitive import sphere_cylinder
 from mujodico.mjx._src.collision_primitive import sphere_sphere
@@ -98,7 +99,7 @@ _COLLISION_FUNC = {
     (GeomType.SPHERE, GeomType.CAPSULE): sphere_capsule,
     (GeomType.SPHERE, GeomType.CYLINDER): sphere_cylinder,
     (GeomType.SPHERE, GeomType.ELLIPSOID): sphere_ellipsoid,
-    (GeomType.SPHERE, GeomType.BOX): sphere_convex,
+    (GeomType.SPHERE, GeomType.BOX): sphere_box,
     (GeomType.SPHERE, GeomType.MESH): sphere_convex,
     (GeomType.CAPSULE, GeomType.CAPSULE): capsule_capsule,
     (GeomType.CAPSULE, GeomType.BOX): capsule_convex,
