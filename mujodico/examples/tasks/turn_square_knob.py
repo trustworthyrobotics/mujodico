@@ -33,15 +33,14 @@ _XML = """
       <joint name="knob_rotate" type="hinge" damping="0.05" />
 
       <geom name="knob_geom"
-            type="cylinder"
-            size="0.08"
-            fromto="-0.08 0 0 0.08 0 0"
+            type="box"
+            size="0.08 0.08 0.05"
             rgba="0 0 1 1" />
 
       <geom name="angle_indicator"
             type="box"
             pos="0.04 0 0"
-            size="0.04 0.003 0.08"
+            size="0.04 0.003 0.05001"
             rgba="0 0 0 1"
             contype="0"
             conaffinity="0" />

@@ -37,9 +37,8 @@ _XML = """
       <joint name="object_rotate" type="hinge" damping="0.08" />
 
       <geom name="object_geom"
-            type="cylinder"
-            size="0.08"
-            fromto="-0.15 0 0 0.15 0 0"
+            type="box"
+            size="0.15 0.08 0.05"
             mass="1"
             rgba="0 0 1 1" />
     </body>
