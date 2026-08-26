@@ -368,7 +368,7 @@ Method: {self.__class__.__name__}
         xs[-1],
     ])
 
-  def _unpack(self, vars: jax.Array | jax.Array):
+  def _unpack(self, vars: jax.Array | np.ndarray):
     N, nx, nu, ncf = self.task.horizon, self.task.nx, self.task.nu, self.ncf
     n_vars = (N + 1) * nx + N * nu + N * ncf
     assert vars.shape == (n_vars,)

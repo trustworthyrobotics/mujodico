@@ -266,7 +266,7 @@ Method: {self.__class__.__name__}
         xs[-1],
     ])
 
-  def _unpack(self, vars: jax.Array | jax.Array):
+  def _unpack(self, vars: jax.Array | np.ndarray):
     N, nx, nu = self.task.horizon, self.task.nx, self.task.nu
     n_vars = (N + 1) * nx + N * nu
     assert vars.shape == (n_vars,)
