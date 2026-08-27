@@ -14,7 +14,6 @@ _XML = """
   <option iterations="20" tolerance="1e-5" />
 
   <default>
-    <joint damping="5"/>
     <geom condim="1" />
   </default>
 
@@ -27,27 +26,25 @@ _XML = """
       <geom name="pusher_geom"
             type="sphere"
             size="0.03"
-            mass="1"
             rgba="1 0 0 1" />
     </body>
 
     <body name="object" pos="0 0 0">
-      <joint name="object_slide_x" type="slide" axis="1 0 0" range="-1 1" />
-      <joint name="object_slide_y" type="slide" axis="0 1 0" range="-1 1" />
-      <joint name="object_rotate" type="hinge" damping="0.08" />
+      <joint name="object_slide_x" type="slide" axis="1 0 0" range="-1 1" damping="20" />
+      <joint name="object_slide_y" type="slide" axis="0 1 0" range="-1 1" damping="20" />
+      <joint name="object_rotate" type="hinge" damping="0.4" />
 
       <geom name="object_geom"
             type="box"
             size="0.15 0.08 0.05"
-            mass="1"
             rgba="0 0 1 1" />
     </body>
 
   </worldbody>
 
   <actuator>
-    <velocity name="pusher_vel_x" joint="pusher_slide_x" kv="100" ctrlrange="-1 1" />
-    <velocity name="pusher_vel_y" joint="pusher_slide_y" kv="100" ctrlrange="-1 1" />
+    <velocity name="pusher_vel_x" joint="pusher_slide_x" kv="10" ctrlrange="-0.5 0.5" />
+    <velocity name="pusher_vel_y" joint="pusher_slide_y" kv="10" ctrlrange="-0.5 0.5" />
   </actuator>
 
 </mujoco>
@@ -60,7 +57,7 @@ class PushBox2d(Task):
     model = mujoco.MjModel.from_xml_string(_XML)
     horizon = 200
 
-    x_0 = np.array([-0.1, -0.15, 0.1, 0.15, 1.0] + [0.0] * 5)
+    x_0 = np.array([-0.1, -0.15, 0.2, 0.25, 1.0] + [0.0] * 5)
     x_goal = np.array([0.0, 0.0, 0.0, 0.0, 0.0] + [0.0] * 5)
     Q = np.diag([0.0, 0.0, 5.0, 5.0, 0.1, 0.0, 0.0, 0.01, 0.01, 0.001])
     Qf = Q * 200
