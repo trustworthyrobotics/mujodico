@@ -7,7 +7,7 @@ import viser
 
 
 _XML = """
-<mujoco model="turn_square_knob">
+<mujoco model="push_square_knob">
 
   <option timestep="0.02"  />
   <option integrator="implicitfast" />
@@ -19,11 +19,11 @@ _XML = """
 
   <worldbody>
 
-    <body name="finger" pos="0 0 0">
-      <joint name="finger_slide_x" type="slide" axis="1 0 0" range="-0.5 0.5" />
-      <joint name="finger_slide_y" type="slide" axis="0 1 0" range="-0.5 0.5" />
+    <body name="pusher" pos="0 0 0">
+      <joint name="pusher_slide_x" type="slide" axis="1 0 0" range="-0.5 0.5" />
+      <joint name="pusher_slide_y" type="slide" axis="0 1 0" range="-0.5 0.5" />
 
-      <geom name="finger_geom"
+      <geom name="pusher_geom"
             type="sphere"
             size="0.02"
             rgba="1 0 0 1" />
@@ -49,15 +49,15 @@ _XML = """
   </worldbody>
 
   <actuator>
-    <velocity name="finger_vel_x" joint="finger_slide_x" kv="10" ctrlrange="-0.2 0.2" />
-    <velocity name="finger_vel_y" joint="finger_slide_y" kv="10" ctrlrange="-0.2 0.2" />
+    <velocity name="pusher_vel_x" joint="pusher_slide_x" kv="10" ctrlrange="-0.2 0.2" />
+    <velocity name="pusher_vel_y" joint="pusher_slide_y" kv="10" ctrlrange="-0.2 0.2" />
   </actuator>
 
 </mujoco>
 """
 
 
-class TurnSquareKnob(Task):
+class PushSquareKnob(Task):
 
   def __init__(self):
     model = mujoco.MjModel.from_xml_string(_XML)
@@ -129,7 +129,7 @@ class TurnSquareKnob(Task):
         fig=fig2,
         x=xs[:k+1, 0],
         y=xs[:k+1, 1],
-        name='Finger',
+        name='Pusher',
         color='red',
     )
     plotly_util.add_circle(
@@ -169,5 +169,5 @@ class TurnSquareKnob(Task):
 
 
 if __name__ == '__main__':
-  task = TurnSquareKnob()
+  task = PushSquareKnob()
   task.print_summary()
