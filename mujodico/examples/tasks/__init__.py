@@ -4,6 +4,7 @@ from mujodico.examples.tasks import push_sphere_1d
 from mujodico.examples.tasks import push_sphere_2d
 from mujodico.examples.tasks import turn_circular_knob
 from mujodico.examples.tasks import turn_square_knob
+from mujodico.examples.tasks import fingers_sphere_2d
 from mujodico.examples.tasks.task import Task as Task
 
 
@@ -14,6 +15,7 @@ _TASKS = [
     push_multisphere_2d.PushMultiSphere2d,
     turn_circular_knob.TurnCircularKnob,
     turn_square_knob.TurnSquareKnob,
+    fingers_sphere_2d.FingersSphere2d,
 ]
 
 

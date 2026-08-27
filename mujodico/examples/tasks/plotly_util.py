@@ -16,6 +16,8 @@ def add_line(
     color='black',
     linestyle='solid',
     name=None,
+    row=None,
+    col=None,
     **kwargs
 ):
   fig.add_trace(
@@ -27,7 +29,9 @@ def add_line(
       name=name,
       showlegend=name is not None,
       **kwargs
-    )
+    ),
+    row=row,
+    col=col,
   )
 
 
@@ -36,6 +40,8 @@ def add_circle(
     x, y, r,
     color='black',
     name=None,
+    row=None,
+    col=None,
     **kwargs
 ):
   t = np.linspace(0, 2 * np.pi)
@@ -50,7 +56,9 @@ def add_circle(
       name=name,
       showlegend=name is not None,
       **kwargs,
-    )
+    ),
+    row=row,
+    col=col,
   )
 
 
@@ -59,6 +67,8 @@ def add_rectangle(
     x, y, theta, w, h,
     color='black',
     name=None,
+    row=None,
+    col=None,
     **kwargs
 ):
   corners = np.array([
@@ -84,5 +94,7 @@ def add_rectangle(
       name=name,
       showlegend=name is not None,
       **kwargs,
-    )
+    ),
+    row=row,
+    col=col,
   )
