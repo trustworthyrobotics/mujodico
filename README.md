@@ -1,6 +1,6 @@
 # MuJoDiCo (Multi-Joint dynamics with Differentiable Contact)
 
-This package extends MuJoCo with differentiable contact and provides trajectory optimization algorithms for contact-rich dynamical systems.
+This package extends MuJoCo with differentiable contact dynamics and provides trajectory optimization algorithms for contact-rich dynamical systems. Gradients are computed using the implicit function theorem rather than differentiating through the solver rollout.
 
 ## Installation
 
@@ -10,7 +10,38 @@ pip install -e .
 
 ## Usage
 
-Once installed, this package can be imported via `from mujodico import mjx`, which has the same API as [mujoco-mjx](https://mujoco.readthedocs.io/en/stable/mjx.html).
+[MuJoDiCo](https://github.com/wei-chen-li/mujodico) is a drop-in replacement for [MuJoCo MJX](https://mujoco.readthedocs.io/en/stable/mjx.html). You can simply replace `from mujoco import mjx` with `from mujodico import mjx`. For example:
+
+```python
+import mujoco
+from mujodico import mjx
+
+model = mujoco.MjModel.from_xml_string(XML)
+
+mjx_model = mjx.put_model(
+    model,
+    contact_approximation='Hunt-Crossley',
+    contact_smoothing=0.0,
+)
+```
+
+### Contact Modeling
+
+MuJoDiCo provides configurable contact models through two parameters:
+
+* **`contact_approximation`** — specifies the contact model used for the dynamics. `'Hunt-Crossley'` is recommended for most applications.
+* **`contact_smoothing`** — adds artificial smoothing to the contact model to make the resulting dynamics **C¹-continuous**.
+
+The `contact_smoothing=κ` parameter controls the amount of regularization. It can be interpreted as applying a force of κ N over a distance of 1 m.
+
+For forward simulation, where differentiability is not required, use `contact_smoothing=0.0`.
+For trajectory optimization or other gradient-based methods that require C¹-continuous dynamics, `contact_smoothing=1e-5` is a good starting point, providing smooth dynamics while introducing relatively little unphysical behavior.
+
+### Examples
+
+```sh
+python -m mujodico.examples --help
+```
 
 ## Versioning
 
