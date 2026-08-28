@@ -14,7 +14,6 @@ _XML = """
   <option iterations="20" tolerance="1e-5" />
 
   <default>
-    <joint damping="5"/>
     <geom condim="1" />
   </default>
 
@@ -22,29 +21,18 @@ _XML = """
 
     <body name="pusher" pos="0 0 0">
       <joint name="pusher_slide" type="slide" axis="1 0 0" range="-2 2" />
-
-      <geom name="pusher_geom"
-            type="sphere"
-            size="0.05"
-            mass="1"
-            rgba="1 0 0 1" />
+      <geom type="sphere" size="0.05" mass="0.1" rgba="1 0 0 1" />
     </body>
 
     <body name="object" pos="0 0 0">
-      <joint name="object_slide" type="slide" axis="1 0 0" range="-2 2" />
-
-      <geom name="object_geom"
-            type="sphere"
-            size="0.05"
-            mass="1"
-            rgba="0 0 1 1" />
+      <joint name="object_slide" type="slide" axis="1 0 0" range="-2 2" damping="10" />
+      <geom type="sphere" size="0.05" mass="1" rgba="0 0 1 1" />
     </body>
 
   </worldbody>
 
   <actuator>
-    <intvelocity name="pusher_vel" joint="pusher_slide" kp="100"
-                 ctrlrange="-1 1" actrange="-1.5 1.5" />
+    <velocity name="pusher_vel" joint="pusher_slide" kv="10" ctrlrange="-2 2" />
   </actuator>
 
 </mujoco>
@@ -57,9 +45,9 @@ class PushSphere1d(Task):
     model = mujoco.MjModel.from_xml_string(_XML)
     horizon = 100
 
-    x_0 = np.array([-0.2, 0.0, 0.0, 0.0, 0.0])
-    x_goal = np.array([0.0, 1.0, 0.0, 0.0, 0.0])
-    Q = np.diag([0.0, 1.0, 0.0, 0.1, 0.0])
+    x_0 = np.array([-0.2, 0.0, 0.0, 0.0])
+    x_goal = np.array([0.0, 1.0, 0.0, 0.0])
+    Q = np.diag([0.0, 1.0, 0.0, 0.1])
     Qf = Q * 100.0
 
     u_ref = np.array([0.0])
