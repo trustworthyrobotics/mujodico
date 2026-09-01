@@ -14,15 +14,14 @@ _XML = """
   <option iterations="20" tolerance="1e-5" />
 
   <default>
-    <geom condim="3" />
+    <geom condim="3" friction="0.3" />
   </default>
 
   <worldbody>
 
     <body name="finger_link1" pos="-0.15 -0.25 0">
       <joint name="finger_joint1" type="hinge" range="-90 90" />
-      <geom type="capsule" size="0.03" fromto="0 0 0 0 0.15 0"
-            contype="0" conaffinity="0" />
+      <geom type="capsule" size="0.03" fromto="0 0 0 0 0.15 0" />
 
       <body name="finger_link2" pos="0 0.15 0">
         <joint name="finger_joint2" type="hinge" range="-90 90" />
@@ -53,7 +52,7 @@ class FingerCircularKnob(Task):
 
   def __init__(self):
     model = mujoco.MjModel.from_xml_string(_XML)
-    horizon = 200
+    horizon = 400
 
     x_0 = np.concatenate((
       np.deg2rad([30, -60]),
@@ -62,7 +61,7 @@ class FingerCircularKnob(Task):
     ))
     x_goal = np.concatenate((
       np.deg2rad([0, 0]),
-      np.deg2rad([180]),
+      np.deg2rad([360]),
       [0.0] * 3,
     ))
     Q = np.diag([0.0, 0.0, 1.0, 0.0, 0.0, 0.001])

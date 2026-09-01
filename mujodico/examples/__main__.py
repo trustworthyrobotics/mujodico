@@ -36,11 +36,10 @@ _HESS_APPROX = flags.DEFINE_string(
     'hess_approx',
     'gaussnewton',
     f'<{"|".join([t.value for t in support.HessianApproxType])}>:'
-    ' Trajectory optimization Hessian approximation.\n'
-    '(default: gaussnewton)',
+    ' Trajectory optimization Hessian approximation.'
 )
 _ITERATIONS = flags.DEFINE_integer(
-    'iterations', 100, 'Number of solver iterations', lower_bound=0,
+    'iterations', 500, 'Number of solver iterations', lower_bound=0,
 )
 
 
