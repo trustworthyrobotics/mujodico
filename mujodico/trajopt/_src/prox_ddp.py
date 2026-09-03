@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 import jax
 import jax.numpy as jp
+import numpy as np
 
 
 class ProxDDP:
@@ -70,34 +71,43 @@ class ProxDDP:
     if nu_init is None:
       nu_init = jp.zeros((self._N - 1, self._nh)), jp.zeros(self._nhf)
 
+    max_iters = 200
+
     def cond_fn(carry):
-      _, _, i = carry
-      return i < 200
+      _, _, log = carry
+      return log.iters < max_iters
 
     def body_fn(carry):
-      (x, u, lam, nu), penalty, i = carry
+      (x, u, lam, nu), penalty, log = carry
 
-      (x, u, lam_new, nu_new), iters = self._minimize_augmented_lagrangian(
+      (x, u, lam_new, nu_new), log = self._minimize_augmented_lagrangian(
           params=params,
           lam_fixed=lam,
           nu_fixed=nu,
           penalty=penalty,
           x_init=x,
           u_init=u,
+          log=log,
       )
 
       lam = lam_new
       nu = nu_new
       penalty = jp.maximum(penalty * 0.1, 1e-6)
 
-      return (x, u, lam, nu), penalty, i + iters
+      return (x, u, lam, nu), penalty, log
 
     penalty = 1.0
-    (x, u, lam, nu), penalty, iters = jax.lax.while_loop(
+    (x, u, lam, nu), penalty, log = jax.lax.while_loop(
         cond_fn,
         body_fn,
-        ((x_init, u_init, lam_init, nu_init), penalty, 0.0),
+        (
+            (x_init, u_init, lam_init, nu_init),
+            penalty,
+            Log.create(max_iters * 2),
+        ),
     )
+
+    jax.debug.callback(lambda log: print(' ' * 33 + 'ProxDDP\n' + str(log)), log)
 
     return x, u
 
@@ -110,6 +120,9 @@ class ProxDDP:
       penalty: float,
       x_init: jax.Array,
       u_init: jax.Array,
+      log: 'Log',
+      *,
+      max_iters: int = 10,
   ):
     """
     Mimimizes
@@ -133,12 +146,12 @@ class ProxDDP:
     lam = lam_fixed
     nu = nu_fixed
 
-    def cond_fn(carry):
-        _, alpha, i = carry
-        return (alpha > 1e-6) & (i < 10)
+    def cond_fn(carry: tuple[tuple, Log, int]):
+      _, log, i = carry
+      return ((i == 0) | (log.step_size > 1e-6)) & (i < max_iters)
 
-    def body_fn(carry):
-        (x, u, lam, nu), _, i = carry
+    def body_fn(carry: tuple[tuple, Log, int]):
+        (x, u, lam, nu), log, i = carry
 
         delta_x, delta_u, delta_lam, delta_nu = self._newton_direction(
             params=params,
@@ -151,7 +164,7 @@ class ProxDDP:
             nu_nominal=nu,
         )
 
-        (x, u, lam, nu), alpha = self._line_search(
+        (x, u, lam, nu), alpha, ls_iters = self._line_search(
             params=params,
             lam_fixed=lam_fixed,
             nu_fixed=nu_fixed,
@@ -166,15 +179,44 @@ class ProxDDP:
             delta_nu=delta_nu,
         )
 
-        return (x, u, lam, nu), alpha, i + 1
+        objective = (
+            jp.sum(jax.vmap(lambda xt, ut: self._ell(xt, ut, params))(x[:-1], u))
+            + self._ellf(x[-1], params)
+        )
 
-    (x, u, lam, nu), _, iters = jax.lax.while_loop(
+        objective, primal_infeasibility, dual_infeasibility \
+        = self._calc_objective_primal_dual_infeasibility(
+            params=params, penalty=penalty, x=x, u=u, lam=lam, nu=nu,
+        )
+
+        step_inf_norm = jp.maximum(
+            jp.linalg.norm(delta_x, ord=jp.inf),
+            jp.linalg.norm(delta_u, ord=jp.inf),
+        )
+
+        log = log.append(
+            objective=objective,
+            primal_infeasibility=primal_infeasibility,
+            dual_infeasibility=dual_infeasibility,
+            penalty_parameter=penalty,
+            step_inf_norm=step_inf_norm,
+            step_size=alpha,
+            line_search_trials=ls_iters,
+        )
+
+        return (x, u, lam, nu), log, i + 1
+
+    (x, u, lam, nu), log, _ = jax.lax.while_loop(
         cond_fn,
         body_fn,
-        ((x, u, lam, nu), jp.inf, 0),
+        (
+            (x, u, lam, nu),
+            log,
+            0
+        ),
     )
 
-    return (x, u, lam, nu), iters
+    return (x, u, lam, nu), log
 
 
   def _newton_direction(
@@ -343,6 +385,70 @@ class ProxDDP:
     return delta_x, delta_u, delta_lam, delta_nu
 
 
+  def _calc_objective_primal_dual_infeasibility(
+      self,
+      params: Any,
+      penalty: float,
+      x: jax.Array,
+      u: jax.Array,
+      lam: tuple[jax.Array, jax.Array],
+      nu: tuple[jax.Array, jax.Array],
+  ) -> tuple[float, float, float]:
+
+    def lagrangian_fun(x, u, lam, nu):
+      g = jax.vmap(
+          lambda xt, ut, xtp1: self._g(xt, ut, xtp1, params)
+      )(x[:-1], u, x[1:])
+      gi = self._gi(x[0], params)
+
+      h = jax.vmap(
+          lambda xt, ut: self._h(xt, ut, params)
+      )(x[:-1], u)
+      hf = self._hf(x[-1], params)
+
+      objective = (
+          jp.sum(jax.vmap(lambda xt, ut: self._ell(xt, ut, params))(x[:-1], u))
+          + self._ellf(x[-1], params)
+      )
+
+      lagrangian = (
+          objective
+          + jp.sum(g * lam[0])
+          + jp.sum(gi * lam[1])
+          + jp.sum(h * nu[0])
+          + jp.sum(hf * nu[1])
+      )
+
+      return lagrangian, (objective, g, gi, h, hf)
+
+    def inf_norm(*vecs):
+      return jp.max(jp.array([
+          jp.linalg.norm(vec.ravel(), ord=jp.inf)
+          for vec in jax.tree_util.tree_leaves(vecs)
+      ]))
+
+    (
+        (lagrangian, (objective, g, gi, h, hf)),
+        (lagrangian_x, lagrangian_u)
+    ) = jax.value_and_grad(
+        lagrangian_fun, argnums=(0, 1), has_aux=True
+    )(x, u, lam, nu)
+
+    primal_infeasibility = inf_norm(
+        g,
+        gi,
+        jp.minimum(h + penalty * nu[0], 0.0) - h,
+        jp.minimum(hf + penalty * nu[-1], 0.0) - hf,
+    )
+
+    dual_infeasibility = inf_norm(
+        lagrangian_x,
+        lagrangian_u,
+    )
+
+    return objective, primal_infeasibility, dual_infeasibility
+
+
   def _line_search(
       self,
       params: Any,
@@ -449,10 +555,118 @@ class ProxDDP:
     alpha = 1.0
     merit_trial = merit(*step(alpha))
 
-    alpha, merit_trial, _ = jax.lax.while_loop(
+    alpha, merit_trial, ls_iters = jax.lax.while_loop(
         cond_fn,
         body_fn,
-        (alpha, merit_trial, 0.0),
+        (alpha, merit_trial, 0),
     )
 
-    return step(alpha), alpha
+    alpha = jp.where(merit_trial < merit_nominal + c1 * alpha * merit_slope, alpha, alpha)
+
+    return step(alpha), alpha, ls_iters
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Log:
+  iters: int
+  _objective: jax.Array
+  _primal_infeasibility: jax.Array
+  _dual_infeasibility: jax.Array
+  _penalty_parameter: jax.Array
+  _step_inf_norm: jax.Array
+  _step_size: jax.Array
+  _line_search_trials: jax.Array
+
+  @property
+  def primal_infeasibility(self) -> jax.Array:
+    return jp.where(
+        self.iters > 0,
+        self._primal_infeasibility[self.iters - 1],
+        jp.nan,
+    )
+
+  @property
+  def dual_infeasibility(self) -> jax.Array:
+    return jp.where(
+        self.iters > 0,
+        self._dual_infeasibility[self.iters - 1],
+        jp.nan,
+    )
+
+  @property
+  def step_size(self) -> jax.Array:
+    return jp.where(
+        self.iters > 0,
+        self._step_size[self.iters - 1],
+        jp.nan,
+    )
+
+  @classmethod
+  def create(cls, capacity: int) -> 'Log':
+    return Log(
+        iters=0,
+        _objective=jp.zeros(capacity),
+        _primal_infeasibility=jp.zeros(capacity),
+        _dual_infeasibility=jp.zeros(capacity),
+        _penalty_parameter=jp.zeros(capacity),
+        _step_inf_norm=jp.zeros(capacity),
+        _step_size=jp.zeros(capacity),
+        _line_search_trials=jp.zeros(capacity, dtype=jp.int32),
+    )
+
+  def append(
+      self,
+      objective: float | jax.Array,
+      primal_infeasibility: float | jax.Array,
+      dual_infeasibility: float | jax.Array,
+      penalty_parameter: float | jax.Array,
+      step_inf_norm: float | jax.Array,
+      step_size: float | jax.Array,
+      line_search_trials: int | jax.Array,
+  ) -> 'Log':
+    i = self.iters
+    return Log(
+        iters=self.iters + 1,
+        _objective=self._objective.at[i].set(objective),
+        _primal_infeasibility=self._primal_infeasibility.at[i].set(primal_infeasibility),
+        _dual_infeasibility=self._dual_infeasibility.at[i].set(dual_infeasibility),
+        _penalty_parameter=self._penalty_parameter.at[i].set(penalty_parameter),
+        _step_inf_norm=self._step_inf_norm.at[i].set(step_inf_norm),
+        _step_size=self._step_size.at[i].set(step_size),
+        _line_search_trials=self._line_search_trials.at[i].set(line_search_trials),
+    )
+
+  def __str__(self) -> str:
+    n = int(self.iters)
+
+    if n == 0:
+        return 'No iterations.'
+
+    objective = np.array(self._objective)
+    primal_infeasibility = np.array(self._primal_infeasibility[:n])
+    dual_infeasibility = np.array(self._dual_infeasibility[:n])
+    log_penalty_parameter = np.log10(np.array(self._penalty_parameter[:n]))
+    step_inf_norm = np.array(self._step_inf_norm[:n])
+    step_size = np.array(self._step_size[:n])
+    line_search_trials = np.array(self._line_search_trials[:n])
+
+    lines = []
+    title = 'iter     objective     inf_pr    inf_du  lg(mu)   ||d||    alpha    ls'
+
+    for i in range(n):
+      if i % 10 == 0:
+        lines.append(title)
+
+      lines.append(
+          f'{i:4d}  '
+          f'{objective[i]:14.7e}  '
+          f'{primal_infeasibility[i]:8.2e}  '
+          f'{dual_infeasibility[i]:8.2e}  '
+          f'{log_penalty_parameter[i]:4.1f}  '
+          f'{step_inf_norm[i]:8.2e}  '
+          f'{step_size[i]:8.2e}  '
+          f'{line_search_trials[i]:2d}  '
+      )
+
+    return "\n".join(lines)
