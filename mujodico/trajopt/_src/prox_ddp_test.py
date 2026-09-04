@@ -1,5 +1,6 @@
 from absl.testing import absltest
 from absl.testing import parameterized
+from itertools import product
 import jax
 import jax.numpy as jp
 from mujodico import trajopt
@@ -8,26 +9,45 @@ import numpy as np
 
 class ProxDDPTest(parameterized.TestCase):
 
-  @parameterized.parameters([
-      (False, False),
-      (True, True),
-  ])
-  def test_double_integrator(self, has_stage_constraint, has_terminal_constraint):
+  @parameterized.parameters(
+      *product(
+        [False, True],
+        [False, True],
+      )
+  )
+  def test_double_integrator(self, lifted_dynamics, ineq_constraint):
     dt = 0.02
-    A = jp.array([[1, dt], [0, 1]])
-    B = jp.array([[0.5 * dt**2], [dt]])
-
-    Q = jp.diag(jp.array([1.0, 0.0]))
-    R = jp.diag(jp.array([1e-5]))
-
-    u_max = 10.0
+    a_max = 10.0
     horizon = 100
 
     x0 = jp.array([-1.0, 0.0])
-    params = (x0,)
 
-    def implicit_dynamics(x, u, xnext, params=None):
-      return xnext - (A @ x + B @ u)
+    Q = jp.diag(jp.array([1.0, 0.0]))
+    R = jp.diag(jp.array([1e-5, 0.0] if lifted_dynamics else [1e-5]))
+
+    def implicit_dynamics1(x, u, xnext, params=None):
+      q = x[0]
+      v = x[1]
+      a = u[0]
+      return jp.array([
+          xnext[1] - (v + dt * a),
+          xnext[0] - (q + dt * v + 0.5 * dt**2 * a)
+      ])
+
+    def implicit_dynamics2(x, u, xnext, params=None):
+      q = x[0]
+      v = x[1]
+      a = u[0]
+      vnext = u[1]
+      return jp.array([
+          vnext - (v + dt * a),
+          xnext[1] - vnext,
+          xnext[0] - (q + dt * vnext)
+      ])
+
+    implicit_dynamics = implicit_dynamics2 if lifted_dynamics else implicit_dynamics1
+
+    params = (x0,)
 
     def initial_state_constraint(x, params):
       x0, = params
@@ -40,15 +60,17 @@ class ProxDDPTest(parameterized.TestCase):
       return horizon * x.dot(Q @ x)
 
     def stage_constraint(x, u, params=None):
+      a = u[0]
       return jp.array([
-          u[0] - u_max,
-          -u[0] - u_max,
+          a - a_max,
+          -a - a_max,
       ])
 
     def terminal_constraint(x, params=None):
+      q = x[0]
       return jp.array([
-          x[0] - 1e-3,
-          -x[0] - 1e-3,
+          q - 1e-3,
+          -q - 1e-3,
       ])
 
     solver = trajopt.ProxDDP(
@@ -56,11 +78,11 @@ class ProxDDPTest(parameterized.TestCase):
         terminal_cost=terminal_cost,
         implicit_dynamics=implicit_dynamics,
         initial_state_constraint=initial_state_constraint,
-        stage_constraint=stage_constraint if has_stage_constraint else None,
-        terminal_constraint=terminal_constraint if has_terminal_constraint else None,
+        stage_constraint=stage_constraint if ineq_constraint else None,
+        terminal_constraint=terminal_constraint if ineq_constraint else None,
         horizon=horizon,
-        num_states=2,
-        num_controls=1,
+        num_states=Q.shape[0],
+        num_controls=R.shape[0],
         params_example=params,
     )
 
@@ -78,12 +100,11 @@ class ProxDDPTest(parameterized.TestCase):
         0.0,
         rtol=tol, atol=tol,
     )
-    if has_stage_constraint:
+    if ineq_constraint:
       np.testing.assert_array_less(
           jax.vmap(stage_constraint)(x[:-1], u),
           tol,
       )
-    if has_terminal_constraint:
       np.testing.assert_array_less(
           terminal_constraint(x[-1]),
           tol,
