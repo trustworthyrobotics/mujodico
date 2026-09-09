@@ -14,7 +14,7 @@ class ProxDDPTest(parameterized.TestCase):
       *product(
         [False, True],
         [False, True],
-        [False, ],
+        [False, True],
       )
   )
   def test_double_integrator(self, lifted_dynamics, ineq_constraint, parallel):
@@ -88,9 +88,12 @@ class ProxDDPTest(parameterized.TestCase):
         params_example=params,
     )
 
-    x, u = jax.jit(
-        lambda params: solver.solve(params, parallel=parallel)
-    )(params)
+    options = trajopt.ProxDDP.Options(
+        parallel_associative_scan=parallel,
+    )
+
+    solve = jax.jit(solver.solve, static_argnames=('options',))
+    x, u = solve(params, options=options)
 
     tol = 1.2e-3
 

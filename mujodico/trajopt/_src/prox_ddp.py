@@ -54,6 +54,13 @@ class ProxDDP:
     self._nhf = self._hf(x, params).size
 
 
+  @dataclass(frozen=True)
+  class Options:
+    max_iters: int = 500
+    parallel_associative_scan: bool = True
+    verbose: bool = True
+
+
   def solve(
       self,
       params: Any,
@@ -61,23 +68,20 @@ class ProxDDP:
       u_init: jax.Array | None = None,
       lam_init: tuple[jax.Array, jax.Array] | None = None,
       nu_init: tuple[jax.Array, jax.Array] | None = None,
-      *,
-      parallel: bool = True,
+      options: Options = Options(),
   ):
     if x_init is None:
-      x_init = jp.zeros((self._N, self._nx))
+      x_init = jp.zeros((self._N + 1, self._nx))
     if u_init is None:
-      u_init = jp.zeros((self._N - 1, self._nu))
+      u_init = jp.zeros((self._N, self._nu))
     if lam_init is None:
-      lam_init = jp.zeros((self._N - 1, self._ng)), jp.zeros(self._ngi)
+      lam_init = jp.zeros((self._N, self._ng)), jp.zeros(self._ngi)
     if nu_init is None:
-      nu_init = jp.zeros((self._N - 1, self._nh)), jp.zeros(self._nhf)
-
-    max_iters = 200
+      nu_init = jp.zeros((self._N, self._nh)), jp.zeros(self._nhf)
 
     def cond_fn(carry):
       _, _, log = carry
-      return log.iters < max_iters
+      return log.iters < options.max_iters
 
     def body_fn(carry):
       (x, u, lam, nu), penalty, log = carry
@@ -90,7 +94,7 @@ class ProxDDP:
           x_init=x,
           u_init=u,
           log=log,
-          parallel=parallel,
+          parallel=options.parallel_associative_scan,
       )
 
       lam = lam_new
@@ -106,11 +110,12 @@ class ProxDDP:
         (
             (x_init, u_init, lam_init, nu_init),
             penalty,
-            Log.create(max_iters * 2),
+            Log.create(options.max_iters * 2),
         ),
     )
 
-    jax.debug.callback(lambda log: print(' ' * 33 + 'ProxDDP\n' + str(log)), log)
+    if options.verbose:
+      jax.debug.callback(lambda log: print(' ' * 33 + 'ProxDDP\n' + str(log)), log)
 
     return x, u
 
@@ -137,13 +142,13 @@ class ProxDDP:
             + 1/(2μ) ‖[hf(x_N) + μ ν_N]₊‖²
     where μ is the penalty parameter.
     """
-    assert lam_proximal[0].shape == (self._N - 1, self._ng)
+    assert lam_proximal[0].shape == (self._N, self._ng)
     assert lam_proximal[1].shape == (self._ngi,)
-    assert nu_proximal[0].shape == (self._N - 1, self._nh)
+    assert nu_proximal[0].shape == (self._N, self._nh)
     assert nu_proximal[1].shape == (self._nhf,)
     assert jp.isscalar(penalty)
-    assert x_init.shape == (self._N, self._nx)
-    assert u_init.shape == (self._N - 1, self._nu)
+    assert x_init.shape == (self._N + 1, self._nx)
+    assert u_init.shape == (self._N, self._nu)
 
     x = x_init
     u = u_init
