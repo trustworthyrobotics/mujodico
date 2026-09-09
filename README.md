@@ -10,9 +10,11 @@ pip install -e .
 
 ## Usage
 
-[MuJoDiCo](https://github.com/wei-chen-li/mujodico) is a drop-in replacement for [MuJoCo MJX](https://mujoco.readthedocs.io/en/stable/mjx.html). You can simply replace `from mujoco import mjx` with `from mujodico import mjx`. For example:
+[MuJoDiCo](https://github.com/wei-chen-li/mujodico) is a drop-in replacement for [MuJoCo MJX](https://mujoco.readthedocs.io/en/stable/mjx.html) that provides differentiable contact dynamics. You can simply replace `from mujoco import mjx` with `from mujodico import mjx`. For example:
 
 ```python
+import jax
+import jax.numpy as jnp
 import mujoco
 from mujodico import mjx
 
@@ -23,7 +25,22 @@ mjx_model = mjx.put_model(
     contact_approximation='Hunt-Crossley',
     contact_smoothing=0.0,
 )
+
+def f(x, u):
+    nq, nv = mjx_model.nq, mjx_model.nv
+    d = mjx.make_data(mjx_model)
+    d = d.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
+    d = mjx.step(mjx_model, d)
+    x_next = jnp.concatenate((d.qpos, d.qvel, d.act))
+    return x_next
+
+x = jnp.zeros(mjx_model.nq + mjx_model.nv + mjx_model.na)
+u = jnp.zeros(mjx_model.nu)
+
+A, B = jax.jacfwd(f, argnums=(0,1))(x, u)
 ```
+
+MuJoDiCo computes dynamics Jacobian using the implicit function theorem. Both forward-mode (`jax.jacfwd`) and reverse-mode (`jax.jacrev`) differentiation are supported.
 
 ### Contact Modeling
 
@@ -32,7 +49,7 @@ MuJoDiCo provides configurable contact models through two parameters:
 * **`contact_approximation`** — specifies the contact model used for the dynamics. `'Hunt-Crossley'` is recommended for most applications.
 * **`contact_smoothing`** — adds artificial smoothing to the contact model to make the resulting dynamics **C¹-continuous**.
 
-The `contact_smoothing=κ` parameter controls the amount of regularization. It can be interpreted as applying a force of κ N over a distance of 1 m.
+The `contact_smoothing=κ` parameter controls the amount of regularization. It can be interpreted as applying a force of κ newtons over a distance of 1 meter.
 
 For forward simulation, where differentiability is not required, use `contact_smoothing=0.0`.
 For trajectory optimization or other gradient-based methods that require C¹-continuous dynamics, `contact_smoothing=1e-5` is a good starting point, providing smooth dynamics while introducing relatively little unphysical behavior.
