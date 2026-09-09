@@ -82,8 +82,8 @@ class ProxDDP:
 
       (x, u, lam_new, nu_new), log = self._minimize_augmented_lagrangian(
           params=params,
-          lam_fixed=lam,
-          nu_fixed=nu,
+          lam_proximal=lam,
+          nu_proximal=nu,
           penalty=penalty,
           x_init=x,
           u_init=u,
@@ -115,8 +115,8 @@ class ProxDDP:
   def _minimize_augmented_lagrangian(
       self,
       params: Any,
-      lam_fixed: tuple[jax.Array, jax.Array],
-      nu_fixed: tuple[jax.Array, jax.Array],
+      lam_proximal: tuple[jax.Array, jax.Array],
+      nu_proximal: tuple[jax.Array, jax.Array],
       penalty: float,
       x_init: jax.Array,
       u_init: jax.Array,
@@ -133,18 +133,18 @@ class ProxDDP:
             + 1/(2μ) ‖[hf(x_N) + μ ν_N]₊‖²
     where μ is the penalty parameter.
     """
-    assert lam_fixed[0].shape == (self._N - 1, self._ng)
-    assert lam_fixed[1].shape == (self._ngi,)
-    assert nu_fixed[0].shape == (self._N - 1, self._nh)
-    assert nu_fixed[1].shape == (self._nhf,)
+    assert lam_proximal[0].shape == (self._N - 1, self._ng)
+    assert lam_proximal[1].shape == (self._ngi,)
+    assert nu_proximal[0].shape == (self._N - 1, self._nh)
+    assert nu_proximal[1].shape == (self._nhf,)
     assert jp.isscalar(penalty)
     assert x_init.shape == (self._N, self._nx)
     assert u_init.shape == (self._N - 1, self._nu)
 
     x = x_init
     u = u_init
-    lam = lam_fixed
-    nu = nu_fixed
+    lam = lam_proximal
+    nu = nu_proximal
 
     def cond_fn(carry: tuple[tuple, Log, int]):
       _, log, i = carry
@@ -153,10 +153,10 @@ class ProxDDP:
     def body_fn(carry: tuple[tuple, Log, int]):
         (x, u, lam, nu), log, i = carry
 
-        delta_x, delta_u, delta_lam, delta_nu = self._newton_direction(
+        delta_x, delta_u, delta_lam, delta_nu = self._newton_direction_serial(
             params=params,
-            lam_fixed=lam_fixed,
-            nu_fixed=nu_fixed,
+            lam_proximal=lam_proximal,
+            nu_proximal=nu_proximal,
             penalty=penalty,
             x_nominal=x,
             u_nominal=u,
@@ -166,8 +166,8 @@ class ProxDDP:
 
         (x, u, lam, nu), alpha, ls_iters = self._line_search(
             params=params,
-            lam_fixed=lam_fixed,
-            nu_fixed=nu_fixed,
+            lam_proximal=lam_proximal,
+            nu_proximal=nu_proximal,
             penalty=penalty,
             x_nominal=x,
             u_nominal=u,
@@ -219,11 +219,11 @@ class ProxDDP:
     return (x, u, lam, nu), log
 
 
-  def _newton_direction(
+  def _newton_direction_serial(
       self,
       params: Any,
-      lam_fixed: tuple[jax.Array, jax.Array],
-      nu_fixed: tuple[jax.Array, jax.Array],
+      lam_proximal: tuple[jax.Array, jax.Array],
+      nu_proximal: tuple[jax.Array, jax.Array],
       penalty: float,
       x_nominal: jax.Array,
       u_nominal: jax.Array,
@@ -234,27 +234,35 @@ class ProxDDP:
     _ng = self._ng
     _nh = self._nh
 
-    xN = x_nominal[-1]
-    ellf_x = jax.grad(self._ellf)(xN, params)
-    ellf_xx = jax.hessian(self._ellf)(xN, params)
-    hf = self._hf(xN, params)
-    hf_x = jax.jacfwd(self._hf)(xN, params)
+    def terminal_stage(xN, nuf_proximal, nuf):
+      ellf_x = jax.grad(self._ellf)(xN, params)
+      ellf_xx = jax.hessian(self._ellf)(xN, params)
+      hf_x = jax.jacfwd(self._hf)(xN, params)
 
-    nuf_fixed = nu_fixed[-1]
-    nuf_plus = nuf_fixed + hf / penalty
-    active = nuf_plus > 0
-    nuf_plus = jp.where(active, nuf_plus, 0.0)
+      hf = self._hf(xN, params)
+      nuf_plus = nuf_proximal + hf / penalty
+      active = nuf_plus > 0
+      nuf_plus = jp.where(active, nuf_plus, 0.0)
 
-    nuf = nu_nominal[-1]
-    c = nuf_plus - nuf
-    C = (hf_x * active[:, None]) / penalty
+      hf_x = hf_x * active[:, None]
 
-    V_x = ellf_x + (hf_x.T * active) @ nuf_plus
-    V_xx = ellf_xx + (hf_x.T * active) @ hf_x / penalty
+      V_x = ellf_x + hf_x.T @ nuf_plus
+      V_xx = ellf_xx + hf_x.T @ hf_x / penalty
+
+      knuf = nuf_plus - nuf
+      Knuf = (hf_x * active[:, None]) / penalty
+
+      return V_x, V_xx, knuf, Knuf
+
+    V_x, V_xx, knuf, Knuf = terminal_stage(
+        xN=x_nominal[-1],
+        nuf_proximal=nu_proximal[-1],
+        nuf=nu_nominal[-1],
+    )
 
     def backward_step(carry, input):
       V_x, V_xx = carry
-      xt, ut, yt, lamt, nut, lamt_fixed, nut_fixed = input
+      xt, ut, yt, lamt, nut, lamt_proximal, nut_proximal = input
 
       ell_x, ell_u = jax.grad(self._ell, argnums=(0,1))(xt, ut, params)
 
@@ -266,9 +274,9 @@ class ProxDDP:
       h = self._h(xt, ut, params)
       h_x, h_u = jax.jacfwd(self._h, argnums=(0,1))(xt, ut, params)
 
-      lamt_plus = lamt_fixed + g / penalty
+      lamt_plus = lamt_proximal + g / penalty
 
-      nut_plus = nut_fixed + h / penalty
+      nut_plus = nut_proximal + h / penalty
       active = nut_plus > 0
       nut_plus = jp.where(active, nut_plus, 0.0)
 
@@ -331,31 +339,37 @@ class ProxDDP:
             x_nominal[1:],
             lam_nominal[0],
             nu_nominal[0],
-            lam_fixed[0],
-            nu_fixed[0],
+            lam_proximal[0],
+            nu_proximal[0],
         ),
         reverse=True,
     )
 
-    x0 = x_nominal[0]
-    gi = self._gi(x0, params)
-    gi_x = jax.jacfwd(self._gi)(x0, params)
+    def initial_stage(x0, lami_proximal, lami, V0_x, V0_xx):
+      gi = self._gi(x0, params)
+      gi_x = jax.jacfwd(self._gi)(x0, params)
 
-    lami = lam_nominal[-1]
-    lami_fixed = lam_fixed[-1]
+      delta_x0, delta_lami = jp.split(
+          jax.scipy.linalg.solve(
+              jp.block([
+                  [V0_xx, gi_x.T],
+                  [gi_x, -penalty * jp.eye(self._ngi)],
+              ]),
+              -jp.concatenate([
+                  V0_x + gi_x.T @ lami,
+                  penalty * (lami_proximal - lami) + gi,
+              ]),
+          ),
+          [_nx],
+      )
+      return delta_x0, delta_lami
 
-    delta_x0, delta_lam0 = jp.split(
-        jax.scipy.linalg.solve(
-            jp.block([
-                [V_xx, gi_x.T],
-                [gi_x, -penalty * jp.eye(self._ngi)],
-            ]),
-            -jp.concatenate([
-                V_x + gi_x.T @ lami,
-                penalty * (lami_fixed - lami) + gi,
-            ]),
-        ),
-        [_nx],
+    delta_x0, delta_lami = initial_stage(
+        x0=x_nominal[0],
+        lami_proximal=lam_proximal[-1],
+        lami=lam_nominal[-1],
+        V0_x=V_x,
+        V0_xx=V_xx,
     )
 
     def forward_step(carry, input):
@@ -377,10 +391,10 @@ class ProxDDP:
 
     delta_x = jp.vstack([delta_x0[None, :], delta_x])
 
-    delta_lam = (delta_lam, delta_lam0)
+    delta_lam = (delta_lam, delta_lami)
 
-    delta_nuN = c + C @ delta_x[-1]
-    delta_nu = (delta_nu, delta_nuN)
+    delta_nuf = knuf + Knuf @ delta_x[-1]
+    delta_nu = (delta_nu, delta_nuf)
 
     return delta_x, delta_u, delta_lam, delta_nu
 
@@ -452,8 +466,8 @@ class ProxDDP:
   def _line_search(
       self,
       params: Any,
-      lam_fixed: tuple[jax.Array, jax.Array],
-      nu_fixed: tuple[jax.Array, jax.Array],
+      lam_proximal: tuple[jax.Array, jax.Array],
+      nu_proximal: tuple[jax.Array, jax.Array],
       penalty: float,
       x_nominal: jax.Array,
       u_nominal: jax.Array,
@@ -482,26 +496,26 @@ class ProxDDP:
       )
       val += jp.sum(
           jax.vmap(
-              lambda xt, ut, xtp1, lamt, lamt_fixed: (
-                  squared(self._g(xt, ut, xtp1, params) + penalty * (lamt - lamt_fixed / 2)) / penalty
+              lambda xt, ut, xtp1, lamt, lamt_proximal: (
+                  squared(self._g(xt, ut, xtp1, params) + penalty * (lamt - lamt_proximal / 2)) / penalty
                   + squared(lamt) * penalty / 4
               )
-          )(x[:-1], u, x[1:], lam[0], lam_fixed[0])
+          )(x[:-1], u, x[1:], lam[0], lam_proximal[0])
       )
       val += (
-          squared(self._gi(x[0], params) + penalty * (lam[-1] - lam_fixed[-1] / 2)) / penalty
+          squared(self._gi(x[0], params) + penalty * (lam[-1] - lam_proximal[-1] / 2)) / penalty
           + squared(lam[-1]) * penalty / 4
       )
       val += jp.sum(
           jax.vmap(
-              lambda xt, ut, nut, nut_fixed: (
-                  squared(jp.maximum(self._h(xt, ut, params) + penalty * (nut - nut_fixed / 2), 0.0)) / penalty
+              lambda xt, ut, nut, nut_proximal: (
+                  squared(jp.maximum(self._h(xt, ut, params) + penalty * (nut - nut_proximal / 2), 0.0)) / penalty
                   + squared(nut) * penalty / 4
               )
-          )(x[:-1], u, nu[0], nu_fixed[0])
+          )(x[:-1], u, nu[0], nu_proximal[0])
       )
       val += (
-          squared(self._hf(x[-1], params) + penalty * (nu[-1] - nu_fixed[-1] / 2)) / penalty
+          squared(self._hf(x[-1], params) + penalty * (nu[-1] - nu_proximal[-1] / 2)) / penalty
           + squared(nu[-1]) * penalty / 4
       )
 
