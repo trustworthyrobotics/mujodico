@@ -1,5 +1,6 @@
 from absl.testing import absltest
 from absl.testing import parameterized
+from functools import partial
 from itertools import product
 import jax
 import jax.numpy as jp
@@ -13,9 +14,10 @@ class ProxDDPTest(parameterized.TestCase):
       *product(
         [False, True],
         [False, True],
+        [False, ],
       )
   )
-  def test_double_integrator(self, lifted_dynamics, ineq_constraint):
+  def test_double_integrator(self, lifted_dynamics, ineq_constraint, parallel):
     dt = 0.02
     a_max = 10.0
     horizon = 100
@@ -86,7 +88,9 @@ class ProxDDPTest(parameterized.TestCase):
         params_example=params,
     )
 
-    x, u = jax.jit(solver.solve)(params)
+    x, u = jax.jit(
+        lambda params: solver.solve(params, parallel=parallel)
+    )(params)
 
     tol = 1.2e-3
 

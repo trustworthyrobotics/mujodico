@@ -61,6 +61,8 @@ class ProxDDP:
       u_init: jax.Array | None = None,
       lam_init: tuple[jax.Array, jax.Array] | None = None,
       nu_init: tuple[jax.Array, jax.Array] | None = None,
+      *,
+      parallel: bool = True,
   ):
     if x_init is None:
       x_init = jp.zeros((self._N, self._nx))
@@ -88,6 +90,7 @@ class ProxDDP:
           x_init=x,
           u_init=u,
           log=log,
+          parallel=parallel,
       )
 
       lam = lam_new
@@ -123,6 +126,7 @@ class ProxDDP:
       log: 'Log',
       *,
       max_iters: int = 10,
+      parallel: bool = True,
   ):
     """
     Mimimizes
@@ -153,7 +157,13 @@ class ProxDDP:
     def body_fn(carry: tuple[tuple, Log, int]):
         (x, u, lam, nu), log, i = carry
 
-        delta_x, delta_u, delta_lam, delta_nu = self._newton_direction_serial(
+        newton_direction_fun = (
+            self._newton_direction_parallel
+            if parallel
+            else self._newton_direction_serial
+        )
+
+        delta_x, delta_u, delta_lam, delta_nu = newton_direction_fun(
             params=params,
             lam_proximal=lam_proximal,
             nu_proximal=nu_proximal,
@@ -390,6 +400,287 @@ class ProxDDP:
     )
 
     delta_x = jp.vstack([delta_x0[None, :], delta_x])
+
+    delta_lam = (delta_lam, delta_lami)
+
+    delta_nuf = knuf + Knuf @ delta_x[-1]
+    delta_nu = (delta_nu, delta_nuf)
+
+    return delta_x, delta_u, delta_lam, delta_nu
+
+
+  def _newton_direction_parallel(
+      self,
+      params: Any,
+      lam_proximal: tuple[jax.Array, jax.Array],
+      nu_proximal: tuple[jax.Array, jax.Array],
+      penalty: float,
+      x_nominal: jax.Array,
+      u_nominal: jax.Array,
+      lam_nominal: tuple[jax.Array, jax.Array],
+      nu_nominal: tuple[jax.Array, jax.Array],
+  ):
+    _nx, _nu = self._nx, self._nu
+    _ng = self._ng
+    _nh = self._nh
+
+    def terminal_stage(xN, nuf_proximal, nuf):
+      ellf_x = jax.grad(self._ellf)(xN, params)
+      ellf_xx = jax.hessian(self._ellf)(xN, params)
+      hf_x = jax.jacfwd(self._hf)(xN, params)
+
+      hf = self._hf(xN, params)
+      nuf_plus = nuf_proximal + hf / penalty
+      active = nuf_plus > 0
+      nuf_plus = jp.where(active, nuf_plus, 0.0)
+
+      hf_x = hf_x * active[:, None]
+
+      pN = ellf_x + hf_x.T @ nuf_plus
+      PN = ellf_xx + hf_x.T @ hf_x / penalty
+
+      knuf = nuf_plus - nuf
+      Knuf = (hf_x * active[:, None]) / penalty
+
+      return pN, PN, knuf, Knuf
+
+    pN, PN, knuf, Knuf = terminal_stage(
+        xN=x_nominal[-1],
+        nuf_proximal=nu_proximal[-1],
+        nuf=nu_nominal[-1],
+    )
+
+    def eval_cost_dynamics(xt, ut, yt, lamt_proximal, nut_proximal):
+      ellt_x, ellt_u = jax.grad(self._ell, argnums=(0,1))(xt, ut, params)
+
+      (ellt_xx, ellt_xu), (ellt_ux, ellt_uu) = jax.hessian(self._ell, argnums=(0,1))(xt, ut, params)
+
+      gt_x, gt_u, gt_y = jax.jacfwd(self._g, argnums=(0,1,2))(xt, ut, yt, params)
+
+      ht_x, ht_u = jax.jacfwd(self._h, argnums=(0,1))(xt, ut, params)
+
+      gt = self._g(xt, ut, yt, params)
+      lamt_plus = lamt_proximal + gt / penalty
+
+      ht = self._h(xt, ut, params)
+      nut_plus = nut_proximal + ht / penalty
+      active = nut_plus > 0
+      nut_plus = jp.where(active, nut_plus, 0.0)
+
+      ht_x = ht_x * active[:, None]
+      ht_u = ht_u * active[:, None]
+
+      return ellt_x, ellt_u, ellt_xx, ellt_xu, ellt_ux, ellt_uu, gt_x, gt_u, gt_y, ht_x, ht_u, lamt_plus, nut_plus
+
+    (
+        ell_x, ell_u,
+        ell_xx, ell_xu, ell_ux, ell_uu,
+        g_x, g_u, g_y,
+        h_x, h_u,
+        lam_plus, nu_plus
+    ) = jax.vmap(eval_cost_dynamics)(
+        x_nominal[:-1],
+        u_nominal,
+        x_nominal[1:],
+        lam_proximal[0],
+        nu_proximal[0]
+    )
+
+    def stage_conditional_value_funcion(
+        ellt_x, ellt_u,
+        ellt_xx, ellt_xu, ellt_ux, ellt_uu,
+        gt_x, gt_u, gt_y,
+        ht_x, ht_u,
+        lamt_plus, nut_plus,
+        lamt, nut,
+    ):
+      M = jp.block([
+          [ellt_uu, gt_u.T, ht_u.T],
+          [gt_u, -penalty * jp.eye(_ng), jp.zeros((_ng, _nh))],
+          [ht_u, jp.zeros((_nh, _ng)), -penalty * jp.eye(_nh)],
+      ])
+
+      Ex = jp.vstack([
+          ellt_ux,
+          gt_x,
+          ht_x,
+      ])
+
+      Ey = jp.vstack([
+          jp.zeros((_nu, _nx)),
+          gt_y,
+          jp.zeros((_nh, _nx)),
+      ])
+
+      r = jp.concatenate([
+          ellt_u + gt_u.T @ lamt + ht_u.T @ nut,
+          penalty * (lamt_plus - lamt),
+          penalty * (nut_plus - nut),
+      ])
+
+      decompM = jax.scipy.linalg.lu_factor(M)
+      Minv_Ex = jax.scipy.linalg.lu_solve(decompM, Ex)
+      Minv_Ey = jax.scipy.linalg.lu_solve(decompM, Ey)
+      Minv_r = jax.scipy.linalg.lu_solve(decompM, r)
+
+      Dxx = -Ex.T @ Minv_Ex + ellt_xx
+      Dxy = -Ex.T @ Minv_Ey
+      Dyx = -Ey.T @ Minv_Ex
+      Dyy = -Ey.T @ Minv_Ey
+      dx = -Ex.T @ Minv_r + ellt_x
+      dy = -Ey.T @ Minv_r
+
+      decompDyy = jax.scipy.linalg.lu_factor(Dyy)
+      Dyyinv = jax.scipy.linalg.lu_solve(decompDyy, jp.eye(_nx))
+      Dyyinv_Dyx = jax.scipy.linalg.lu_solve(decompDyy, Dyx)
+      Dyyinv_dy = jax.scipy.linalg.lu_solve(decompDyy, dy)
+
+      Pt = Dxx - Dxy @ Dyyinv_Dyx
+      pt = dx - Dxy @ Dyyinv_dy
+      Ct = Dyyinv
+      At = -Dyyinv_Dyx
+      bt = -Dyyinv_dy
+
+      return Pt, pt, Ct, At, bt
+
+    P, p, C, A, b = jax.vmap(stage_conditional_value_funcion)(
+        ell_x, ell_u,
+        ell_xx, ell_xu, ell_ux, ell_uu,
+        g_x, g_u, g_y,
+        h_x, h_u,
+        lam_plus, nu_plus,
+        lam_nominal[0], nu_nominal[0],
+    )
+
+    P = jp.concatenate((P, PN[None, :, :]))
+    p = jp.concatenate((p, pN[None, :]))
+    C = jp.concatenate((C, jp.zeros((1, _nx, _nx))))
+    A = jp.concatenate((A, jp.zeros((1, _nx, _nx))))
+    b = jp.concatenate((b, jp.zeros((1, _nx))))
+
+    def conditional_value_funcion_composition(elem2, elem1):
+      P1, p1, C1, A1, b1 = elem1
+      P2, p2, C2, A2, b2 = elem2
+
+      Slinv = jax.scipy.linalg.lu_factor(jp.eye(_nx) + P2 @ C1)
+      Srinv = jax.scipy.linalg.lu_factor(jp.eye(_nx) + C1 @ P2)
+
+      P = A1.T @ jax.scipy.linalg.lu_solve(Slinv, P2 @ A1) + P1
+      p = A1.T @ jax.scipy.linalg.lu_solve(Slinv, p2 + P2 @ b1) + p1
+      C = A2 @ jax.scipy.linalg.lu_solve(Srinv, C1 @ A2.T) + C2
+      A = A2 @ jax.scipy.linalg.lu_solve(Srinv, A1)
+      b = A2 @ jax.scipy.linalg.lu_solve(Srinv, b1 - C1 @ p2) + b2
+
+      return P, p, C, A, b
+
+    V_xx, V_x, _, _, _ = jax.lax.associative_scan(
+        jax.vmap(conditional_value_funcion_composition),
+        (P, p, C, A, b),
+        reverse=True,
+    )
+
+    def calc_gain(
+        ellt_x, ellt_u,
+        ellt_xx, ellt_xu, ellt_ux, ellt_uu,
+        gt_x, gt_u, gt_y,
+        ht_x, ht_u,
+        lamt_plus, nut_plus,
+        lamt, nut,
+        Vtp1_x, Vtp1_xx,
+    ):
+      M = jp.block([
+          [ellt_uu, jp.zeros((_nu, _nx)), gt_u.T, ht_u.T],
+          [jp.zeros((_nx, _nu)), Vtp1_xx, gt_y.T, jp.zeros((_nx, _nh))],
+          [gt_u, gt_y, -penalty * jp.eye(_ng), jp.zeros((_ng, _nh))],
+          [ht_u, jp.zeros((_nh, _nx)), jp.zeros((_nh, _ng)), -penalty * jp.eye(_nh)],
+      ])
+
+      decompM = jax.scipy.linalg.lu_factor(M)
+
+      kt = jax.scipy.linalg.lu_solve(
+          decompM,
+          -jp.concatenate([
+              ellt_u + gt_u.T @ lamt + ht_u.T @ nut,
+              Vtp1_x + gt_y.T @ lamt,
+              penalty * (lamt_plus - lamt),
+              penalty * (nut_plus - nut),
+          ])
+      )
+
+      Kt = jax.scipy.linalg.lu_solve(
+          decompM,
+          -jp.vstack([
+              ellt_ux,
+              jp.zeros((_nx, _nx)),
+              gt_x,
+              ht_x,
+          ])
+      )
+
+      return kt, Kt
+
+    k, K = jax.vmap(calc_gain)(
+        ell_x, ell_u,
+        ell_xx, ell_xu, ell_ux, ell_uu,
+        g_x, g_u, g_y,
+        h_x, h_u,
+        lam_plus, nu_plus,
+        lam_nominal[0], nu_nominal[0],
+        V_x[1:], V_xx[1:],
+    )
+
+    def initial_stage(x0, lami_proximal, lami, V0_x, V0_xx):
+      gi = self._gi(x0, params)
+      gi_x = jax.jacfwd(self._gi)(x0, params)
+
+      delta_x0, delta_lami = jp.split(
+          jax.scipy.linalg.solve(
+              jp.block([
+                  [V0_xx, gi_x.T],
+                  [gi_x, -penalty * jp.eye(self._ngi)],
+              ]),
+              -jp.concatenate([
+                  V0_x + gi_x.T @ lami,
+                  penalty * (lami_proximal - lami) + gi,
+              ]),
+          ),
+          [_nx],
+      )
+      return delta_x0, delta_lami
+
+    delta_x0, delta_lami = initial_stage(
+        x0=x_nominal[0],
+        lami_proximal=lam_proximal[-1],
+        lami=lam_nominal[-1],
+        V0_x=V_x[0],
+        V0_xx=V_xx[0],
+    )
+
+    kx = k[:, _nu:_nu+_nx]
+    Kx = K[:, _nu:_nu+_nx]
+    kx = jp.concatenate((delta_x0[None, :], kx))
+    Kx = jp.concatenate((jp.eye(_nx)[None, :, :], Kx))
+
+    def gain_composition(elem1, elem2):
+      k1, K1 = elem1
+      k2, K2 = elem2
+      k = k2 + K2 @ k1
+      K = K2 @ K1
+      return k, K
+
+    delta_x, _ = jax.lax.associative_scan(
+        jax.vmap(gain_composition),
+        (kx, Kx),
+    )
+
+    def calc_delta(delta_xt, kt, Kt):
+      delta_ut, delta_yt, delta_lamt, delta_nut = jp.split(
+          kt + Kt @ delta_xt,
+          [_nu, _nu + _nx, _nu + _nx + _ng],
+      )
+      return delta_ut, delta_lamt, delta_nut
+
+    delta_u, delta_lam, delta_nu = jax.vmap(calc_delta)(delta_x[:-1], k, K)
 
     delta_lam = (delta_lam, delta_lami)
 
