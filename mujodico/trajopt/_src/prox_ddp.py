@@ -155,12 +155,12 @@ class ProxDDP:
     lam = lam_proximal
     nu = nu_proximal
 
-    def cond_fn(carry: tuple[tuple, Log, int]):
-      _, log, i = carry
+    def cond_fn(carry: tuple[tuple, LineSearchFilter, Log, int]):
+      _, ls_filter, log, i = carry
       return ((i == 0) | (log.step_size > 1e-6)) & (i < max_iters)
 
-    def body_fn(carry: tuple[tuple, Log, int]):
-      (x, u, lam, nu), log, i = carry
+    def body_fn(carry: tuple[tuple, LineSearchFilter, Log, int]):
+      (x, u, lam, nu), ls_filter, log, i = carry
 
       newton_direction_fun = (
           self._newton_direction_parallel
@@ -179,7 +179,7 @@ class ProxDDP:
           nu_nominal=nu,
       )
 
-      (x, u, lam, nu), alpha, ls_iters = self._line_search(
+      (x, u, lam, nu), alpha, ls_iters, ls_filter = self._line_search(
           params=params,
           lam_proximal=lam_proximal,
           nu_proximal=nu_proximal,
@@ -192,6 +192,7 @@ class ProxDDP:
           delta_u=delta_u,
           delta_lam=delta_lam,
           delta_nu=delta_nu,
+          ls_filter=ls_filter,
       )
 
       objective = (
@@ -218,13 +219,16 @@ class ProxDDP:
           line_search_trials=ls_iters,
       )
 
-      return (x, u, lam, nu), log, i + 1
+      return (x, u, lam, nu), ls_filter, log, i + 1
 
-    (x, u, lam, nu), log, _ = jax.lax.while_loop(
+    ls_filter = LineSearchFilter.create(capacity=max_iters * 2)
+
+    (x, u, lam, nu), ls_filter, log, _ = jax.lax.while_loop(
         cond_fn,
         body_fn,
         (
             (x, u, lam, nu),
+            ls_filter,
             log,
             0
         ),
@@ -724,10 +728,7 @@ class ProxDDP:
       return lagrangian, (objective, g, gi, h, hf)
 
     def inf_norm(*vecs):
-      return jp.max(jp.array([
-          jp.linalg.norm(vec.ravel(), ord=jp.inf)
-          for vec in jax.tree_util.tree_leaves(vecs)
-      ]))
+      return jp.max(jp.array([jp.linalg.norm(vec.ravel(), ord=jp.inf) for vec in vecs]))
 
     (_, (objective, g, gi, h, hf)), (lagrangian_x, lagrangian_u) \
      = jax.value_and_grad(lagrangian_fun, argnums=(0, 1), has_aux=True)(x, u, lam, nu)
@@ -747,7 +748,7 @@ class ProxDDP:
     return objective, primal_infeasibility, dual_infeasibility
 
 
-  def _calc_augmented_lagrangian(
+  def _calc_augmented_lagrangian_and_residual(
       self,
       params: Any,
       lam_proximal: tuple[jax.Array, jax.Array],
@@ -755,32 +756,44 @@ class ProxDDP:
       penalty: float,
       x: jax.Array,
       u: jax.Array,
-  ):
-    def squared(vec):
-      return vec.dot(vec)
+      lam: tuple[jax.Array, jax.Array],
+      nu: tuple[jax.Array, jax.Array],
+  ) -> tuple[float, float]:
 
-    al = self._ellf(x[-1], params)
+    def two_norm(vec):
+      return jp.sum(vec * vec)
+
+    def inf_norm(*vecs):
+      return jp.max(jp.array([jp.linalg.norm(vec.ravel(), ord=jp.inf) for vec in vecs]))
 
     ell = jax.vmap(lambda xt, ut: self._ell(xt, ut, params))(x[:-1], u)
-    al += jp.sum(ell)
+    ellf = self._ellf(x[-1], params)
 
-    gi_squared = squared(self._gi(x[0], params) + penalty * lam_proximal[-1])
-    al += 0.5 / penalty * gi_squared
+    g = jax.vmap(lambda xt, ut, xtp1: self._g(xt, ut, xtp1, params))(x[:-1], u, x[1:])
+    gi = self._gi(x[0], params)
 
-    g_squared = jax.vmap(
-        lambda xt, ut, xtp1, lamt_proximal: squared(self._g(xt, ut, xtp1, params) + penalty * lamt_proximal)
-    )(x[:-1], u, x[1:], lam_proximal[0])
-    al += 0.5 / penalty * jp.sum(g_squared)
+    h = jax.vmap(lambda xt, ut: self._h(xt, ut, params))(x[:-1], u)
+    hf = self._hf(x[-1], params)
 
-    h_squared = jax.vmap(
-        lambda xt, ut, nut_proximal: squared(jp.maximum(self._h(xt, ut, params) + penalty * nut_proximal, 0.0))
-    )(x[:-1], u, nu_proximal[0])
-    al += 0.5 / penalty * jp.sum(h_squared)
+    augmented_lagrangian = (
+        jp.sum(ell) +
+        ellf +
+        0.5 / penalty * (
+            two_norm(g + penalty * lam_proximal[0]) +
+            two_norm(gi + penalty * lam_proximal[-1]) +
+            two_norm(jp.maximum(h + penalty * nu_proximal[0], 0.0)) +
+            two_norm(jp.maximum(hf + penalty * nu_proximal[-1], 0.0))
+      )
+    )
 
-    hf_squared = squared(jp.maximum(self._hf(x[-1], params) + penalty * nu_proximal[-1], 0.0))
-    al += 0.5 / penalty * hf_squared
+    residual = inf_norm(
+        g + penalty * lam_proximal[0] - penalty * lam[0],
+        gi + penalty * lam_proximal[-1] - penalty * lam[-1],
+        jp.maximum(h + penalty * nu_proximal[0], 0.0) - penalty * nu[0],
+        jp.maximum(hf + penalty * nu_proximal[-1], 0.0) - penalty * nu[-1],
+    )
 
-    return al
+    return augmented_lagrangian, residual
 
 
   def _line_search(
@@ -797,22 +810,8 @@ class ProxDDP:
       delta_u: jax.Array,
       delta_lam: tuple[jax.Array, jax.Array],
       delta_nu: tuple[jax.Array, jax.Array],
+      ls_filter: 'LineSearchFilter',
   ):
-
-    def merit(
-        x: jax.Array,
-        u: jax.Array,
-        lam: tuple[jax.Array, jax.Array],
-        nu: tuple[jax.Array, jax.Array],
-    ):
-      return self._calc_augmented_lagrangian(
-          params=params,
-          lam_proximal=lam_proximal,
-          nu_proximal=nu_proximal,
-          penalty=penalty,
-          x=x,
-          u=u,
-      )
 
     def step(alpha):
       return (
@@ -828,49 +827,120 @@ class ProxDDP:
           ),
       )
 
-    merit_nominal, merit_grad = jax.value_and_grad(
-        merit,
-        argnums=(0, 1, 2, 3),
-    )(*step(0.0))
+    def theta_phi(x, u, lam, nu):
+      al, r = self._calc_augmented_lagrangian_and_residual(
+          params=params,
+          lam_proximal=lam_proximal,
+          nu_proximal=nu_proximal,
+          penalty=penalty,
+          x=x,
+          u=u,
+          lam=lam,
+          nu=nu,
+      )
+      return r, al
 
-    merit_slope = sum(
-        jp.vdot(g, d)
-        for g, d in zip(
-            jax.tree_util.tree_leaves(merit_grad),
-            jax.tree_util.tree_leaves((delta_x, delta_u, delta_lam, delta_nu)),
-        )
+    ls_filter = jax.lax.cond(
+        ls_filter.size == 0,
+        lambda f: f.add(*theta_phi(*step(0.0))),
+        lambda f: f,
+        ls_filter,
     )
 
-    # Armijo parameters
-    c1 = 1e-4
-    rho = 0.5
-    max_backtracks = 20
+    alpha_decay = 0.5
+    max_trials = 20
 
     def cond_fn(carry):
-      alpha, merit_trial, i = carry
-      return (
-          (merit_trial > merit_nominal + c1 * alpha * merit_slope)
-          & (i < max_backtracks)
-      )
+      _, _, accept, i = carry
+      return (~accept) & (i < max_trials)
 
-    def body_fn(carry):
-      alpha, _, i = carry
-      alpha = rho * alpha
-      merit_trial = merit(*step(alpha))
-      return alpha, merit_trial, i + 1
+    def body_fn(carry: tuple[LineSearchFilter, float, bool, int]):
+      ls_filter, alpha, _, i = carry
 
-    alpha = 1.0
-    merit_trial = merit(*step(alpha))
+      alpha = alpha * alpha_decay
 
-    alpha, merit_trial, ls_iters = jax.lax.while_loop(
+      theta, phi = theta_phi(*step(alpha))
+      accept, ls_filter = ls_filter.accepts_and_add(theta_trial=theta, phi_trial=phi)
+
+      return ls_filter, alpha, accept, i + 1
+
+    ls_filter, alpha, accept, ls_iters = jax.lax.while_loop(
         cond_fn,
         body_fn,
-        (alpha, merit_trial, 0),
+        (ls_filter, 2.0, False, 0),
     )
 
-    alpha = jp.where(merit_trial < merit_nominal + c1 * alpha * merit_slope, alpha, alpha)
+    return step(alpha), alpha, ls_iters, ls_filter
 
-    return step(alpha), alpha, ls_iters
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class LineSearchFilter:
+  """IPOPT-style line-search filter.
+
+  A trial point (θ, ϕ) = (constraint violation, objective) is acceptable
+  if it is not dominated by any point currently in the filter:
+      θ ≤ (1 - γ_θ) * θᵢ
+  or
+      ϕ ≤ ϕᵢ - γ_ϕ * θᵢ
+  for every filter entry i.
+  """
+
+  size: int
+  theta: jax.Array
+  phi: jax.Array
+  gamma_theta: float = 1e-5
+  gamma_phi: float = 1e-5
+
+  @classmethod
+  def create(
+      cls,
+      capacity: int,
+      gamma_theta: float = 1e-5,
+      gamma_phi: float = 1e-5,
+  ):
+    return cls(
+        size=0,
+        theta=jp.empty(capacity),
+        phi=jp.empty(capacity),
+        gamma_theta=gamma_theta,
+        gamma_phi=gamma_phi,
+    )
+
+  def accepts(self, theta_trial: float, phi_trial: float) -> bool:
+    active = jp.arange(self.theta.size) < self.size
+
+    sufficient_theta_reduction = theta_trial <= (1.0 - self.gamma_theta) * self.theta
+    sufficient_phi_reduction = phi_trial <= self.phi - self.gamma_phi * self.theta
+
+    return jp.all((~active) | (sufficient_theta_reduction | sufficient_phi_reduction))
+
+  def add(self, theta_point: float, phi_point: float) -> 'LineSearchFilter':
+    return LineSearchFilter(
+        size=self.size + 1,
+        theta=self.theta.at[self.size].set(theta_point),
+        phi=self.phi.at[self.size].set(phi_point),
+        gamma_theta=self.gamma_theta,
+        gamma_phi=self.gamma_phi,
+    )
+
+  def accepts_and_add(
+      self,
+      theta_trial: float,
+      phi_trial: float,
+  ) -> tuple[bool, 'LineSearchFilter']:
+    """Check a trial point and add it if accepted."""
+
+    accepted = self.accepts(theta_trial=theta_trial, phi_trial=phi_trial)
+
+    new_filter = jax.lax.cond(
+        accepted,
+        lambda f: f.add(theta_trial, phi_trial),
+        lambda f: f,
+        self,
+    )
+
+    return accepted, new_filter
 
 
 @jax.tree_util.register_dataclass

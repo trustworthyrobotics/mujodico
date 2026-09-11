@@ -17,7 +17,7 @@ class ProxDDPTest(parameterized.TestCase):
         [False, True],
       )
   )
-  def test_double_integrator(self, lifted_dynamics, ineq_constraint, parallel):
+  def test_double_integrator(self, ineq_constraint, lifted_dynamics, parallel):
     dt = 0.02
     a_max = 10.0
     horizon = 100
@@ -95,7 +95,7 @@ class ProxDDPTest(parameterized.TestCase):
     solve = jax.jit(solver.solve, static_argnames=('options',))
     x, u = solve(params, options=options)
 
-    tol = 1.2e-3
+    tol = 1e-4
 
     np.testing.assert_allclose(
         initial_state_constraint(x[0], params),
