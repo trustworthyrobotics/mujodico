@@ -747,6 +747,42 @@ class ProxDDP:
     return objective, primal_infeasibility, dual_infeasibility
 
 
+  def _calc_augmented_lagrangian(
+      self,
+      params: Any,
+      lam_proximal: tuple[jax.Array, jax.Array],
+      nu_proximal: tuple[jax.Array, jax.Array],
+      penalty: float,
+      x: jax.Array,
+      u: jax.Array,
+  ):
+    def squared(vec):
+      return vec.dot(vec)
+
+    al = self._ellf(x[-1], params)
+
+    ell = jax.vmap(lambda xt, ut: self._ell(xt, ut, params))(x[:-1], u)
+    al += jp.sum(ell)
+
+    gi_squared = squared(self._gi(x[0], params) + penalty * lam_proximal[-1])
+    al += 0.5 / penalty * gi_squared
+
+    g_squared = jax.vmap(
+        lambda xt, ut, xtp1, lamt_proximal: squared(self._g(xt, ut, xtp1, params) + penalty * lamt_proximal)
+    )(x[:-1], u, x[1:], lam_proximal[0])
+    al += 0.5 / penalty * jp.sum(g_squared)
+
+    h_squared = jax.vmap(
+        lambda xt, ut, nut_proximal: squared(jp.maximum(self._h(xt, ut, params) + penalty * nut_proximal, 0.0))
+    )(x[:-1], u, nu_proximal[0])
+    al += 0.5 / penalty * jp.sum(h_squared)
+
+    hf_squared = squared(jp.maximum(self._hf(x[-1], params) + penalty * nu_proximal[-1], 0.0))
+    al += 0.5 / penalty * hf_squared
+
+    return al
+
+
   def _line_search(
       self,
       params: Any,
@@ -763,47 +799,20 @@ class ProxDDP:
       delta_nu: tuple[jax.Array, jax.Array],
   ):
 
-    def squared(vec):
-      return vec.dot(vec)
-
     def merit(
         x: jax.Array,
         u: jax.Array,
         lam: tuple[jax.Array, jax.Array],
         nu: tuple[jax.Array, jax.Array],
     ):
-      val = self._ellf(x[-1], params)
-      val += jp.sum(
-          jax.vmap(
-              lambda xt, ut: self._ell(xt, ut, params)
-          )(x[:-1], u)
+      return self._calc_augmented_lagrangian(
+          params=params,
+          lam_proximal=lam_proximal,
+          nu_proximal=nu_proximal,
+          penalty=penalty,
+          x=x,
+          u=u,
       )
-      val += jp.sum(
-          jax.vmap(
-              lambda xt, ut, xtp1, lamt, lamt_proximal: (
-                  squared(self._g(xt, ut, xtp1, params) + penalty * (lamt - lamt_proximal / 2)) / penalty
-                  + squared(lamt) * penalty / 4
-              )
-          )(x[:-1], u, x[1:], lam[0], lam_proximal[0])
-      )
-      val += (
-          squared(self._gi(x[0], params) + penalty * (lam[-1] - lam_proximal[-1] / 2)) / penalty
-          + squared(lam[-1]) * penalty / 4
-      )
-      val += jp.sum(
-          jax.vmap(
-              lambda xt, ut, nut, nut_proximal: (
-                  squared(jp.maximum(self._h(xt, ut, params) + penalty * (nut - nut_proximal / 2), 0.0)) / penalty
-                  + squared(nut) * penalty / 4
-              )
-          )(x[:-1], u, nu[0], nu_proximal[0])
-      )
-      val += (
-          squared(self._hf(x[-1], params) + penalty * (nu[-1] - nu_proximal[-1] / 2)) / penalty
-          + squared(nu[-1]) * penalty / 4
-      )
-
-      return val
 
     def step(alpha):
       return (
