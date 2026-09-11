@@ -160,65 +160,65 @@ class ProxDDP:
       return ((i == 0) | (log.step_size > 1e-6)) & (i < max_iters)
 
     def body_fn(carry: tuple[tuple, Log, int]):
-        (x, u, lam, nu), log, i = carry
+      (x, u, lam, nu), log, i = carry
 
-        newton_direction_fun = (
-            self._newton_direction_parallel
-            if parallel
-            else self._newton_direction_serial
-        )
+      newton_direction_fun = (
+          self._newton_direction_parallel
+          if parallel
+          else self._newton_direction_serial
+      )
 
-        delta_x, delta_u, delta_lam, delta_nu = newton_direction_fun(
-            params=params,
-            lam_proximal=lam_proximal,
-            nu_proximal=nu_proximal,
-            penalty=penalty,
-            x_nominal=x,
-            u_nominal=u,
-            lam_nominal=lam,
-            nu_nominal=nu,
-        )
+      delta_x, delta_u, delta_lam, delta_nu = newton_direction_fun(
+          params=params,
+          lam_proximal=lam_proximal,
+          nu_proximal=nu_proximal,
+          penalty=penalty,
+          x_nominal=x,
+          u_nominal=u,
+          lam_nominal=lam,
+          nu_nominal=nu,
+      )
 
-        (x, u, lam, nu), alpha, ls_iters = self._line_search(
-            params=params,
-            lam_proximal=lam_proximal,
-            nu_proximal=nu_proximal,
-            penalty=penalty,
-            x_nominal=x,
-            u_nominal=u,
-            lam_nominal=lam,
-            nu_nominal=nu,
-            delta_x=delta_x,
-            delta_u=delta_u,
-            delta_lam=delta_lam,
-            delta_nu=delta_nu,
-        )
+      (x, u, lam, nu), alpha, ls_iters = self._line_search(
+          params=params,
+          lam_proximal=lam_proximal,
+          nu_proximal=nu_proximal,
+          penalty=penalty,
+          x_nominal=x,
+          u_nominal=u,
+          lam_nominal=lam,
+          nu_nominal=nu,
+          delta_x=delta_x,
+          delta_u=delta_u,
+          delta_lam=delta_lam,
+          delta_nu=delta_nu,
+      )
 
-        objective = (
-            jp.sum(jax.vmap(lambda xt, ut: self._ell(xt, ut, params))(x[:-1], u))
-            + self._ellf(x[-1], params)
-        )
+      objective = (
+          jp.sum(jax.vmap(lambda xt, ut: self._ell(xt, ut, params))(x[:-1], u))
+          + self._ellf(x[-1], params)
+      )
 
-        objective, primal_infeasibility, dual_infeasibility = self._calc_objective_and_infeasibility(
-            params=params, penalty=penalty, x=x, u=u, lam=lam, nu=nu,
-        )
+      objective, primal_infeasibility, dual_infeasibility = self._calc_objective_and_infeasibility(
+          params=params, penalty=penalty, x=x, u=u, lam=lam, nu=nu,
+      )
 
-        step_inf_norm = jp.maximum(
-            jp.linalg.norm(delta_x, ord=jp.inf),
-            jp.linalg.norm(delta_u, ord=jp.inf),
-        )
+      step_inf_norm = jp.maximum(
+          jp.linalg.norm(delta_x, ord=jp.inf),
+          jp.linalg.norm(delta_u, ord=jp.inf),
+      )
 
-        log = log.append(
-            objective=objective,
-            primal_infeasibility=primal_infeasibility,
-            dual_infeasibility=dual_infeasibility,
-            penalty_parameter=penalty,
-            step_inf_norm=step_inf_norm,
-            step_size=alpha,
-            line_search_trials=ls_iters,
-        )
+      log = log.append(
+          objective=objective,
+          primal_infeasibility=primal_infeasibility,
+          dual_infeasibility=dual_infeasibility,
+          penalty_parameter=penalty,
+          step_inf_norm=step_inf_norm,
+          step_size=alpha,
+          line_search_trials=ls_iters,
+      )
 
-        return (x, u, lam, nu), log, i + 1
+      return (x, u, lam, nu), log, i + 1
 
     (x, u, lam, nu), log, _ = jax.lax.while_loop(
         cond_fn,
