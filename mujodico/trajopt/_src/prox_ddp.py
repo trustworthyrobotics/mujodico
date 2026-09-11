@@ -110,7 +110,7 @@ class ProxDDP:
         (
             (x_init, u_init, lam_init, nu_init),
             penalty,
-            Log.create(options.max_iters * 2),
+            Log.create(capacity=options.max_iters * 2),
         ),
     )
 
@@ -199,8 +199,7 @@ class ProxDDP:
             + self._ellf(x[-1], params)
         )
 
-        objective, primal_infeasibility, dual_infeasibility \
-        = self._calc_objective_primal_dual_infeasibility(
+        objective, primal_infeasibility, dual_infeasibility = self._calc_objective_and_infeasibility(
             params=params, penalty=penalty, x=x, u=u, lam=lam, nu=nu,
         )
 
@@ -265,56 +264,44 @@ class ProxDDP:
       V_xx = ellf_xx + hf_x.T @ hf_x / penalty
 
       knuf = nuf_plus - nuf
-      Knuf = (hf_x * active[:, None]) / penalty
+      Knuf = hf_x / penalty
 
       return V_x, V_xx, knuf, Knuf
 
-    V_x, V_xx, knuf, Knuf = terminal_stage(
+    VN_x, VN_xx, knuf, Knuf = terminal_stage(
         xN=x_nominal[-1],
         nuf_proximal=nu_proximal[-1],
         nuf=nu_nominal[-1],
     )
 
     def backward_step(carry, input):
-      V_x, V_xx = carry
+      Vtp1_x, Vtp1_xx = carry
       xt, ut, yt, lamt, nut, lamt_proximal, nut_proximal = input
 
-      ell_x, ell_u = jax.grad(self._ell, argnums=(0,1))(xt, ut, params)
+      ellt_x, ellt_u = jax.grad(self._ell, argnums=(0,1))(xt, ut, params)
 
-      (ell_xx, ell_xu), (ell_ux, ell_uu) = jax.hessian(self._ell, argnums=(0,1))(xt, ut, params)
+      (ellt_xx, ellt_xu), (ellt_ux, ellt_uu) = jax.hessian(self._ell, argnums=(0,1))(xt, ut, params)
 
-      g = self._g(xt, ut, yt, params)
-      g_x, g_u, g_y = jax.jacfwd(self._g, argnums=(0,1,2))(xt, ut, yt, params)
+      gt_x, gt_u, gt_y = jax.jacfwd(self._g, argnums=(0,1,2))(xt, ut, yt, params)
 
-      h = self._h(xt, ut, params)
-      h_x, h_u = jax.jacfwd(self._h, argnums=(0,1))(xt, ut, params)
+      ht_x, ht_u = jax.jacfwd(self._h, argnums=(0,1))(xt, ut, params)
 
-      lamt_plus = lamt_proximal + g / penalty
+      gt = self._g(xt, ut, yt, params)
+      lamt_plus = lamt_proximal + gt / penalty
 
-      nut_plus = nut_proximal + h / penalty
+      ht = self._h(xt, ut, params)
+      nut_plus = nut_proximal + ht / penalty
       active = nut_plus > 0
       nut_plus = jp.where(active, nut_plus, 0.0)
 
-      Q_x = ell_x + g_x.T @ lamt + (h_x.T * active) @ nut
-      Q_xx = ell_xx
-      Q_xu = ell_xu
-      Q_xy = jp.zeros((_nx, _nx))
-
-      Q_u = ell_u + g_u.T @ lamt + (h_u.T * active) @ nut
-      Q_ux = ell_ux
-      Q_uu = ell_uu
-      Q_uy = jp.zeros((_nu, _nx))
-
-      Q_y = V_x + g_y.T @ lamt
-      Q_yy = V_xx
-      Q_yx = Q_xy.T
-      Q_yu = Q_uy.T
+      ht_x = ht_x * active[:, None]
+      ht_u = ht_u * active[:, None]
 
       M = jp.block([
-          [Q_uu, Q_uy, g_u.T, h_u.T * active],
-          [Q_yu, Q_yy, g_y.T, jp.zeros((_nx, _nh))],
-          [g_u, g_y, -penalty * jp.eye(_ng), jp.zeros((_ng, _nh))],
-          [h_u * active[:, None], jp.zeros((_nh, _nx)), jp.zeros((_nh, _ng)), -penalty * jp.eye(_nh)],
+          [ellt_uu, jp.zeros((_nu, _nx)), gt_u.T, ht_u.T],
+          [jp.zeros((_nx, _nu)), Vtp1_xx, gt_y.T, jp.zeros((_nx, _nh))],
+          [gt_u, gt_y, -penalty * jp.eye(_ng), jp.zeros((_ng, _nh))],
+          [ht_u, jp.zeros((_nh, _nx)), jp.zeros((_nh, _ng)), -penalty * jp.eye(_nh)],
       ])
 
       decompM = jax.scipy.linalg.lu_factor(M)
@@ -322,8 +309,8 @@ class ProxDDP:
       kt = jax.scipy.linalg.lu_solve(
           decompM,
           -jp.concatenate([
-              Q_u,
-              Q_y,
+              ellt_u + gt_u.T @ lamt + ht_u.T @ nut,
+              Vtp1_x + gt_y.T @ lamt,
               penalty * (lamt_plus - lamt),
               penalty * (nut_plus - nut),
           ])
@@ -332,22 +319,27 @@ class ProxDDP:
       Kt = jax.scipy.linalg.lu_solve(
           decompM,
           -jp.vstack([
-              Q_ux,
-              Q_yx,
-              g_x,
-              h_x * active[:, None],
+              ellt_ux,
+              jp.zeros((_nx, _nx)),
+              gt_x,
+              ht_x,
           ])
       )
 
-      Q_xw = jp.hstack([Q_xu, Q_xy, g_x.T, h_x.T * active])
-      V_x = Q_x + Q_xw @ kt
-      V_xx = Q_xx + Q_xw @ Kt
+      Qt_x = ellt_x + gt_x.T @ lamt + ht_x.T @ nut
+      Qt_xx = ellt_xx
+      Qt_xu = ellt_xu
+      Qt_xy = jp.zeros((_nx, _nx))
 
-      return (V_x, V_xx), (kt, Kt)
+      Qt_xw = jp.hstack([Qt_xu, Qt_xy, gt_x.T, ht_x.T])
+      Vt_x = Qt_x + Qt_xw @ kt
+      Vt_xx = Qt_xx + Qt_xw @ Kt
 
-    (V_x, V_xx), (k, K) = jax.lax.scan(
+      return (Vt_x, Vt_xx), (kt, Kt)
+
+    (V0_x, V0_xx), (k, K) = jax.lax.scan(
         backward_step,
-        (V_x, V_xx),
+        (VN_x, VN_xx),
         (
             x_nominal[:-1],
             u_nominal,
@@ -383,8 +375,8 @@ class ProxDDP:
         x0=x_nominal[0],
         lami_proximal=lam_proximal[-1],
         lami=lam_nominal[-1],
-        V0_x=V_x,
-        V0_xx=V_xx,
+        V0_x=V0_x,
+        V0_xx=V0_xx,
     )
 
     def forward_step(carry, input):
@@ -404,7 +396,7 @@ class ProxDDP:
         (k, K),
     )
 
-    delta_x = jp.vstack([delta_x0[None, :], delta_x])
+    delta_x = jp.concatenate([delta_x0[None, :], delta_x])
 
     delta_lam = (delta_lam, delta_lami)
 
@@ -445,7 +437,7 @@ class ProxDDP:
       PN = ellf_xx + hf_x.T @ hf_x / penalty
 
       knuf = nuf_plus - nuf
-      Knuf = (hf_x * active[:, None]) / penalty
+      Knuf = hf_x / penalty
 
       return pN, PN, knuf, Knuf
 
@@ -695,7 +687,7 @@ class ProxDDP:
     return delta_x, delta_u, delta_lam, delta_nu
 
 
-  def _calc_objective_primal_dual_infeasibility(
+  def _calc_objective_and_infeasibility(
       self,
       params: Any,
       penalty: float,
@@ -737,12 +729,8 @@ class ProxDDP:
           for vec in jax.tree_util.tree_leaves(vecs)
       ]))
 
-    (
-        (lagrangian, (objective, g, gi, h, hf)),
-        (lagrangian_x, lagrangian_u)
-    ) = jax.value_and_grad(
-        lagrangian_fun, argnums=(0, 1), has_aux=True
-    )(x, u, lam, nu)
+    (_, (objective, g, gi, h, hf)), (lagrangian_x, lagrangian_u) \
+     = jax.value_and_grad(lagrangian_fun, argnums=(0, 1), has_aux=True)(x, u, lam, nu)
 
     primal_infeasibility = inf_norm(
         g,
