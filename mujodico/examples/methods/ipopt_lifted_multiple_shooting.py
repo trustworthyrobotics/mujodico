@@ -295,12 +295,12 @@ class IpoptLiftedMultipleShooting:
 
     total_time = time.perf_counter() - tic
 
-    print(f"""
+    print(f'''
 Method: {self.__class__.__name__}
   total time: {total_time:.6f} sec
     dynamics time: {self._dynamics_time:.6f} sec / {self._dynamics_time/total_time*100:.2f}%
     ipopt time:    {total_time-self._dynamics_time:.6f} sec / {(1-self._dynamics_time/total_time)*100:.2f}%
-""")
+''')
 
     xs_opt, us_opt, cfs_opt = self._unpack(vars_opt)
 

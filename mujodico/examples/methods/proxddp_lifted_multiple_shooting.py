@@ -174,10 +174,10 @@ class ProxddpLiftedMultipleShooting:
     us_opt = us_aug_opt[:, :self.nu]
     total_time = time.perf_counter() - tic
 
-    print(f"""
+    print(f'''
 Method: {self.__class__.__name__}
   total time: {total_time:.6f} sec
-""")
+''')
 
     return np.asarray(xs_opt), np.asarray(us_opt)
 

@@ -1,6 +1,5 @@
 import os
 import time
-from typing import Sequence
 
 from absl import app
 from absl import flags
@@ -43,7 +42,7 @@ _ITERATIONS = flags.DEFINE_integer(
 )
 
 
-def _main(argv: Sequence[str]) -> None:
+def _main(argv) -> None:
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
 
@@ -57,11 +56,23 @@ def _main(argv: Sequence[str]) -> None:
   task = task_cls()
   method = method_cls(task, contact_approx, hess_approx)
 
+  tic = time.perf_counter()
   xs_nominal, us_nominal = method.solve(
     xs_init=task.xs_init,
     us_init=task.us_init,
     iterations=_ITERATIONS.value,
   )
+  total_time = time.perf_counter() - tic
+
+  x_error = xs_nominal[-1] - task.x_goal
+  goal_error = x_error.dot(task.Q @ x_error)
+
+  print(f'''
+Task: {task_cls.__name__}
+Method: {method_cls.__name__}
+  total time: {total_time:.6f} sec
+  goal error: {goal_error:.6f}
+''')
 
   task.visualize_trajectory(xs_nominal)
 
