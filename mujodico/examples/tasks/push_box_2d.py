@@ -57,7 +57,13 @@ class PushBox2d(Task):
     model = mujoco.MjModel.from_xml_string(_XML)
     horizon = 80
 
-    x_0 = np.array([-0.1, -0.15, 0.2, 0.25, 1.0] + [0.0] * 5)
+    rng = np.random.default_rng(seed)
+
+    x_0 = np.concatenate((
+        [-0.1, -0.15],
+        rng.uniform([0.1, 0.05, -1.0], [0.3, 0.25, 1.0]),
+        [0.0] * 5,
+    ))
     x_goal = np.array([0.0, 0.0, 0.0, 0.0, 0.0] + [0.0] * 5)
     Q = np.diag([0.0, 0.0, 5.0, 5.0, 0.1, 0.0, 0.0, 0.01, 0.01, 0.001])
     Qf = Q * 80
