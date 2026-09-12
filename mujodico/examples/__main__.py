@@ -1,5 +1,7 @@
 import os
 import time
+import csv
+from pathlib import Path
 
 from absl import app
 from absl import flags
@@ -41,7 +43,10 @@ _ITERATIONS = flags.DEFINE_integer(
     'iterations', 500, 'Number of solver iterations', lower_bound=0,
 )
 _TESTS = flags.DEFINE_integer(
-    'tests', 1, 'Number of test cases to run', lower_bound=1,
+    'tests', 1, 'Number of test cases to run.', lower_bound=1,
+)
+_SEED = flags.DEFINE_integer(
+    'seed', 0, 'Random seed for tests.',
 )
 
 
@@ -56,30 +61,44 @@ def _main(argv) -> None:
 
   hess_approx = support.HessianApproxType._resolve(_HESS_APPROX.value)
 
-  for seed in range(_TESTS.value):
-    task = task_cls(seed)
-    method = method_cls(task, contact_approx, hess_approx)
+  result_dir = Path(__file__).resolve().parent / 'result'
+  result_dir.mkdir(exist_ok=True)
+  result_file = result_dir / f'{task_cls.__name__}_{contact_approx.value}_{method_cls.__name__}.csv'
+  print(result_file)
 
-    tic = time.perf_counter()
-    xs_nominal, us_nominal = method.solve(
-      xs_init=task.xs_init,
-      us_init=task.us_init,
-      iterations=_ITERATIONS.value,
-    )
-    total_time = time.perf_counter() - tic
+  with open(result_file, 'a', newline='') as f:
+    writer = csv.writer(f)
+    if f.tell() == 0:
+      writer.writerow(['seed', 'total_time_sec', 'goal_error'])
 
-    x_error = xs_nominal[-1] - task.x_goal
-    goal_error = x_error.dot(task.Q @ x_error)
+    for seed in range(_SEED.value, _SEED.value + _TESTS.value):
+      task = task_cls(seed)
+      method = method_cls(task, contact_approx, hess_approx)
 
-    print(f'''
-Task: {task_cls.__name__}
-Method: {method_cls.__name__}
-  seed: {seed}
-  total time: {total_time:.6f} sec
-  goal error: {goal_error:.6f}
-''')
+      tic = time.perf_counter()
+      xs_nominal, us_nominal = method.solve(
+        xs_init=task.xs_init,
+        us_init=task.us_init,
+        iterations=_ITERATIONS.value,
+      )
+      total_time = time.perf_counter() - tic
 
-  task.visualize_trajectory(xs_nominal)
+      x_error = xs_nominal[-1] - task.x_goal
+      goal_error = x_error.dot(task.Q @ x_error)
+
+      writer.writerow([seed, total_time, goal_error])
+      f.flush()
+
+      print(f'''
+  Task: {task_cls.__name__}
+  Method: {method_cls.__name__}
+    seed: {seed}
+    total time: {total_time:.6f} sec
+    goal error: {goal_error:.6f}
+  ''')
+
+  if _TESTS.value == 1:
+    task.visualize_trajectory(xs_nominal)
 
 
 def main():
