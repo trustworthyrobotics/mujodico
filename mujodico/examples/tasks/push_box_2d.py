@@ -9,7 +9,7 @@ import viser
 _XML = """
 <mujoco model="push_box_2d">
 
-  <option timestep="0.02"  />
+  <option timestep="0.05"  />
   <option integrator="implicitfast" />
   <option iterations="20" tolerance="1e-5" />
 
@@ -55,12 +55,12 @@ class PushBox2d(Task):
 
   def __init__(self):
     model = mujoco.MjModel.from_xml_string(_XML)
-    horizon = 200
+    horizon = 80
 
     x_0 = np.array([-0.1, -0.15, 0.2, 0.25, 1.0] + [0.0] * 5)
     x_goal = np.array([0.0, 0.0, 0.0, 0.0, 0.0] + [0.0] * 5)
     Q = np.diag([0.0, 0.0, 5.0, 5.0, 0.1, 0.0, 0.0, 0.01, 0.01, 0.001])
-    Qf = Q * 200
+    Qf = Q * 80
 
     u_ref = np.array([0.0, 0.0])
     R = np.eye(2) * 0.01
