@@ -40,6 +40,9 @@ _HESS_APPROX = flags.DEFINE_string(
 _ITERATIONS = flags.DEFINE_integer(
     'iterations', 500, 'Number of solver iterations', lower_bound=0,
 )
+_TESTS = flags.DEFINE_integer(
+    'tests', 1, 'Number of test cases to run', lower_bound=1,
+)
 
 
 def _main(argv) -> None:
@@ -53,23 +56,25 @@ def _main(argv) -> None:
 
   hess_approx = support.HessianApproxType._resolve(_HESS_APPROX.value)
 
-  task = task_cls()
-  method = method_cls(task, contact_approx, hess_approx)
+  for seed in range(_TESTS.value):
+    task = task_cls(seed)
+    method = method_cls(task, contact_approx, hess_approx)
 
-  tic = time.perf_counter()
-  xs_nominal, us_nominal = method.solve(
-    xs_init=task.xs_init,
-    us_init=task.us_init,
-    iterations=_ITERATIONS.value,
-  )
-  total_time = time.perf_counter() - tic
+    tic = time.perf_counter()
+    xs_nominal, us_nominal = method.solve(
+      xs_init=task.xs_init,
+      us_init=task.us_init,
+      iterations=_ITERATIONS.value,
+    )
+    total_time = time.perf_counter() - tic
 
-  x_error = xs_nominal[-1] - task.x_goal
-  goal_error = x_error.dot(task.Q @ x_error)
+    x_error = xs_nominal[-1] - task.x_goal
+    goal_error = x_error.dot(task.Q @ x_error)
 
-  print(f'''
+    print(f'''
 Task: {task_cls.__name__}
 Method: {method_cls.__name__}
+  seed: {seed}
   total time: {total_time:.6f} sec
   goal error: {goal_error:.6f}
 ''')
