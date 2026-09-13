@@ -7,7 +7,8 @@ from mujodico.examples.methods import proxddp_lifted_multiple_shooting
 
 
 _METHODS = [
-    casadi_lifted_multiple_shooting.CasadiLiftedMultipleShooting,
+    casadi_lifted_multiple_shooting.CasadiIpoptLiftedMultipleShooting,
+    casadi_lifted_multiple_shooting.CasadiFatropLiftedMultipleShooting,
     ipopt_kkt_contact_implicit.IpoptKKTContactImplicit,
     ipopt_lifted_multiple_shooting.IpoptLiftedMultipleShooting,
     ipopt_multiple_shooting.IpoptMultipleShooting,

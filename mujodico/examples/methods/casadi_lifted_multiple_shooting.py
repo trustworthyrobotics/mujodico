@@ -18,13 +18,12 @@ except ImportError as e:
   ) from e
 
 
-class CasadiLiftedMultipleShooting:
+class _CasadiLiftedMultipleShooting:
 
   def __init__(
       self,
       task: Task,
       contact_approx: mjx.ContactApproxType,
-      hess_approx,
   ):
     self.task = task
     model = task.model
@@ -37,7 +36,7 @@ class CasadiLiftedMultipleShooting:
         model,
         impl='jax',
         contact_approximation=contact_approx,
-        contact_smoothing=task.contact_smoothing * 0.001,
+        contact_smoothing=task.contact_smoothing * 0.01,
     )
 
     mjx_data = mjx.make_data(mjx_model, impl=mjx_model.impl)
@@ -53,15 +52,14 @@ class CasadiLiftedMultipleShooting:
     ncf = int(efc_contact_addresses.size)
     self.ncf = ncf
     nsoc = len(socs)
+    self.nsoc = nsoc
 
-    @jax.jit
     def step1(x, u):
       nq, nv = mjx_model.nq, mjx_model.nv
       d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u,)
       d = mjx.forward(mjx_model, d)
       return d._impl.efc_force[efc_contact_addresses]
 
-    @jax.jit
     def step2(x, u, cf):
       efc_force = jp.zeros(mjx_data._impl.nefc)
       efc_force = efc_force.at[efc_contact_addresses].set(cf)
@@ -162,24 +160,20 @@ class CasadiLiftedMultipleShooting:
     self._g_lb = np.tile(constraint_lb, N)
     self._g_ub = np.tile(constraint_ub, N)
 
+    self._opts = {}
+
   def solve(
       self,
       *,
       xs_init,
       us_init,
-      iterations: int,
-      **kwargs,
+      solver_name: str,
+      options: dict = {},
   ):
     cfs_init = np.zeros((self.task.horizon, self.ncf))
     vars_init = self._pack(xs_init, us_init, cfs_init)
 
-    ipopt_opts = {
-        'ipopt.print_level': 5,
-        'print_time': False,
-        'ipopt.max_iter': iterations,
-    }
-
-    solver = ca.nlpsol('solver', 'ipopt', self._nlp, ipopt_opts)
+    solver = ca.nlpsol('solver', solver_name, self._nlp, options)
 
     tic = time.perf_counter()
     sol = solver(
@@ -193,12 +187,6 @@ class CasadiLiftedMultipleShooting:
 
     vars_opt = np.asarray(sol["x"]).flatten()
     xs_opt, us_opt, cfs_opt = self._unpack(vars_opt)
-
-    print(f'''
-Method: {self.__class__.__name__}
-  total time: {total_time:.6f} sec
-  ipopt return status: {solver.stats().get('return_status')}
-''')
 
     return xs_opt, us_opt
 
@@ -229,3 +217,68 @@ Method: {self.__class__.__name__}
     cfs = xucs[:, nx + nu :]
 
     return xs, us, cfs
+
+
+class CasadiIpoptLiftedMultipleShooting(_CasadiLiftedMultipleShooting):
+  def __init__(
+      self,
+      task: Task,
+      contact_approx: mjx.ContactApproxType,
+      hess_approx,
+  ):
+    super().__init__(
+        task=task,
+        contact_approx=contact_approx,
+    )
+
+  def solve(
+      self,
+      *,
+      xs_init,
+      us_init,
+      iterations: int,
+      **kwargs,
+  ):
+    return super().solve(
+        xs_init=xs_init,
+        us_init=us_init,
+        solver_name='ipopt',
+        options={
+            'ipopt.max_iter': iterations
+        },
+    )
+
+
+class CasadiFatropLiftedMultipleShooting(_CasadiLiftedMultipleShooting):
+  def __init__(
+      self,
+      task: Task,
+      contact_approx: mjx.ContactApproxType,
+      hess_approx,
+  ):
+    super().__init__(
+        task=task,
+        contact_approx=contact_approx,
+    )
+
+  def solve(
+      self,
+      *,
+      xs_init,
+      us_init,
+      iterations: int,
+      **kwargs,
+  ):
+    N, nx, ncf, nsoc = self.task.horizon, self.task.nx, self.ncf, self.nsoc
+    equality = ([1] * (nx + ncf) + [0] * nsoc) * N
+
+    return super().solve(
+        xs_init=xs_init,
+        us_init=us_init,
+        solver_name='fatrop',
+        options={
+            'fatrop.max_iter': iterations,
+            'structure_detection': 'auto',
+            'equality': equality,
+        },
+    )
