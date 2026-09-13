@@ -59,7 +59,13 @@ class PushSphere2d(Task):
     model = mujoco.MjModel.from_xml_string(_XML)
     horizon = 100
 
-    x_0 = np.array([-0.1, -0.15, 0.1, 0.15] + [0.0] * 4)
+    rng = np.random.default_rng(seed)
+
+    x_0 = np.concatenate((
+        [-0.1, -0.15],
+        rng.uniform([0.1, 0.1], [0.4, 0.4]),
+        [0.0] * 4,
+    ))
     x_goal = np.array([0.0, 0.0, 0.0, 0.0] + [0.0] * 4)
     Q = np.diag([0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.1, 0.1])
     Qf = Q * 100.0

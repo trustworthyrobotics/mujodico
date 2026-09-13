@@ -64,8 +64,14 @@ class PushCircularKnob(Task):
     model = mujoco.MjModel.from_xml_string(_XML)
     horizon = 400
 
-    x_0 = np.array([-0.2, -0.2, 0.0] + [0.0] * 3)
-    x_goal = np.array([0.0, 0.0, np.pi * 2.0] + [0.0] * 3)
+    rng = np.random.default_rng(seed)
+
+    x_0 = np.concatenate((
+        [-0.2, -0.2],
+        rng.uniform([-2 * np.pi], [2 * np.pi]),
+        [0.0] * 3
+    ))
+    x_goal = np.array([0.0, 0.0, 0.0] + [0.0] * 3)
     Q = np.diag([0.0, 0.0, 1.0, 0.0, 0.0, 0.001])
     Qf = Q * 400
 
