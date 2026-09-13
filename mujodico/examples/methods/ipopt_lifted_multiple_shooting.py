@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import time
 import jax
 import jax.numpy as jp
@@ -15,13 +14,6 @@ except ImportError as e:
       'Optional solver dependency not installed. Install it with:\n\n'
       '    pip install cyipopt'
   ) from e
-
-
-@dataclass(frozen=True)
-class SOC:
-  start_index: int
-  dim: int
-  friction: jax.Array
 
 
 class IpoptLiftedMultipleShooting:
@@ -55,7 +47,7 @@ class IpoptLiftedMultipleShooting:
     u_ref = jp.array(task.u_ref)
     R = jp.array(task.R)
 
-    efc_contact_addresses, socs = self._extract_contact_indices(mjx_model, mjx_data)
+    efc_contact_addresses, socs = support.extract_contact_indices(mjx_model, mjx_data)
 
     ncf = int(efc_contact_addresses.size)
     self.ncf = ncf
@@ -305,50 +297,6 @@ Method: {self.__class__.__name__}
     xs_opt, us_opt, cfs_opt = self._unpack(vars_opt)
 
     return np.asarray(xs_opt), np.asarray(us_opt)
-
-  def _extract_contact_indices(
-      self, mjx_model: mjx.Model, mjx_data: mjx.Data
-    ) -> tuple[np.ndarray, list[SOC]]:
-    '''
-    Returns
-      efc_contact_addresses: indices of efc_force that are contact forces
-      socs:
-        start_index: index of efc_contact_addresses that is the soc normal
-        dim: dimension of the soc
-        friction: friction coefficients of the soc
-    '''
-    efc_type = np.array(mjx_data._impl.efc_type)
-    efc_contact_addresses = np.nonzero(
-        (efc_type == mjx.ConstraintType.CONTACT_FRICTIONLESS) |
-        (efc_type == mjx.ConstraintType.CONTACT_PYRAMIDAL) |
-        (efc_type == mjx.ConstraintType.CONTACT_ELLIPTIC)
-    )[0]
-
-    contact_dim = np.array(mjx_data._impl.contact.dim)
-    contact_efc_address = np.array(mjx_data._impl.contact.efc_address)
-    contact_is_elliptic = (
-      efc_type[contact_efc_address] == mjx.ConstraintType.CONTACT_ELLIPTIC
-    )
-
-    if np.any(contact_is_elliptic):
-      mjx_data = mjx.fwd_position(mjx_model, mjx_data)
-    conic_friction = mjx_data._impl.contact.friction
-
-    socs = []
-    for i in np.nonzero(contact_is_elliptic)[0]:
-      start_index = np.nonzero(contact_efc_address[i] == efc_contact_addresses)[0][0]
-      dim = contact_dim[i]
-      soc = SOC(
-          start_index=int(start_index),
-          dim=int(dim),
-          friction=conic_friction[i, :dim-1],
-      )
-      socs.append(soc)
-
-      if not np.all(soc.friction > 1e-6):
-        raise ValueError('Near zero friction not allowed')
-
-    return efc_contact_addresses, socs
 
   def _pack(
       self,

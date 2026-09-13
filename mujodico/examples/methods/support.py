@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import enum
 import jax
 from jax import numpy as jp
@@ -5,6 +6,7 @@ from mujodico import mjx
 # pylint: disable=g-importing-member
 from mujodico.mjx._src.types import Model
 # pylint: enable=g-importing-member
+import numpy as np
 
 
 class HessianApproxType(enum.Enum):
@@ -71,3 +73,55 @@ def step_given_efc_force(
     raise NotImplementedError(f'integrator {m.opt.integrator} not implemented.')
 
   return jp.concatenate((d.qpos, d.qvel, d.act))
+
+
+@dataclass(frozen=True)
+class SOC:
+  start_index: int
+  dim: int
+  friction: jax.Array
+
+
+def extract_contact_indices(
+    mjx_model: mjx.Model, mjx_data: mjx.Data
+  ) -> tuple[np.ndarray, list[SOC]]:
+  """
+  Returns
+    efc_contact_addresses: indices of efc_force that are contact forces
+    socs:
+      start_index: index of efc_contact_addresses that is the soc normal
+      dim: dimension of the soc
+      friction: friction coefficients of the soc
+  """
+  efc_type = np.array(mjx_data._impl.efc_type)
+  efc_contact_addresses = np.nonzero(
+      (efc_type == mjx.ConstraintType.CONTACT_FRICTIONLESS) |
+      (efc_type == mjx.ConstraintType.CONTACT_PYRAMIDAL) |
+      (efc_type == mjx.ConstraintType.CONTACT_ELLIPTIC)
+  )[0]
+
+  contact_dim = np.array(mjx_data._impl.contact.dim)
+  contact_efc_address = np.array(mjx_data._impl.contact.efc_address)
+  contact_is_elliptic = (
+    efc_type[contact_efc_address] == mjx.ConstraintType.CONTACT_ELLIPTIC
+  )
+
+  if np.any(contact_is_elliptic):
+    mjx_data = mjx.fwd_position(mjx_model, mjx_data)
+  conic_friction = mjx_data._impl.contact.friction
+
+  socs = []
+  for i in np.nonzero(contact_is_elliptic)[0]:
+    start_index = np.nonzero(contact_efc_address[i] == efc_contact_addresses)[0][0]
+    dim = contact_dim[i]
+    soc = SOC(
+        start_index=int(start_index),
+        dim=int(dim),
+        friction=conic_friction[i, :dim-1],
+    )
+    socs.append(soc)
+
+    if not np.all(soc.friction > 1e-6):
+      raise ValueError('Near zero friction not allowed')
+
+  return efc_contact_addresses, socs
