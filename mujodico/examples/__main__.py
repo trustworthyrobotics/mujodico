@@ -69,32 +69,34 @@ def _main(argv) -> None:
   with open(result_file, 'a', newline='') as f:
     writer = csv.writer(f)
     if f.tell() == 0:
-      writer.writerow(['seed', 'total_time_sec', 'goal_error'])
+      writer.writerow(['seed', 'goal_error', 'solve_time_sec', 'solver_iters'])
 
     for seed in range(_SEED.value, _SEED.value + _TESTS.value):
       task = task_cls(seed)
       method = method_cls(task, contact_approx, hess_approx)
+      iters = _ITERATIONS.value
 
       tic = time.perf_counter()
       xs_nominal, us_nominal = method.solve(
         xs_init=task.xs_init,
         us_init=task.us_init,
-        iterations=_ITERATIONS.value,
+        iterations=iters,
       )
-      total_time = time.perf_counter() - tic
+      solve_time = time.perf_counter() - tic
 
       x_error = xs_nominal[-1] - task.x_goal
       goal_error = x_error.dot(task.Q @ x_error)
 
-      writer.writerow([seed, total_time, goal_error])
+      writer.writerow([seed, goal_error, solve_time, iters])
       f.flush()
 
       print(f'''
   Task: {task_cls.__name__}
   Method: {method_cls.__name__}
     seed: {seed}
-    total time: {total_time:.6f} sec
-    goal error: {goal_error:.6f}
+    goal error: {goal_error:.8f}
+    solve time: {solve_time:.4f} sec
+    iterations: {iters}
   ''')
 
   if _TESTS.value == 1:
