@@ -47,7 +47,7 @@ class ProxddpLiftedMultipleShooting:
     self.nu = nu
     self.nu_aug = nu_aug
 
-    def forward(x, u):
+    def step1(x, u):
       nq, nv = mjx_model.nq, mjx_model.nv
       d = mjx_data.replace(
           qpos=x[:nq], qvel=x[nq : nq + nv], act=x[nq + nv :], ctrl=u
@@ -55,7 +55,7 @@ class ProxddpLiftedMultipleShooting:
       d = mjx.forward(mjx_model, d)
       return d._impl.efc_force[efc_contact_addresses]
 
-    def advance(x, u, cf):
+    def step2(x, u, cf):
       efc_force = jp.zeros(mjx_data._impl.nefc)
       efc_force = efc_force.at[efc_contact_addresses].set(cf)
       return support.step_given_efc_force(mjx_model, x, u, efc_force)
@@ -109,8 +109,8 @@ class ProxddpLiftedMultipleShooting:
       u = u_aug[:nu]
       cf = u_aug[nu:]
       return jp.concatenate([
-          xnext - advance(x, u, cf),
-          cf - forward(x, u),
+          xnext - step2(x, u, cf),
+          cf - step1(x, u),
       ])
 
     def initial_state_constraint(x, params):

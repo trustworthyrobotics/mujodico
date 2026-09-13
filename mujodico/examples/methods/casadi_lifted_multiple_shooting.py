@@ -55,21 +55,20 @@ class CasadiLiftedMultipleShooting:
     nsoc = len(socs)
 
     @jax.jit
-    def forward(x, u):
+    def step1(x, u):
       nq, nv = mjx_model.nq, mjx_model.nv
       d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u,)
       d = mjx.forward(mjx_model, d)
       return d._impl.efc_force[efc_contact_addresses]
 
     @jax.jit
-    def advance(x, u, cf):
+    def step2(x, u, cf):
       efc_force = jp.zeros(mjx_data._impl.nefc)
       efc_force = efc_force.at[efc_contact_addresses].set(cf)
-
       return support.step_given_efc_force(mjx_model, x, u, efc_force)
 
-    self._forward_cb = casadi_support.JaxCallback('mjx_forward', forward, [nx, nu], ncf)
-    self._advance_cb = casadi_support.JaxCallback('mjx_advance', advance, [nx, nu, ncf], nx)
+    self._step1_cb = casadi_support.JaxCallback('mjx_step1', step1, [nx, nu], ncf)
+    self._step2_cb = casadi_support.JaxCallback('mjx_step2', step2, [nx, nu, ncf], nx)
 
     nvar = N * (nx + nu + ncf) + nx
     vars = ca.MX.sym('var', nvar, 1)
@@ -117,11 +116,11 @@ class CasadiLiftedMultipleShooting:
       obj += ca.mtimes([dx.T, Q, dx])
       obj += ca.mtimes([du.T, R, du])
 
-      dyn_resid = xnext - self._advance_cb(x, u, cf)
-      force_resid = cf - self._forward_cb(x, u)
+      xnext_resid = xnext - self._step2_cb(x, u, cf)
+      cf_resid = cf - self._step1_cb(x, u)
 
-      g_list.append(dyn_resid)
-      g_list.append(force_resid)
+      g_list.append(xnext_resid)
+      g_list.append(cf_resid)
 
       if nsoc > 0:
         g_list.append(soc_constraint(cf))

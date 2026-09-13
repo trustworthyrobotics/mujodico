@@ -53,7 +53,7 @@ class IpoptLiftedMultipleShooting:
     self.ncf = ncf
     nsoc = len(socs)
 
-    def forward(x, u):
+    def step1(x, u):
       nq, nv = mjx_model.nq, mjx_model.nv
       d = mjx_data.replace(
           qpos=x[:nq], qvel=x[nq : nq + nv], act=x[nq + nv :], ctrl=u
@@ -64,7 +64,7 @@ class IpoptLiftedMultipleShooting:
 
       return cf
 
-    def advance(x, u, cf):
+    def step2(x, u, cf):
       # TODO(wei-chen): consider using computed force with stop gradient instead of zero
       efc_force = jp.zeros(mjx_data._impl.nefc)
       efc_force = efc_force.at[efc_contact_addresses].set(cf)
@@ -84,8 +84,8 @@ class IpoptLiftedMultipleShooting:
 
     def stage_constraint(x, u, cf, xnext):
       return jp.concatenate([
-          xnext - advance(x, u, cf),
-          cf - forward(x, u),
+          xnext - step2(x, u, cf),
+          cf - step1(x, u),
           soc_constraint(cf),
       ])
 
@@ -127,8 +127,8 @@ class IpoptLiftedMultipleShooting:
       xs, us, cfs = self._unpack(vars)
 
       def stage_constraints_jac(x, u, cf):
-        A, B, C = jax.jacfwd(advance, argnums=(0, 1, 2))(x, u, cf)
-        Acf, Bcf = jax.jacfwd(forward, argnums=(0, 1))(x, u)
+        A, B, C = jax.jacfwd(step2, argnums=(0, 1, 2))(x, u, cf)
+        Acf, Bcf = jax.jacfwd(step1, argnums=(0, 1))(x, u)
         Jsoc = jax.jacfwd(soc_constraint)(cf)
         return jp.concatenate([
             (-A).ravel(),
