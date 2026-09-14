@@ -25,6 +25,7 @@ class Task:
   u_ref: np.ndarray
   R: np.ndarray
   contact_smoothing: float
+  quaternion_starts: tuple = ()
 
   @property
   def nx(self):
@@ -42,6 +43,15 @@ class Task:
     assert self.Qf.shape == (nx, nx)
     assert self.u_ref.shape == (nu,)
     assert self.R.shape == (nu, nu)
+
+    x_lb, x_ub = self.x_bounds
+    assert (self.x_0 >= x_lb).all()
+    assert (self.x_0 <= x_ub).all()
+    assert (self.x_goal >= x_lb).all()
+    assert (self.x_goal <= x_ub).all()
+    u_lb, u_ub = self.u_bounds
+    assert (self.u_ref >= u_lb).all()
+    assert (self.u_ref <= u_ub).all()
 
   @property
   def x_bounds(self):
@@ -119,6 +129,7 @@ Task: {self.__class__.__name__}
   horizon = {self.horizon}
   nx = {self.nx} (nq={self.model.nq}, nv={self.model.nv}, na={self.model.na})
   nu = {self.nu}
+  {f'quaternion_starts={self.quaternion_starts}' if self.quaternion_starts else 'no quaternions'}
   x_0 = {self.x_0}
   x_goal = {self.x_goal}
   diag(Q) = {np.diag(self.Q)}
