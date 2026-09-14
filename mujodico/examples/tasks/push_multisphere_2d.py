@@ -70,7 +70,7 @@ _XML = """
 
 class PushMultiSphere2d(Task):
 
-  def __init__(self, seed):
+  def __init__(self, seed=0):
     model = mujoco.MjModel.from_xml_string(_XML)
     horizon = 100
 

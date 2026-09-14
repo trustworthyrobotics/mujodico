@@ -50,7 +50,7 @@ _XML = """
 
 class FingerCircularKnob(Task):
 
-  def __init__(self, seed):
+  def __init__(self, seed=0):
     model = mujoco.MjModel.from_xml_string(_XML)
     horizon = 400
 
@@ -125,5 +125,5 @@ class FingerCircularKnob(Task):
 
 
 if __name__ == '__main__':
-  task = PushCircularKnob()
+  task = FingerCircularKnob()
   task.print_summary()
