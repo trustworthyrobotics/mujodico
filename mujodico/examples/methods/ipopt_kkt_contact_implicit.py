@@ -93,11 +93,13 @@ class IpoptKKTContactImplicit:
     def objective(vars: jax.Array):
       xs, us, cfs = self._unpack(vars)
 
-      dx = xs[:-1] - x_goal
-      dxf = xs[-1] - x_goal
       du = us - u_ref
 
-      cost = jp.sum((dx @ Q) * dx) + jp.sum((du @ R) * du) + dxf @ Qf @ dxf
+      cost = (
+          jp.sum(jax.vmap(lambda x: support.state_cost(Qf, x_goal, x, task.quaternion_starts))(xs[:-1]))
+          + jp.sum((du @ R) * du)
+          + support.state_cost(Qf, x_goal, xs[-1], task.quaternion_starts)
+      )
       return cost
 
     def constraints(vars: jax.Array):

@@ -125,3 +125,66 @@ def extract_contact_indices(
       raise ValueError('Near zero friction not allowed')
 
   return efc_contact_addresses, socs
+
+
+import numpy as np
+import jax.numpy as jnp
+
+try:
+    import casadi as ca
+except ImportError:
+    ca = None
+
+
+def state_cost(
+    Q,
+    x_goal,
+    x,
+    quaternion_starts: tuple[int, ...],
+):
+  try:
+    import casadi as ca
+  except ImportError:
+    ca = None
+
+  if ca is not None and isinstance(x, (ca.SX, ca.MX, ca.DM)):
+    backend = 'casadi'
+  elif isinstance(x, jax.Array):
+    backend = 'jax'
+  elif isinstance(x, np.ndarray):
+    backend = 'numpy'
+  else:
+    raise TypeError(f'Unsupported type: {type(x)}')
+
+  e = x - x_goal
+
+  for start in quaternion_starts:
+    if backend == 'jax':
+      e = e.at[start:start + 4].set(0.0)
+    elif backend == 'numpy':
+      e[start:start + 4] = 0.0
+    elif backend == 'csadi':
+      e = ca.vertcat(
+          e[:start],
+          ca.DM.zeros(4, 1),
+          e[start + 4:],
+      )
+
+  cost = e.T @ Q @ e
+
+  for start in quaternion_starts:
+    q = x[start:start+4]
+    q_goal = x_goal[start:start+4]
+
+    Q_block = Q[start:start+4, start:start+4]
+
+    if backend == 'jax':
+      weight = jp.mean(jp.diag(Q_block))
+    elif backend == 'numpy':
+      weight = np.mean(np.diag(Q_block))
+    elif backend == 'casadi':
+      weight = ca.trace(Q_block) / 4.0
+
+    cost += weight * (1.0 - (q.T @ q_goal)**2)
+
+  return cost

@@ -70,7 +70,10 @@ class IpoptMultipleShooting:
       )
 
     def stage_objective(x, u):
-      return (x - x_goal).dot(Q @ (x - x_goal)) + (u - u_ref).dot(R @ (u - u_ref))
+      return (
+          support.state_cost(Q, x_goal, x, task.quaternion_starts)
+          + (u - u_ref).dot(R @ (u - u_ref))
+      )
 
     def stage_constraint(x, u, xnext):
       return xnext - step(x, u)
@@ -95,7 +98,10 @@ class IpoptMultipleShooting:
 
       per_stage_cost = jax.vmap(stage_objective)(xs[:-1], us)
 
-      cost = jp.sum(per_stage_cost) + (xs[-1] - x_goal).dot(Qf @ (xs[-1] - x_goal))
+      cost = (
+          jp.sum(per_stage_cost)
+          + support.state_cost(Qf, x_goal, xs[-1], task.quaternion_starts)
+      )
       return cost
 
     def constraints(vars: jax.Array):

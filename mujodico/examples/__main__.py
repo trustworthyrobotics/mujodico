@@ -84,8 +84,9 @@ def _main(argv) -> None:
       )
       solve_time = time.perf_counter() - tic
 
-      x_error = xs_nominal[-1] - task.x_goal
-      goal_error = x_error.dot(task.Q @ x_error)
+      goal_error = support.state_cost(
+          task.Q, task.x_goal, xs_nominal[-1], task.quaternion_starts
+      )
 
       writer.writerow([seed, goal_error, solve_time, iters])
       f.flush()

@@ -100,10 +100,13 @@ class ProxddpLiftedMultipleShooting:
 
     def stage_cost(x, u_aug, params):
       u = u_aug[:nu]
-      return (x - x_goal).dot(Q @ (x - x_goal)) + (u - u_ref).dot(R @ (u - u_ref))
+      return (
+          support.state_cost(Qf, x_goal, x, task.quaternion_starts)
+          + (u - u_ref).dot(R @ (u - u_ref))
+      )
 
     def terminal_cost(x, params):
-      return (x - x_goal).dot(Qf @ (x - x_goal))
+      return support.state_cost(Qf, x_goal, x, task.quaternion_starts)
 
     def implicit_dynamics(x, u_aug, xnext, params):
       u = u_aug[:nu]

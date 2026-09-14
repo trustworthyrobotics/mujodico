@@ -79,11 +79,13 @@ class IpoptSingleShooting:
       us = vars.reshape(N, nu)
       xs = rollout(x_0, us)
 
-      dx = xs[:-1] - x_goal
-      dxf = xs[-1] - x_goal
       du = us - u_ref
 
-      cost = jp.sum((dx @ Q) * dx) + jp.sum((du @ R) * du) + dxf @ Qf @ dxf
+      cost = (
+          jp.sum(jax.vmap(lambda x: support.state_cost(Qf, x_goal, x, task.quaternion_starts))(xs[:-1]))
+          + jp.sum((du @ R) * du)
+          + support.state_cost(Qf, x_goal, xs[-1], task.quaternion_starts)
+      )
       return cost
 
     vars_trace = jp.zeros((N, nu)).ravel()
