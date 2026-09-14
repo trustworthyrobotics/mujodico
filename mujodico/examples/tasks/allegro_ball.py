@@ -58,8 +58,9 @@ class AllegroBall(Task):
     x_0[8:12] = np.deg2rad([0, 50, 60, 30])
     x_0[12:16] = np.deg2rad([30, 120, 80, 60])
 
-    goal_pos = np.array([0.0, 0.03, 0.0])
-    goal_angle = np.deg2rad(0)
+    rng = np.random.default_rng(seed)
+    goal_pos = rng.uniform([-0.03, -0.03, 0.0], [0.03, 0.03, 0.0])
+    goal_angle = np.deg2rad(rng.uniform(-30, 30))
 
     x_goal = x_0.copy()
     x_goal[16:19] += goal_pos
