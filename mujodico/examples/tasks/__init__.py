@@ -1,4 +1,5 @@
 from mujodico.examples.tasks import allegro_ball
+from mujodico.examples.tasks import allegro_pen
 from mujodico.examples.tasks import finger_circular_knob
 from mujodico.examples.tasks import fingers_sphere_2d
 from mujodico.examples.tasks import push_box_2d
@@ -20,6 +21,7 @@ _TASKS = [
     finger_circular_knob.FingerCircularKnob,
     fingers_sphere_2d.FingersSphere2d,
     allegro_ball.AllegroBall,
+    allegro_pen.AllegroPen,
 ]
 
 
