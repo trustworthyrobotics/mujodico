@@ -175,6 +175,9 @@ def state_cost(
   for start in quaternion_starts:
     q = x[start:start+4]
     q_goal = x_goal[start:start+4]
+    if backend == 'jax':
+      q = mjx._src.math.normalize(q)
+      q_goal = mjx._src.math.normalize(q_goal)
 
     Q_block = Q[start:start+4, start:start+4]
 
