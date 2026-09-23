@@ -752,6 +752,6 @@ def make_constraint(m: Model, d: Data) -> Data:
       '_impl.efc_pos': pos,
       '_impl.efc_margin': margin,
   })
-  d = d.tree_replace({'_impl.efc_frictionloss': frictionloss})
+  d = d.tree_replace({'_impl.efc_frictionloss': frictionloss})  # pyrefly: ignore[bad-assignment]
 
   return d

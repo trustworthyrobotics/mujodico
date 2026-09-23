@@ -64,7 +64,7 @@ def benchmark(
   xla_flags += ' --xla_gpu_triton_gemm_any=True'
   os.environ['XLA_FLAGS'] = xla_flags
 
-  m.opt.solver = {
+  m.opt.solver = {  # pyrefly: ignore[bad-assignment]
       'cg': mujoco.mjtSolver.mjSOL_CG,
       'newton': mujoco.mjtSolver.mjSOL_NEWTON,
   }[solver.lower()]
@@ -450,7 +450,7 @@ def create_mjcf(
     if p(80):
       continue
 
-    geom1, geom2 = np.random.choice(geom_names, replace=False, size=2)
+    geom1, geom2 = np.random.choice(geom_names, replace=False, size=2)  # pyrefly: ignore[no-matching-overload]
     if geom1 > geom2:
       geom1, geom2 = geom2, geom1
 
@@ -468,7 +468,7 @@ def create_mjcf(
     if p(50):
       continue
 
-    body1, body2 = np.random.choice(body_names, replace=False, size=2)
+    body1, body2 = np.random.choice(body_names, replace=False, size=2)  # pyrefly: ignore[no-matching-overload]
     ET.SubElement(contact, 'exclude', {'body1': body1, 'body2': body2})
 
   # ElementTree.indent is not available before Python 3.9

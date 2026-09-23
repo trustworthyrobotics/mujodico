@@ -117,11 +117,14 @@ class EnableBit(enum.IntFlag):
 
   Attributes:
     INVDISCRETE: discrete-time inverse dynamics
+    SLEEP: sleeping
+    IPC: IPC flex contact mode of the discrete integrator
   """
 
   INVDISCRETE = mujoco.mjtEnableBit.mjENBL_INVDISCRETE
-  # unsupported: OVERRIDE, ENERGY, FWDINV, ISLAND
+  # unsupported: OVERRIDE, ENERGY, FWDINV, ISLAND, DIAGEXACT
   SLEEP = mujoco.mjtEnableBit.mjENBL_SLEEP
+  IPC = mujoco.mjtEnableBit.mjENBL_IPC
 
 
 class JointType(enum.IntEnum):
@@ -134,10 +137,10 @@ class JointType(enum.IntEnum):
     HINGE: rotation angle (rad) around body-fixed axis  (1,)
   """
 
-  FREE = mujoco.mjtJoint.mjJNT_FREE
-  BALL = mujoco.mjtJoint.mjJNT_BALL
-  SLIDE = mujoco.mjtJoint.mjJNT_SLIDE
-  HINGE = mujoco.mjtJoint.mjJNT_HINGE
+  FREE = mujoco.mjtJoint.mjJNT_FREE  # pyrefly: ignore[bad-assignment]
+  BALL = mujoco.mjtJoint.mjJNT_BALL  # pyrefly: ignore[bad-assignment]
+  SLIDE = mujoco.mjtJoint.mjJNT_SLIDE  # pyrefly: ignore[bad-assignment]
+  HINGE = mujoco.mjtJoint.mjJNT_HINGE  # pyrefly: ignore[bad-assignment]
 
   def dof_width(self) -> int:
     return {0: 6, 1: 3, 2: 1, 3: 1}[self.value]
@@ -153,11 +156,13 @@ class IntegratorType(enum.IntEnum):
     EULER: semi-implicit Euler
     RK4: 4th-order Runge Kutta
     IMPLICITFAST: implicit in velocity, no rne derivative
+    DISCRETE: discrete step map
   """
 
-  EULER = mujoco.mjtIntegrator.mjINT_EULER
-  RK4 = mujoco.mjtIntegrator.mjINT_RK4
-  IMPLICITFAST = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
+  EULER = mujoco.mjtIntegrator.mjINT_EULER  # pyrefly: ignore[bad-assignment]
+  RK4 = mujoco.mjtIntegrator.mjINT_RK4  # pyrefly: ignore[bad-assignment]
+  IMPLICITFAST = mujoco.mjtIntegrator.mjINT_IMPLICITFAST  # pyrefly: ignore[bad-assignment]
+  DISCRETE = mujoco.mjtIntegrator.mjINT_DISCRETE  # pyrefly: ignore[bad-assignment]
   # unsupported: IMPLICIT
 
 
@@ -176,14 +181,14 @@ class GeomType(enum.IntEnum):
     SDF: signed distance field
   """
 
-  PLANE = mujoco.mjtGeom.mjGEOM_PLANE
-  HFIELD = mujoco.mjtGeom.mjGEOM_HFIELD
-  SPHERE = mujoco.mjtGeom.mjGEOM_SPHERE
-  CAPSULE = mujoco.mjtGeom.mjGEOM_CAPSULE
-  ELLIPSOID = mujoco.mjtGeom.mjGEOM_ELLIPSOID
-  CYLINDER = mujoco.mjtGeom.mjGEOM_CYLINDER
-  BOX = mujoco.mjtGeom.mjGEOM_BOX
-  MESH = mujoco.mjtGeom.mjGEOM_MESH
+  PLANE = mujoco.mjtGeom.mjGEOM_PLANE  # pyrefly: ignore[bad-assignment]
+  HFIELD = mujoco.mjtGeom.mjGEOM_HFIELD  # pyrefly: ignore[bad-assignment]
+  SPHERE = mujoco.mjtGeom.mjGEOM_SPHERE  # pyrefly: ignore[bad-assignment]
+  CAPSULE = mujoco.mjtGeom.mjGEOM_CAPSULE  # pyrefly: ignore[bad-assignment]
+  ELLIPSOID = mujoco.mjtGeom.mjGEOM_ELLIPSOID  # pyrefly: ignore[bad-assignment]
+  CYLINDER = mujoco.mjtGeom.mjGEOM_CYLINDER  # pyrefly: ignore[bad-assignment]
+  BOX = mujoco.mjtGeom.mjGEOM_BOX  # pyrefly: ignore[bad-assignment]
+  MESH = mujoco.mjtGeom.mjGEOM_MESH  # pyrefly: ignore[bad-assignment]
   # unsupported: NGEOMTYPES, ARROW*, LINE, SKIN, LABEL, NONE
 
 
@@ -213,8 +218,8 @@ class ConeType(enum.IntEnum):
     ELLIPTIC: elliptic
   """
 
-  PYRAMIDAL = mujoco.mjtCone.mjCONE_PYRAMIDAL
-  ELLIPTIC = mujoco.mjtCone.mjCONE_ELLIPTIC
+  PYRAMIDAL = mujoco.mjtCone.mjCONE_PYRAMIDAL  # pyrefly: ignore[bad-assignment]
+  ELLIPTIC = mujoco.mjtCone.mjCONE_ELLIPTIC  # pyrefly: ignore[bad-assignment]
 
 
 class JacobianType(enum.IntEnum):
@@ -226,9 +231,9 @@ class JacobianType(enum.IntEnum):
     AUTO: sparse if nv>60 and device is TPU, dense otherwise
   """
 
-  DENSE = mujoco.mjtJacobian.mjJAC_DENSE
-  SPARSE = mujoco.mjtJacobian.mjJAC_SPARSE
-  AUTO = mujoco.mjtJacobian.mjJAC_AUTO
+  DENSE = mujoco.mjtJacobian.mjJAC_DENSE  # pyrefly: ignore[bad-assignment]
+  SPARSE = mujoco.mjtJacobian.mjJAC_SPARSE  # pyrefly: ignore[bad-assignment]
+  AUTO = mujoco.mjtJacobian.mjJAC_AUTO  # pyrefly: ignore[bad-assignment]
 
 
 class SolverType(enum.IntEnum):
@@ -240,8 +245,8 @@ class SolverType(enum.IntEnum):
   """
 
   # unsupported: PGS
-  CG = mujoco.mjtSolver.mjSOL_CG
-  NEWTON = mujoco.mjtSolver.mjSOL_NEWTON
+  CG = mujoco.mjtSolver.mjSOL_CG  # pyrefly: ignore[bad-assignment]
+  NEWTON = mujoco.mjtSolver.mjSOL_NEWTON  # pyrefly: ignore[bad-assignment]
 
 
 class EqType(enum.IntEnum):
@@ -254,10 +259,10 @@ class EqType(enum.IntEnum):
     TENDON: couple the lengths of two tendons with cubic
   """
 
-  CONNECT = mujoco.mjtEq.mjEQ_CONNECT
-  WELD = mujoco.mjtEq.mjEQ_WELD
-  JOINT = mujoco.mjtEq.mjEQ_JOINT
-  TENDON = mujoco.mjtEq.mjEQ_TENDON
+  CONNECT = mujoco.mjtEq.mjEQ_CONNECT  # pyrefly: ignore[bad-assignment]
+  WELD = mujoco.mjtEq.mjEQ_WELD  # pyrefly: ignore[bad-assignment]
+  JOINT = mujoco.mjtEq.mjEQ_JOINT  # pyrefly: ignore[bad-assignment]
+  TENDON = mujoco.mjtEq.mjEQ_TENDON  # pyrefly: ignore[bad-assignment]
   # unsupported: DISTANCE
 
 
@@ -272,11 +277,11 @@ class WrapType(enum.IntEnum):
     CYLINDER: wrap around (infinite) cylinder
   """
 
-  JOINT = mujoco.mjtWrap.mjWRAP_JOINT
-  PULLEY = mujoco.mjtWrap.mjWRAP_PULLEY
-  SITE = mujoco.mjtWrap.mjWRAP_SITE
-  SPHERE = mujoco.mjtWrap.mjWRAP_SPHERE
-  CYLINDER = mujoco.mjtWrap.mjWRAP_CYLINDER
+  JOINT = mujoco.mjtWrap.mjWRAP_JOINT  # pyrefly: ignore[bad-assignment]
+  PULLEY = mujoco.mjtWrap.mjWRAP_PULLEY  # pyrefly: ignore[bad-assignment]
+  SITE = mujoco.mjtWrap.mjWRAP_SITE  # pyrefly: ignore[bad-assignment]
+  SPHERE = mujoco.mjtWrap.mjWRAP_SPHERE  # pyrefly: ignore[bad-assignment]
+  CYLINDER = mujoco.mjtWrap.mjWRAP_CYLINDER  # pyrefly: ignore[bad-assignment]
 
 
 class TrnType(enum.IntEnum):
@@ -289,10 +294,10 @@ class TrnType(enum.IntEnum):
     SITE: force on site
   """
 
-  JOINT = mujoco.mjtTrn.mjTRN_JOINT
-  JOINTINPARENT = mujoco.mjtTrn.mjTRN_JOINTINPARENT
-  SITE = mujoco.mjtTrn.mjTRN_SITE
-  TENDON = mujoco.mjtTrn.mjTRN_TENDON
+  JOINT = mujoco.mjtTrn.mjTRN_JOINT  # pyrefly: ignore[bad-assignment]
+  JOINTINPARENT = mujoco.mjtTrn.mjTRN_JOINTINPARENT  # pyrefly: ignore[bad-assignment]
+  SITE = mujoco.mjtTrn.mjTRN_SITE  # pyrefly: ignore[bad-assignment]
+  TENDON = mujoco.mjtTrn.mjTRN_TENDON  # pyrefly: ignore[bad-assignment]
   # unsupported: SLIDERCRANK, BODY
 
 
@@ -307,11 +312,11 @@ class DynType(enum.IntEnum):
     MUSCLE: piece-wise linear filter with two time constants
   """
 
-  NONE = mujoco.mjtDyn.mjDYN_NONE
-  INTEGRATOR = mujoco.mjtDyn.mjDYN_INTEGRATOR
-  FILTER = mujoco.mjtDyn.mjDYN_FILTER
-  FILTEREXACT = mujoco.mjtDyn.mjDYN_FILTEREXACT
-  MUSCLE = mujoco.mjtDyn.mjDYN_MUSCLE
+  NONE = mujoco.mjtDyn.mjDYN_NONE  # pyrefly: ignore[bad-assignment]
+  INTEGRATOR = mujoco.mjtDyn.mjDYN_INTEGRATOR  # pyrefly: ignore[bad-assignment]
+  FILTER = mujoco.mjtDyn.mjDYN_FILTER  # pyrefly: ignore[bad-assignment]
+  FILTEREXACT = mujoco.mjtDyn.mjDYN_FILTEREXACT  # pyrefly: ignore[bad-assignment]
+  MUSCLE = mujoco.mjtDyn.mjDYN_MUSCLE  # pyrefly: ignore[bad-assignment]
   # unsupported: USER
 
 
@@ -324,9 +329,9 @@ class GainType(enum.IntEnum):
     MUSCLE: muscle FLV curve computed by muscle_gain
   """
 
-  FIXED = mujoco.mjtGain.mjGAIN_FIXED
-  AFFINE = mujoco.mjtGain.mjGAIN_AFFINE
-  MUSCLE = mujoco.mjtGain.mjGAIN_MUSCLE
+  FIXED = mujoco.mjtGain.mjGAIN_FIXED  # pyrefly: ignore[bad-assignment]
+  AFFINE = mujoco.mjtGain.mjGAIN_AFFINE  # pyrefly: ignore[bad-assignment]
+  MUSCLE = mujoco.mjtGain.mjGAIN_MUSCLE  # pyrefly: ignore[bad-assignment]
   # unsupported: USER
 
 
@@ -339,9 +344,9 @@ class BiasType(enum.IntEnum):
     MUSCLE: muscle passive force computed by muscle_bias
   """
 
-  NONE = mujoco.mjtBias.mjBIAS_NONE
-  AFFINE = mujoco.mjtBias.mjBIAS_AFFINE
-  MUSCLE = mujoco.mjtBias.mjBIAS_MUSCLE
+  NONE = mujoco.mjtBias.mjBIAS_NONE  # pyrefly: ignore[bad-assignment]
+  AFFINE = mujoco.mjtBias.mjBIAS_AFFINE  # pyrefly: ignore[bad-assignment]
+  MUSCLE = mujoco.mjtBias.mjBIAS_MUSCLE  # pyrefly: ignore[bad-assignment]
   # unsupported: USER
 
 
@@ -356,14 +361,14 @@ class ConstraintType(enum.IntEnum):
     CONTACT_PYRAMIDAL: frictional contact, pyramidal friction cone
   """
 
-  EQUALITY = mujoco.mjtConstraint.mjCNSTR_EQUALITY
-  FRICTION_DOF = mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF
-  FRICTION_TENDON = mujoco.mjtConstraint.mjCNSTR_FRICTION_TENDON
-  LIMIT_JOINT = mujoco.mjtConstraint.mjCNSTR_LIMIT_JOINT
-  LIMIT_TENDON = mujoco.mjtConstraint.mjCNSTR_LIMIT_TENDON
-  CONTACT_FRICTIONLESS = mujoco.mjtConstraint.mjCNSTR_CONTACT_FRICTIONLESS
-  CONTACT_PYRAMIDAL = mujoco.mjtConstraint.mjCNSTR_CONTACT_PYRAMIDAL
-  CONTACT_ELLIPTIC = mujoco.mjtConstraint.mjCNSTR_CONTACT_ELLIPTIC
+  EQUALITY = mujoco.mjtConstraint.mjCNSTR_EQUALITY  # pyrefly: ignore[bad-assignment]
+  FRICTION_DOF = mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF  # pyrefly: ignore[bad-assignment]
+  FRICTION_TENDON = mujoco.mjtConstraint.mjCNSTR_FRICTION_TENDON  # pyrefly: ignore[bad-assignment]
+  LIMIT_JOINT = mujoco.mjtConstraint.mjCNSTR_LIMIT_JOINT  # pyrefly: ignore[bad-assignment]
+  LIMIT_TENDON = mujoco.mjtConstraint.mjCNSTR_LIMIT_TENDON  # pyrefly: ignore[bad-assignment]
+  CONTACT_FRICTIONLESS = mujoco.mjtConstraint.mjCNSTR_CONTACT_FRICTIONLESS  # pyrefly: ignore[bad-assignment]
+  CONTACT_PYRAMIDAL = mujoco.mjtConstraint.mjCNSTR_CONTACT_PYRAMIDAL  # pyrefly: ignore[bad-assignment]
+  CONTACT_ELLIPTIC = mujoco.mjtConstraint.mjCNSTR_CONTACT_ELLIPTIC  # pyrefly: ignore[bad-assignment]
 
 
 class CamLightType(enum.IntEnum):
@@ -377,11 +382,11 @@ class CamLightType(enum.IntEnum):
     TARGETBODYCOM: pos fixed in body, rot tracks target subtree com
   """
 
-  FIXED = mujoco.mjtCamLight.mjCAMLIGHT_FIXED
-  TRACK = mujoco.mjtCamLight.mjCAMLIGHT_TRACK
-  TRACKCOM = mujoco.mjtCamLight.mjCAMLIGHT_TRACKCOM
-  TARGETBODY = mujoco.mjtCamLight.mjCAMLIGHT_TARGETBODY
-  TARGETBODYCOM = mujoco.mjtCamLight.mjCAMLIGHT_TARGETBODYCOM
+  FIXED = mujoco.mjtCamLight.mjCAMLIGHT_FIXED  # pyrefly: ignore[bad-assignment]
+  TRACK = mujoco.mjtCamLight.mjCAMLIGHT_TRACK  # pyrefly: ignore[bad-assignment]
+  TRACKCOM = mujoco.mjtCamLight.mjCAMLIGHT_TRACKCOM  # pyrefly: ignore[bad-assignment]
+  TARGETBODY = mujoco.mjtCamLight.mjCAMLIGHT_TARGETBODY  # pyrefly: ignore[bad-assignment]
+  TARGETBODYCOM = mujoco.mjtCamLight.mjCAMLIGHT_TARGETBODYCOM  # pyrefly: ignore[bad-assignment]
 
 
 class SensorType(enum.IntEnum):
@@ -424,40 +429,40 @@ class SensorType(enum.IntEnum):
     FRAMEANGACC: 3D angular acceleration
   """
 
-  MAGNETOMETER = mujoco.mjtSensor.mjSENS_MAGNETOMETER
-  CAMPROJECTION = mujoco.mjtSensor.mjSENS_CAMPROJECTION
-  RANGEFINDER = mujoco.mjtSensor.mjSENS_RANGEFINDER
-  JOINTPOS = mujoco.mjtSensor.mjSENS_JOINTPOS
-  TENDONPOS = mujoco.mjtSensor.mjSENS_TENDONPOS
-  ACTUATORPOS = mujoco.mjtSensor.mjSENS_ACTUATORPOS
-  BALLQUAT = mujoco.mjtSensor.mjSENS_BALLQUAT
-  FRAMEPOS = mujoco.mjtSensor.mjSENS_FRAMEPOS
-  FRAMEXAXIS = mujoco.mjtSensor.mjSENS_FRAMEXAXIS
-  FRAMEYAXIS = mujoco.mjtSensor.mjSENS_FRAMEYAXIS
-  FRAMEZAXIS = mujoco.mjtSensor.mjSENS_FRAMEZAXIS
-  FRAMEQUAT = mujoco.mjtSensor.mjSENS_FRAMEQUAT
-  SUBTREECOM = mujoco.mjtSensor.mjSENS_SUBTREECOM
-  CLOCK = mujoco.mjtSensor.mjSENS_CLOCK
-  VELOCIMETER = mujoco.mjtSensor.mjSENS_VELOCIMETER
-  GYRO = mujoco.mjtSensor.mjSENS_GYRO
-  JOINTVEL = mujoco.mjtSensor.mjSENS_JOINTVEL
-  TENDONVEL = mujoco.mjtSensor.mjSENS_TENDONVEL
-  ACTUATORVEL = mujoco.mjtSensor.mjSENS_ACTUATORVEL
-  BALLANGVEL = mujoco.mjtSensor.mjSENS_BALLANGVEL
-  FRAMELINVEL = mujoco.mjtSensor.mjSENS_FRAMELINVEL
-  FRAMEANGVEL = mujoco.mjtSensor.mjSENS_FRAMEANGVEL
-  SUBTREELINVEL = mujoco.mjtSensor.mjSENS_SUBTREELINVEL
-  SUBTREEANGMOM = mujoco.mjtSensor.mjSENS_SUBTREEANGMOM
-  TOUCH = mujoco.mjtSensor.mjSENS_TOUCH
-  CONTACT = mujoco.mjtSensor.mjSENS_CONTACT
-  ACCELEROMETER = mujoco.mjtSensor.mjSENS_ACCELEROMETER
-  FORCE = mujoco.mjtSensor.mjSENS_FORCE
-  TORQUE = mujoco.mjtSensor.mjSENS_TORQUE
-  ACTUATORFRC = mujoco.mjtSensor.mjSENS_ACTUATORFRC
-  JOINTACTFRC = mujoco.mjtSensor.mjSENS_JOINTACTFRC
-  TENDONACTFRC = mujoco.mjtSensor.mjSENS_TENDONACTFRC
-  FRAMELINACC = mujoco.mjtSensor.mjSENS_FRAMELINACC
-  FRAMEANGACC = mujoco.mjtSensor.mjSENS_FRAMEANGACC
+  MAGNETOMETER = mujoco.mjtSensor.mjSENS_MAGNETOMETER  # pyrefly: ignore[bad-assignment]
+  CAMPROJECTION = mujoco.mjtSensor.mjSENS_CAMPROJECTION  # pyrefly: ignore[bad-assignment]
+  RANGEFINDER = mujoco.mjtSensor.mjSENS_RANGEFINDER  # pyrefly: ignore[bad-assignment]
+  JOINTPOS = mujoco.mjtSensor.mjSENS_JOINTPOS  # pyrefly: ignore[bad-assignment]
+  TENDONPOS = mujoco.mjtSensor.mjSENS_TENDONPOS  # pyrefly: ignore[bad-assignment]
+  ACTUATORPOS = mujoco.mjtSensor.mjSENS_ACTUATORPOS  # pyrefly: ignore[bad-assignment]
+  BALLQUAT = mujoco.mjtSensor.mjSENS_BALLQUAT  # pyrefly: ignore[bad-assignment]
+  FRAMEPOS = mujoco.mjtSensor.mjSENS_FRAMEPOS  # pyrefly: ignore[bad-assignment]
+  FRAMEXAXIS = mujoco.mjtSensor.mjSENS_FRAMEXAXIS  # pyrefly: ignore[bad-assignment]
+  FRAMEYAXIS = mujoco.mjtSensor.mjSENS_FRAMEYAXIS  # pyrefly: ignore[bad-assignment]
+  FRAMEZAXIS = mujoco.mjtSensor.mjSENS_FRAMEZAXIS  # pyrefly: ignore[bad-assignment]
+  FRAMEQUAT = mujoco.mjtSensor.mjSENS_FRAMEQUAT  # pyrefly: ignore[bad-assignment]
+  SUBTREECOM = mujoco.mjtSensor.mjSENS_SUBTREECOM  # pyrefly: ignore[bad-assignment]
+  CLOCK = mujoco.mjtSensor.mjSENS_CLOCK  # pyrefly: ignore[bad-assignment]
+  VELOCIMETER = mujoco.mjtSensor.mjSENS_VELOCIMETER  # pyrefly: ignore[bad-assignment]
+  GYRO = mujoco.mjtSensor.mjSENS_GYRO  # pyrefly: ignore[bad-assignment]
+  JOINTVEL = mujoco.mjtSensor.mjSENS_JOINTVEL  # pyrefly: ignore[bad-assignment]
+  TENDONVEL = mujoco.mjtSensor.mjSENS_TENDONVEL  # pyrefly: ignore[bad-assignment]
+  ACTUATORVEL = mujoco.mjtSensor.mjSENS_ACTUATORVEL  # pyrefly: ignore[bad-assignment]
+  BALLANGVEL = mujoco.mjtSensor.mjSENS_BALLANGVEL  # pyrefly: ignore[bad-assignment]
+  FRAMELINVEL = mujoco.mjtSensor.mjSENS_FRAMELINVEL  # pyrefly: ignore[bad-assignment]
+  FRAMEANGVEL = mujoco.mjtSensor.mjSENS_FRAMEANGVEL  # pyrefly: ignore[bad-assignment]
+  SUBTREELINVEL = mujoco.mjtSensor.mjSENS_SUBTREELINVEL  # pyrefly: ignore[bad-assignment]
+  SUBTREEANGMOM = mujoco.mjtSensor.mjSENS_SUBTREEANGMOM  # pyrefly: ignore[bad-assignment]
+  TOUCH = mujoco.mjtSensor.mjSENS_TOUCH  # pyrefly: ignore[bad-assignment]
+  CONTACT = mujoco.mjtSensor.mjSENS_CONTACT  # pyrefly: ignore[bad-assignment]
+  ACCELEROMETER = mujoco.mjtSensor.mjSENS_ACCELEROMETER  # pyrefly: ignore[bad-assignment]
+  FORCE = mujoco.mjtSensor.mjSENS_FORCE  # pyrefly: ignore[bad-assignment]
+  TORQUE = mujoco.mjtSensor.mjSENS_TORQUE  # pyrefly: ignore[bad-assignment]
+  ACTUATORFRC = mujoco.mjtSensor.mjSENS_ACTUATORFRC  # pyrefly: ignore[bad-assignment]
+  JOINTACTFRC = mujoco.mjtSensor.mjSENS_JOINTACTFRC  # pyrefly: ignore[bad-assignment]
+  TENDONACTFRC = mujoco.mjtSensor.mjSENS_TENDONACTFRC  # pyrefly: ignore[bad-assignment]
+  FRAMELINACC = mujoco.mjtSensor.mjSENS_FRAMELINACC  # pyrefly: ignore[bad-assignment]
+  FRAMEANGACC = mujoco.mjtSensor.mjSENS_FRAMEANGACC  # pyrefly: ignore[bad-assignment]
 
 
 class ObjType(PyTreeNode):
@@ -665,6 +670,8 @@ class Model(PyTreeNode):
   nJmom: int  # pylint:disable=invalid-name
   nJten: int  # pylint:disable=invalid-name
   ngravcomp: int
+  flg_gravcomp: bool
+  flg_surfacevel: bool
   nuserdata: int
   nsensordata: int
   npluginstate: int
@@ -1189,3 +1196,53 @@ class Data(PyTreeNode):
       return attr
 
     return jax.tree.map(lambda x: x[key], self)
+
+  def where(self, done: jax.Array, other: 'Data') -> 'Data':
+    """Selectively merge self and other based on done.
+
+    Args:
+      done: Boolean array (or scalar inside vmap) indicating reset status.
+      other: Data object to select when done is True.
+
+    Returns:
+      Merged Data object.
+    """
+    if self.impl != Impl.JAX and self.impl != Impl.WARP:
+      raise NotImplementedError(
+          'where is only supported for JAX and WARP implementations.'
+      )
+
+    if self.impl == Impl.JAX:
+      return jax.tree.map(
+          lambda x, y: jax.numpy.where(done, x, y), other, self
+      )
+
+    # Warp impl:
+    def merge_leaf(path, r_val, s_val):
+      field_name = tree_path_to_attr_str(path)
+      is_batched = mjxw_types._BATCH_DIM['Data'].get(field_name, True)
+
+      if is_batched:
+        return jax.numpy.where(done, r_val, s_val)
+      else:
+        return s_val
+
+    return jax.tree_util.tree_map_with_path(merge_leaf, other, self)
+
+
+def tree_path_to_attr_str(path: jax.tree_util.KeyPath) -> str:
+  """Converts a tree path to a dataclass attribute string."""
+  if not isinstance(path, tuple):
+    raise NotImplementedError(
+        f'Parsing for jax tree path {path} not implemented.'
+    )
+
+  if any(isinstance(p, jax.tree_util.SequenceKey) for p in path):
+    # get the path up to the first sequence key, we assume variadic sequences
+    is_seq_key = [isinstance(p, jax.tree_util.SequenceKey) for p in path]
+    path = path[: is_seq_key.index(True)]
+
+  assert all(isinstance(p, jax.tree_util.GetAttrKey) for p in path)
+  path = [p for p in path if p.name != '_impl']  # pyrefly: ignore[bad-assignment]
+  return '__'.join(p.name for p in path)
+

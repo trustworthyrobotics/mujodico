@@ -172,7 +172,7 @@ def com_pos(m: Model, d: Data) -> Data:
   root_com = subtree_com[m.body_rootid]
   offset = d.xipos - root_com
   cinert = inert_com(m.body_inertia, d.ximat, offset, m.body_mass)
-  d = d.tree_replace({'_impl.cinert': cinert})
+  d = d.tree_replace({'_impl.cinert': cinert})  # pyrefly: ignore[bad-assignment]
 
   # map motion dofs to global frame centered at subtree_com
   def cdof_fn(jnt_typs, root_com, xmat, xanchor, xaxis):
@@ -211,7 +211,7 @@ def com_pos(m: Model, d: Data) -> Data:
       d.xanchor,
       d.xaxis,
   )
-  d = d.tree_replace({'cdof': cdof})
+  d = d.tree_replace({'cdof': cdof})  # pyrefly: ignore[bad-assignment]
 
   return d
 
@@ -301,12 +301,12 @@ def crb(m: Model, d: Data) -> Data:
 
   crb_body = scan.body_tree(m, crb_fn, 'b', 'b', d._impl.cinert, reverse=True)
   crb_body = crb_body.at[0].set(0.0)
-  d = d.tree_replace({'_impl.crb': crb_body})
+  d = d.tree_replace({'_impl.crb': crb_body})  # pyrefly: ignore[bad-assignment]
 
   crb_dof = jp.take(crb_body, jp.array(m.dof_bodyid), axis=0)
   crb_cdof = jax.vmap(math.inert_mul)(crb_dof, d.cdof)
   qm = support.make_m(m, crb_cdof, d.cdof, m.dof_armature)
-  d = d.tree_replace({'_impl.M': qm})
+  d = d.tree_replace({'_impl.M': qm})  # pyrefly: ignore[bad-assignment]
   return d
 
 
@@ -317,7 +317,7 @@ def factor_m(m: Model, d: Data) -> Data:
 
   if not support.is_sparse(m):
     qh, _ = jax.scipy.linalg.cho_factor(d._impl.M)
-    d = d.tree_replace({'_impl.qLD': qh})
+    d = d.tree_replace({'_impl.qLD': qh})  # pyrefly: ignore[bad-assignment]
     return d
 
   depth = []
@@ -366,7 +366,7 @@ def factor_m(m: Model, d: Data) -> Data:
   qld_diag = qld[diag_adr]
   qld = (qld / qld[np.array(diag_ds)]).at[diag_adr].set(qld_diag)
 
-  d = d.tree_replace({'_impl.qLD': qld, '_impl.qLDiagInv': 1 / qld_diag})
+  d = d.tree_replace({'_impl.qLD': qld, '_impl.qLDiagInv': 1 / qld_diag})  # pyrefly: ignore[bad-assignment]
   return d
 
 
@@ -447,7 +447,7 @@ def com_vel(m: Model, d: Data) -> Data:
       d.qvel,
   )
 
-  d = d.tree_replace({'cvel': cvel, 'cdof_dot': cdof_dot})
+  d = d.tree_replace({'cvel': cvel, 'cdof_dot': cdof_dot})  # pyrefly: ignore[bad-assignment]
 
   return d
 
@@ -543,7 +543,7 @@ def subtree_vel(m: Model, d: Data) -> Data:
       reverse=True,
   )
 
-  return d.tree_replace({
+  return d.tree_replace({  # pyrefly: ignore[bad-return]
       '_impl.subtree_linvel': subtree_linvel,
       '_impl.subtree_angmom': subtree_angmom,
   })
@@ -740,6 +740,32 @@ def rne_postconstraint(m: Model, d: Data) -> Data:
       pos1 = jp.where(is_site[:, None], m.site_pos[m.eq_obj1id], pos1)
       pos2 = jp.where(is_site[:, None], m.site_pos[m.eq_obj2id], pos2)
 
+    quat1 = jax.vmap(math.quat_mul)(d.xquat[body1id], m.eq_data[:, 6:10])
+    quat2 = d.xquat[body2id]
+
+    if m.nsite:
+      quat1_site = jax.vmap(math.quat_mul)(
+          d.xquat[body1id], m.site_quat[m.eq_obj1id]
+      )
+      quat2_site = jax.vmap(math.quat_mul)(
+          d.xquat[body2id], m.site_quat[m.eq_obj2id]
+      )
+      quat1 = jp.where(is_site[:, None], quat1_site, quat1)
+      quat2 = jp.where(is_site[:, None], quat2_site, quat2)
+
+    # the rotational rows are 0.5*torquescale * neg(q2)*(jac1-jac2)*q1, so the
+    # torque is the adjoint applied to the multiplier: 0.5*torquescale * q2*f*neg(q1)
+    def _weld_torque(q1, q2, frc, torquescale):
+      quat = math.quat_mul(math.quat_mul_axis(q2, frc), math.quat_inv(q1))
+      return 0.5 * torquescale * quat[1:]
+
+    cfrc_weld_torque = jax.vmap(_weld_torque)(
+        quat1[weld_id],
+        quat2[weld_id],
+        cfrc_weld_torque,
+        m.eq_data[weld_id, 10],
+    )
+
     # body 1
     k1_weld = body1id[weld_id]
     k1_weld_mask = k1_weld != 0
@@ -840,7 +866,7 @@ def rne_postconstraint(m: Model, d: Data) -> Data:
   )
 
   # update data
-  return d.tree_replace({
+  return d.tree_replace({  # pyrefly: ignore[bad-return]
       '_impl.cacc': cacc,
       '_impl.cfrc_int': cfrc_int,
       '_impl.cfrc_ext': cfrc_ext,
@@ -999,7 +1025,7 @@ def tendon(m: Model, d: Data) -> Data:
       geom_xmat[wrap_inside_id],
       geom_size[wrap_inside_id],
       side[wrap_inside_id],
-      has_sidesite[wrap_inside_id],
+      has_sidesite[wrap_inside_id],  # pyrefly: ignore[bad-argument-type]
       is_sphere[wrap_inside_id],
       True,
       m._impl.wrap_inside_maxiter,
@@ -1014,7 +1040,7 @@ def tendon(m: Model, d: Data) -> Data:
       geom_xmat[wrap_outside_id],
       geom_size[wrap_outside_id],
       side[wrap_outside_id],
-      has_sidesite[wrap_outside_id],
+      has_sidesite[wrap_outside_id],  # pyrefly: ignore[bad-argument-type]
       is_sphere[wrap_outside_id],
       False,
       m._impl.wrap_inside_maxiter,
@@ -1171,7 +1197,7 @@ def tendon(m: Model, d: Data) -> Data:
       [wrap_obj[sort], jp.zeros(2 * m.nwrap - count, dtype=int)]
   ).reshape((m.nwrap, 2))
 
-  return d.tree_replace({
+  return d.tree_replace({  # pyrefly: ignore[bad-return]
       'ten_length': ten_length,
       '_impl.ten_J': ten_moment,
       '_impl.ten_wrapadr': jp.array(ten_wrapadr, dtype=int),
@@ -1275,7 +1301,7 @@ def transmission(m: Model, d: Data) -> Data:
       moment = jac @ wrench
     elif trntype == TrnType.TENDON:
       length = d.ten_length[trnid[0]] * gear[:1]
-      moment = d._impl.ten_J[trnid[0]] * gear[0]
+      moment = d._impl.ten_J[trnid[0]] * gear[0]  # pyrefly: ignore[missing-attribute]
     else:
       raise RuntimeError(f'unrecognized trntype: {TrnType(trntype)}')
 
@@ -1307,7 +1333,7 @@ def transmission(m: Model, d: Data) -> Data:
   length = length.reshape((m.nu,))
   moment = moment.reshape((m.nu, m.nv))
 
-  d = d.tree_replace(
+  d = d.tree_replace(  # pyrefly: ignore[bad-assignment]
       {'actuator_length': length, '_impl.actuator_moment': moment}
   )
   return d
@@ -1331,7 +1357,7 @@ def tendon_armature(m: Model, d: Data) -> Data:
     j = m.M_colind
     JTAJ = JTAJ[(i, j)]
 
-  return d.tree_replace({'_impl.M': d._impl.M + JTAJ})
+  return d.tree_replace({'_impl.M': d._impl.M + JTAJ})  # pyrefly: ignore[bad-return]
 
 
 def tendon_dot(m: Model, d: Data) -> jax.Array:
@@ -1456,7 +1482,7 @@ def tendon_bias(m: Model, d: Data) -> Data:
   # add bias term: qfrc += ten_J * armature * ten_Jdot @ qvel
   coef = m.tendon_armature * jp.dot(ten_Jdot, d.qvel)
 
-  return d.tree_replace({
+  return d.tree_replace({  # pyrefly: ignore[bad-return]
       'qfrc_bias': (
           d.qfrc_bias
           + jp.sum(jax.vmap(jp.multiply)(d._impl.ten_J, coef), axis=0)
