@@ -5,12 +5,10 @@ import ctypes
 from functools import reduce
 
 import warp as wp
-from warp._src.context import type_str
-from warp._src.jax import get_jax_device
-from warp._src.types import array_t, launch_bounds_t, matches_array_class, strides_from_shape
-from warp._src.utils import warn
-
-_wp_module_name_ = "warp.jax_experimental.custom_call"
+from warp._src.context import _build_kernel_launch_bounds, _raise_cuda_launch_error, _validate_cluster_launch, type_str
+from mujoco.mjx.third_party.warp._src.jax import get_jax_device
+from warp._src.logger import log_warning
+from warp._src.types import array_t, matches_array_class, strides_from_shape
 
 _jax_warp_p = None
 
@@ -25,11 +23,11 @@ def jax_kernel(kernel, launch_dims=None, quiet=False):
 
     .. deprecated:: 1.10.0
         This version of ``jax_kernel()`` is deprecated for JAX >= 0.5.0 and is not supported
-        with JAX >= 0.8.0. Use :func:`warp.jax_experimental.ffi.jax_kernel` instead, which
+        with JAX >= 0.8.0. Use :func:`warp.jax_kernel` instead, which
         is the default implementation as of Warp 1.10.
 
     This implementation requires JAX version 0.4.25 - 0.7.x. For JAX 0.8.0 and later,
-    use the FFI-based implementation at :func:`warp.jax_experimental.ffi.jax_kernel`.
+    use the FFI-based implementation at :func:`warp.jax_kernel`.
 
     Args:
         kernel: The Warp kernel to be wrapped.
@@ -56,14 +54,14 @@ def jax_kernel(kernel, launch_dims=None, quiet=False):
             f"but installed JAX version is {jax.__version_info__}."
         )
         if jax.__version_info__ >= (0, 8, 0):
-            msg += " Please use warp.jax_experimental.ffi.jax_kernel instead."
+            msg += " Please use warp.jax_kernel instead."
         raise RuntimeError(msg)
 
     # deprecation warning
     if jax.__version_info__ >= (0, 5, 0) and not quiet:
-        warn(
+        log_warning(
             "This version of jax_kernel() is deprecated and will not be supported with newer JAX versions. "
-            "Please use the newer FFI version instead (warp.jax_experimental.ffi.jax_kernel). "
+            "Please use the newer FFI version instead (warp.jax_kernel). "
             "As of Warp release 1.10, the FFI version is the default implementation of jax_kernel(). "
             "Pass quiet=True to disable this warning.",
             DeprecationWarning,
@@ -97,7 +95,7 @@ def _warp_custom_callback(stream, buffers, opaque, opaque_len):
 
     # Parse launch dimensions.
     dims = [int(d) for d in dim_str.split(",")]
-    bounds = launch_bounds_t(dims)
+    bounds = _build_kernel_launch_bounds(dims, kernel)
 
     # Parse arguments.
     arg_strings = args_str.split(";")
@@ -129,15 +127,30 @@ def _warp_custom_callback(stream, buffers, opaque, opaque_len):
     hooks = kernel.module.get_kernel_hooks(kernel, device)
     assert hooks.forward, "Failed to find kernel entry point"
 
-    # Launch the kernel.
-    wp._src.context.runtime.core.wp_cuda_launch_kernel(
-        device.context, hooks.forward, bounds.size, 0, 256, hooks.forward_smem_bytes, kernel_params, stream
-    )
+    # Reject non-cluster-aligned grids with a clear Python error instead of a
+    # cryptic native CUDA error (block_dim=256, max_blocks=0 below).
+    _validate_cluster_launch(hooks.cluster_dim, bounds.size, 256, 0)
+
+    # Launch the kernel (cluster_dim is cached on the hooks at load time).
+    if wp._src.context.runtime.core.wp_cuda_launch_kernel(
+        device.context,
+        hooks.forward,
+        bounds.size,
+        0,
+        256,
+        int(kernel.grid_stride),
+        hooks.cluster_dim,
+        hooks.forward_smem_bytes,
+        kernel_params,
+        stream,
+        None,
+    ):
+        _raise_cuda_launch_error(kernel, device, hooks, False)
 
 
 def _create_jax_warp_primitive():
     import jax  # noqa: PLC0415
-    from jax._src.interpreters import batching  # noqa: PLC0415
+    from jax.interpreters import batching  # noqa: PLC0415
     from jax.interpreters import mlir  # noqa: PLC0415
     from jax.interpreters.mlir import ir  # noqa: PLC0415
     from jaxlib.hlo_helpers import custom_call  # noqa: PLC0415
@@ -170,9 +183,9 @@ def _create_jax_warp_primitive():
         # Figure out the number of outputs.
         wp_kernel = _registered_kernels[params["kernel"]]
         output_count = len(wp_kernel.adj.args) - len(args)
-        shape, dim = next((a.shape, d) for a, d in zip(args, dims) if d is not None)
+        shape, dim = next((a.shape, d) for a, d in zip(args, dims, strict=True) if d is not None)
         size = shape[dim]
-        args = [batching.bdim_at_front(a, d, size) if len(a.shape) else a for a, d in zip(args, dims)]
+        args = [batching.bdim_at_front(a, d, size) if len(a.shape) else a for a, d in zip(args, dims, strict=True)]
         # Create the batched primitive.
         return _jax_warp_p.bind(*args, **params), [dims[0]] * output_count
 
@@ -211,6 +224,7 @@ def _create_jax_warp_primitive():
     def base_type_to_jax_ir(warp_dtype):
         warp_to_jax_dict = {
             wp.float16: ir.F16Type.get(),
+            wp.bfloat16: ir.BF16Type.get(),
             wp.float32: ir.F32Type.get(),
             wp.float64: ir.F64Type.get(),
             wp.int8: ir.IntegerType.get_signless(8),
@@ -232,6 +246,7 @@ def _create_jax_warp_primitive():
     def base_type_is_compatible(warp_type, jax_ir_type):
         jax_ir_to_warp = {
             "f16": wp.float16,
+            "bf16": wp.bfloat16,
             "f32": wp.float32,
             "f64": wp.float64,
             "i8": wp.int8,
@@ -321,10 +336,15 @@ def _create_jax_warp_primitive():
         else:
             dims = launch_dims
             warp_dims = launch_dims
+
+        # JAX 0.4.25-0.7.x uses this legacy custom-call path, so reject
+        # oversized scalar coordinates during lowering before XLA allocates outputs.
+        _build_kernel_launch_bounds(warp_dims, wp_kernel)
+
         # Figure out the types and shapes of the input arrays.
         arg_strings = []
         operand_layouts = []
-        for actual, warg in zip(args, wp_kernel.adj.args):
+        for actual, warg in zip(args, wp_kernel.adj.args, strict=False):
             wtype = warg.type
             rtt = ir.RankedTensorType(actual.type)
 

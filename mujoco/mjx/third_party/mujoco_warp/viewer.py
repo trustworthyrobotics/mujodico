@@ -88,7 +88,7 @@ def _make_warp_step_fn(mjm, m, d, graph, ctrls=None):
       graph = _compile_step(m, d) if wp.get_device().is_cuda else None
     wp.copy(d.ctrl, wp.array([mjd.ctrl.astype(np.float32)]))
     wp.copy(d.act, wp.array([mjd.act.astype(np.float32)]))
-    wp.copy(d.xfrc_applied, wp.array([mjd.xfrc_applied.astype(np.float32)]))
+    wp.copy(d.xfrc_applied, wp.array([mjd.xfrc_applied], dtype=wp.spatial_vector))
     wp.copy(d.qpos, wp.array([mjd.qpos.astype(np.float32)]))
     wp.copy(d.qvel, wp.array([mjd.qvel.astype(np.float32)]))
     wp.copy(d.time, wp.array([mjd.time], dtype=wp.float32))
@@ -126,7 +126,7 @@ def _run_viser_viewer(mjm, mjd, step_fn):
 
 def _run_passive_viewer(mjm, mjd, step_fn):
   with mujoco.viewer.launch_passive(mjm, mjd, key_callback=key_callback) as viewer:
-    while True:
+    while viewer.is_running():
       start = time.time()
       if _VIEWER_GLOBAL_STATE["running"] or _VIEWER_GLOBAL_STATE["step_once"]:
         _VIEWER_GLOBAL_STATE["step_once"] = False
@@ -144,7 +144,7 @@ def _main(argv: Sequence[str]) -> None:
   elif len(argv) > 2:
     raise app.UsageError("Too many command-line arguments.")
 
-  wp.config.quiet = flags.FLAGS["verbosity"].value < 1
+  wp.config.log_level = wp.LOG_WARNING if flags.FLAGS["verbosity"].value < 1 else wp.LOG_INFO
   wp.init()
 
   mjm = cli.load_model(epath.Path(argv[1]))
@@ -169,7 +169,7 @@ def _main(argv: Sequence[str]) -> None:
     solver, cone = mjw.SolverType(m.opt.solver).name, mjw.ConeType(m.opt.cone).name
     integrator = mjw.IntegratorType(m.opt.integrator).name
     iterations, ls_iterations = m.opt.iterations, m.opt.ls_iterations
-    ls_str = f"{'parallel' if m.opt.ls_parallel else 'iterative'} linesearch iterations: {ls_iterations}"
+    ls_str = f"linesearch iterations: {ls_iterations}"
     print(
       f"  nbody: {m.nbody} nv: {m.nv} ngeom: {m.ngeom} nu: {m.nu} is_sparse: {m.is_sparse}\n"
       f"  broadphase: {broadphase} broadphase_filter: {filter}\n"
@@ -180,9 +180,9 @@ def _main(argv: Sequence[str]) -> None:
     print(f"MuJoCo Warp simulating with dt = {m.opt.timestep.numpy()[0]:.3f}...")
 
   if _ENGINE.value == EngineOptions.WARP:
-    step_fn = _make_warp_step_fn(mjm, m, d, graph, ctrls)
+    step_fn = _make_warp_step_fn(mjm, m, d, graph, ctrls if cli.REPLAY.value else None)
   else:
-    step_fn = _make_c_step_fn(ctrls)
+    step_fn = _make_c_step_fn(ctrls if cli.REPLAY.value else None)
 
   mjd = mujoco.MjData(mjm)
   mjw.get_data_into(mjd, mjm, d)

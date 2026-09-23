@@ -42,16 +42,37 @@ KEYFRAME = flags.DEFINE_integer("keyframe", 0, "keyframe to initialize simulatio
 EVENT_TRACE = flags.DEFINE_bool("event_trace", False, "print an event trace report")
 NOISE_STD = flags.DEFINE_float("noise_std", 0.01, "add noise to ctrl signal (standard deviation)")
 NOISE_RATE = flags.DEFINE_float("noise_rate", 0.1, "add noise to ctrl signal (noise rate)")
+NVMAX = flags.DEFINE_integer("nvmax", None, "maximum active DOFs per world")
+
+
+INIT_ASLEEP = flags.DEFINE_bool(
+  "init_asleep", False, "initialize all trees as asleep before simulation (requires sleep enabled)"
+)
 
 DEVICE = flags.DEFINE_string("device", None, "override the default Warp device")
 REPLAY = flags.DEFINE_string("replay", None, "NPZ file with ctrl sequence to replay")
 
-RENDER_WIDTH = flags.DEFINE_integer("render_width", 64, "render width (pixels)")
-RENDER_HEIGHT = flags.DEFINE_integer("render_height", 64, "render height (pixels)")
-RENDER_RGB = flags.DEFINE_bool("render_rgb", True, "render RGB image")
-RENDER_DEPTH = flags.DEFINE_bool("render_depth", True, "render depth image")
+RENDER_WIDTH = flags.DEFINE_multi_integer("render_width", [64], "render width (pixels) for each camera")
+RENDER_HEIGHT = flags.DEFINE_multi_integer("render_height", [64], "render height (pixels) for each camera")
+RENDER_RGB = flags.DEFINE_multi_enum("render_rgb", ["true"], ["true", "false", "True", "False", "1", "0"], "render RGB image")
+RENDER_DEPTH = flags.DEFINE_multi_enum(
+  "render_depth", ["true"], ["true", "false", "True", "False", "1", "0"], "render depth image"
+)
+RENDER_SEG = flags.DEFINE_multi_enum(
+  "render_seg", ["false"], ["true", "false", "True", "False", "1", "0"], "render segmentation image"
+)
+CAM_ACTIVE = flags.DEFINE_multi_enum(
+  "cam_active", [], ["true", "false", "True", "False", "1", "0"], "which cameras to include in rendering"
+)
+CAMERA_NAME = flags.DEFINE_multi_string("camera_name", [], "specific camera name(s) to render")
 RENDER_TEXTURES = flags.DEFINE_bool("render_textures", True, "use textures")
 RENDER_SHADOWS = flags.DEFINE_bool("render_shadows", False, "use shadows")
+RENDER_BACKFACE_CULLING = flags.DEFINE_bool(
+  "render_backface_culling",
+  True,
+  "enable renderer backface culling (RenderContext.enable_backface_culling)",
+)
+RENDER_SKYBOX = flags.DEFINE_bool("render_skybox", True, "render skybox texture if available")
 
 
 def load_model(path: epath.Path) -> mujoco.MjModel:
@@ -143,21 +164,74 @@ def init_structs(
     m = mjw.put_model(mjm)
     if OVERRIDE.value:
       override_model(m, OVERRIDE.value)
+    if INIT_ASLEEP.value:
+      mjd.tree_asleep[:] = np.arange(mjm.ntree, dtype=np.int32)
+
     d = mjw.put_data(
-      mjm, mjd, nworld=NWORLD.value, nconmax=NCONMAX.value, njmax=NJMAX.value, njmax_nnz=NJMAX_NNZ.value, nccdmax=NCCDMAX.value
+      mjm,
+      mjd,
+      nworld=NWORLD.value,
+      nconmax=NCONMAX.value,
+      njmax=NJMAX.value,
+      njmax_nnz=NJMAX_NNZ.value,
+      nccdmax=NCCDMAX.value,
+      nvmax=NVMAX.value,
     )
 
     if mjw.RenderContext not in get_type_hints(fn).values():
       return m, d, None, ctrls
 
+    widths = RENDER_WIDTH.value
+    heights = RENDER_HEIGHT.value
+    if len(widths) == 1 and len(heights) == 1:
+      cam_res = (widths[0], heights[0])
+    else:
+      max_len = max(len(widths), len(heights))
+      if len(widths) == 1:
+        widths = widths * max_len
+      if len(heights) == 1:
+        heights = heights * max_len
+      cam_res = [(w, h) for w, h in zip(widths, heights)]
+
+    def _parse_bool_list(vals: list[str]) -> list[bool] | bool:
+      bools = [x.lower() in ("true", "1") for x in vals]
+      return bools[0] if len(bools) == 1 else bools
+
+    cam_active = None
+    if CAMERA_NAME.value:
+      cam_active = CAMERA_NAME.value
+    elif CAM_ACTIVE.value:
+      cam_active = [x.lower() in ("true", "1") for x in CAM_ACTIVE.value]
+
+    non_single_lengths = {
+      name: len(lst)
+      for name, lst in [
+        ("camera_name", CAMERA_NAME.value),
+        ("cam_active", CAM_ACTIVE.value),
+        ("render_width", widths),
+        ("render_height", heights),
+        ("render_rgb", RENDER_RGB.value),
+        ("render_depth", RENDER_DEPTH.value),
+        ("render_seg", RENDER_SEG.value if flags.FLAGS["render_seg"].present else []),
+      ]
+      if lst and len(lst) > 1
+    }
+    if len(set(non_single_lengths.values())) > 1:
+      details = ", ".join(f"{k}={v}" for k, v in non_single_lengths.items())
+      raise ValueError(f"Mismatched render setting lengths: {details}")
+
     rc = mjw.create_render_context(
       mjm,
-      NWORLD.value,
-      (RENDER_WIDTH.value, RENDER_HEIGHT.value),
-      RENDER_RGB.value,
-      RENDER_DEPTH.value,
-      RENDER_TEXTURES.value,
-      RENDER_SHADOWS.value,
+      nworld=NWORLD.value,
+      cam_res=cam_res,
+      render_rgb=_parse_bool_list(RENDER_RGB.value),
+      render_depth=_parse_bool_list(RENDER_DEPTH.value),
+      render_seg=_parse_bool_list(RENDER_SEG.value) if flags.FLAGS["render_seg"].present else None,
+      cam_active=cam_active,
+      use_textures=RENDER_TEXTURES.value,
+      use_shadows=RENDER_SHADOWS.value,
+      enable_backface_culling=RENDER_BACKFACE_CULLING.value,
+      render_skybox=RENDER_SKYBOX.value,
     )
 
     return m, d, rc, ctrls

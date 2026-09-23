@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
+import dataclasses
 import functools
 import inspect
 import warnings
@@ -20,6 +21,31 @@ import warnings
 import warp as wp
 
 _STACK = None
+
+
+def is_array_spec(typ) -> bool:
+  """Check if a type annotation is an array spec (wp.array instance or bracket annotation)."""
+  return isinstance(typ, wp.array) or type(typ).__name__ == "_ArrayAnnotation"
+
+
+def mark_batched(obj):
+  """Recursively set _is_batched = True on all batched warp arrays within obj."""
+  if not dataclasses.is_dataclass(obj):
+    return
+  for f in dataclasses.fields(obj):
+    val = getattr(obj, f.name, None)
+    if val is None:
+      continue
+    if dataclasses.is_dataclass(val):
+      mark_batched(val)
+      continue
+    if not isinstance(val, wp.array):
+      continue
+    if not is_array_spec(f.type):
+      continue
+    spec_shape = getattr(f.type, "shape", ())
+    if spec_shape and spec_shape[0] in ("*", "nworld"):
+      val._is_batched = True
 
 
 class EventTracer:
@@ -154,28 +180,3 @@ def check_toolkit_driver():
         """,
         stacklevel=2,
       )
-
-
-class scoped_mathdx_gemm_disabled:
-  """Temporarily disable Warp MathDx GEMM kernels within this scope."""
-
-  def __init__(self, disable: bool = True):
-    self._disable = disable
-    self._config = None
-    self._prev = None
-
-  def __enter__(self):
-    if not self._disable:
-      return self
-    config = getattr(wp, "config", None)
-    if config is None or not hasattr(config, "enable_mathdx_gemm"):
-      return self
-    self._config = config
-    self._prev = config.enable_mathdx_gemm
-    self._config.enable_mathdx_gemm = False
-    return self
-
-  def __exit__(self, exc_type, exc, tb):
-    if self._config is not None:
-      self._config.enable_mathdx_gemm = self._prev
-    return False

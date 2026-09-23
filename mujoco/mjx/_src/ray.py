@@ -33,7 +33,7 @@ def _ray_quad(
 ) -> Tuple[jax.Array, jax.Array]:
   """Returns two solutions for quadratic: a*x^2 + 2*b*x + c = 0."""
   det = b * b - a * c
-  det_2 = jp.sqrt(det)
+  det_2 = jp.sqrt(jp.maximum(det, 0))
 
   x0, x1 = math.safe_div(-b - det_2, a), math.safe_div(-b + det_2, a)
   x0 = jp.where((det < mujoco.mjMINVAL) | (x0 < 0), jp.inf, x0)
@@ -177,7 +177,7 @@ def _ray_triangle(
   # intersect ray with plane of triangle
   nrm = jp.cross(vert[0] - vert[2], vert[1] - vert[2])
   dist = math.safe_div(jp.dot(vert[2] - pnt, nrm), jp.dot(vec, nrm))
-  valid &= dist >= 0
+  valid &= (dist >= 0)
   dist = jp.where(valid, dist, jp.inf)
 
   return dist
@@ -239,7 +239,7 @@ def ray(
     flg_static: bool = True,
     bodyexclude: Sequence[int] | int = -1,
 ) -> Tuple[jax.Array, jax.Array]:
-  """Returns the geom id and distance at which a ray intersects with a geom.
+  """Returns the distance and geom id at which a ray intersects with a geom.
 
   Args:
     m: MJX model
@@ -263,8 +263,8 @@ def ray(
   for bodyid in bodyexclude:
     geom_filter &= (m.geom_bodyid != bodyid)
   if geomgroup:
-    geomgroup = np.array(geomgroup, dtype=bool)
-    geom_filter &= geomgroup[np.clip(m.geom_group, 0, mujoco.mjNGROUP)]
+    geomgroup = np.array(geomgroup, dtype=bool)  # pyrefly: ignore[bad-assignment]
+    geom_filter &= geomgroup[np.clip(m.geom_group, 0, mujoco.mjNGROUP)]  # pyrefly: ignore[bad-index]
 
   # map ray to local geom frames
   geom_pnts = jax.vmap(lambda x, y: x.T @ (pnt - y))(d.geom_xmat, d.geom_xpos)
@@ -281,15 +281,15 @@ def ray(
     args = m.geom_size[id_], geom_pnts[id_], geom_vecs[id_]
 
     if geom_type == GeomType.MESH:
-      dist, id_ = fn(m, id_, *args)
+      dist, id_ = fn(m, id_, *args)  # pyrefly: ignore[bad-argument-count, bad-argument-type]
     else:
-      dist = jax.vmap(fn)(*args)
+      dist = jax.vmap(fn)(*args)  # pyrefly: ignore[bad-argument-type, missing-argument]
 
-    dist = jp.where(geom_filter_dyn[id_], dist, jp.inf)
+    dist = jp.where(geom_filter_dyn[id_], dist, jp.inf)  # pyrefly: ignore[bad-argument-type]
     dists, ids = dists + [dist], ids + [id_]
 
   if not ids:
-    return jp.array(-1), jp.array(-1.0)
+    return jp.array(-1.0), jp.array(-1)
 
   dists = jp.concatenate(dists)
   ids = jp.concatenate(ids)
@@ -314,4 +314,4 @@ def ray_geom(
   Returns:
     dist: distance from ray origin to geom surface
   """
-  return _RAY_FUNC[geomtype](size, pnt, vec)
+  return _RAY_FUNC[geomtype](size, pnt, vec)  # pyrefly: ignore[bad-argument-type, bad-return, missing-argument]
