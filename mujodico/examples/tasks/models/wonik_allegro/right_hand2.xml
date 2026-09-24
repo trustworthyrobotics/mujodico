@@ -3,8 +3,8 @@
 
   <default>
     <default class="allegro_right">
-      <joint axis="0 1 0" damping=".1"/>
-      <position kp="1"/>
+      <joint axis="0 1 0" damping=".3" armature=".005"/>
+      <position kp="1" forcelimited="true" forcerange="-2 2"/>
       <geom density="800"/>
 
       <default class="visual">

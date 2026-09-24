@@ -12,16 +12,17 @@ import viser
 _XML = """
 <mujoco model="right_allegro_hand scene">
 
-  <option timestep="0.05"  />
+  <option timestep="0.02"  />
   <option integrator="implicitfast" />
-  <option iterations="20" tolerance="1e-5" />
+  <option iterations="40" tolerance="1e-6" />
 
   <include file="right_hand2.xml"/>
 
   <worldbody>
     <body name="object" pos="-0.025 0 0.026">
-      <freejoint/>
-      <geom type="capsule" size="0.015" fromto="0 -0.08 0 0 0.08 0" rgba="0.5 0.7 0.5 1" friction="0.7" density="300"/>
+      <joint name="object_joint" type="free" damping="0.05" armature="0.002"/>
+      <geom type="capsule" size="0.015" fromto="0 -0.08 0 0 0.08 0" rgba="0.5 0.7 0.5 1"
+            friction="0.7" density="600" solref="0.02 1" solimp="0.9 0.95 0.001"/>
       <geom name="angle_indicator" type="sphere" size="0.005" pos="0 0 0.011" rgba="0 0 0 1"
             contype="0" conaffinity="0" />
     </body>
@@ -50,7 +51,7 @@ class AllegroPen(Task):
     Path(scene_path).unlink()
     data = mujoco.MjData(model)
 
-    horizon = 15
+    horizon = 200
 
     x_0 = np.concatenate((data.qpos, data.qvel))
     x_0[0:4] = np.deg2rad([0, 70, 80, 60])
@@ -58,13 +59,9 @@ class AllegroPen(Task):
     x_0[8:12] = np.deg2rad([0, 70, 80, 60])
     x_0[12:16] = np.deg2rad([50, 110, 80, 60])
 
-    rng = np.random.default_rng(seed)
-    goal_pos = rng.uniform([-0.01, 0.0, 0.0], [0.01, 0.0, 0.0])
-    goal_angle = np.deg2rad(0)
-
     x_goal = x_0.copy()
-    x_goal[16:19] += goal_pos
-    x_goal[19:23] = np.array([np.cos(goal_angle/2), 0.0, 0.0, np.sin(goal_angle/2)])
+    x_goal[16:19] += np.array([0.051, -0.022, 0.074])
+    x_goal[19:23] = np.array([np.cos(np.pi/4), np.sin(np.pi/4), 0.0, 0.0])
 
     Q = np.diag([0.0] * 16 + [100] * 3 + [0.01] * 4 + [0.0] * 22)
     Qf = Q * 40.0

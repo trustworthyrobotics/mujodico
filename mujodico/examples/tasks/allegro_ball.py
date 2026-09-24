@@ -50,7 +50,7 @@ class AllegroBall(Task):
     Path(scene_path).unlink()
     data = mujoco.MjData(model)
 
-    horizon = 20
+    horizon = 60
 
     x_0 = np.concatenate((data.qpos, data.qvel))
     x_0[0:4] = np.deg2rad([0, 50, 60, 30])
@@ -60,7 +60,7 @@ class AllegroBall(Task):
 
     rng = np.random.default_rng(seed)
     goal_pos = rng.uniform([-0.03, -0.03, 0.0], [0.03, 0.03, 0.0])
-    goal_angle = np.deg2rad(rng.uniform(-30, 30))
+    goal_angle = np.deg2rad(-180)
 
     x_goal = x_0.copy()
     x_goal[16:19] += goal_pos

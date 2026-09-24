@@ -64,7 +64,7 @@
         <default class="fingertip_collision">
           <geom type="capsule" size="0.012 0.009" pos="0 0 0.02"/>
           <default class="thumbtip_collision">
-            <geom type="capsule" size="0.012 0.010" pos="0 0 0.033"/>
+            <geom group="4" contype="0" conaffinity="0" type="capsule" size="0.012 0.010" pos="0 0 0.033"/>
           </default>
         </default>
       </default>
