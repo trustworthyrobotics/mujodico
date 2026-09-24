@@ -25,7 +25,6 @@ class Task:
   u_ref: np.ndarray
   R: np.ndarray
   contact_smoothing: float
-  quaternion_starts: tuple = ()
 
   @property
   def nx(self):
@@ -121,15 +120,28 @@ class Task:
   def us_init(self):
     return np.zeros((self.horizon, self.nu))
 
+  @property
+  def quaternion_w_idxs(self):
+    idxs = []
+    for j in range(self.model.njnt):
+      typ = self.model.jnt_type[j]
+      adr = int(self.model.jnt_qposadr[j])
+      if typ == mujoco.mjtJoint.mjJNT_FREE:
+        idxs.append(adr + 3)
+      elif typ == mujoco.mjtJoint.mjJNT_BALL:
+        idxs.append(adr)
+    return idxs
+
   def print_summary(self):
     x_lb, x_ub = self.x_bounds
     u_lb, u_ub = self.u_bounds
+    qw_idxs = self.quaternion_w_idxs
     print(f'''
 Task: {self.__class__.__name__}
   horizon = {self.horizon}
   nx = {self.nx} (nq={self.model.nq}, nv={self.model.nv}, na={self.model.na})
   nu = {self.nu}
-  {f'quaternion_starts={self.quaternion_starts}' if self.quaternion_starts else 'no quaternions'}
+  quaternion_w_idxs={qw_idxs} ({len(qw_idxs) if qw_idxs else 'no'} quaternion{'s' if len(qw_idxs) > 1 else ''} in state)
   x_0 = {self.x_0}
   x_goal = {self.x_goal}
   diag(Q) = {np.diag(self.Q)}

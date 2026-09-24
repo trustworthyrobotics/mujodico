@@ -66,8 +66,6 @@ class AllegroBall(Task):
     x_goal[16:19] += goal_pos
     x_goal[19:23] = np.array([np.cos(goal_angle/2), 0.0, 0.0, np.sin(goal_angle/2)])
 
-    quaternion_starts = (19,)
-
     Q = np.diag([0.0] * 16 + [100] * 3 + [0.1] * 4 + [0.0] * 22)
     Qf = Q * 40.0
 
@@ -86,7 +84,6 @@ class AllegroBall(Task):
         u_ref=u_ref,
         R=R,
         contact_smoothing=contact_smoothing,
-        quaternion_starts=quaternion_starts,
     )
 
   def _plot_object_dof(self, fig: go.Figure, k: int, xs: np.ndarray, object_dof: int):
