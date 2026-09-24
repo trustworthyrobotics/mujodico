@@ -3,7 +3,7 @@ from mujodico.examples.methods import ipopt_kkt_contact_implicit
 from mujodico.examples.methods import ipopt_lifted_multiple_shooting
 from mujodico.examples.methods import ipopt_multiple_shooting
 from mujodico.examples.methods import ipopt_single_shooting
-from mujodico.examples.methods import proxddp_lifted_multiple_shooting
+from mujodico.examples.methods import jax_pas_fatrop_lifted_multiple_shooting
 
 
 _METHODS = [
@@ -13,7 +13,7 @@ _METHODS = [
     ipopt_lifted_multiple_shooting.IpoptLiftedMultipleShooting,
     ipopt_multiple_shooting.IpoptMultipleShooting,
     ipopt_single_shooting.IpoptSingleShooting,
-    proxddp_lifted_multiple_shooting.ProxddpLiftedMultipleShooting,
+    jax_pas_fatrop_lifted_multiple_shooting.JaxPasFatropLiftedMultipleShooting,
 ]
 
 
