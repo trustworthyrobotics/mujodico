@@ -81,7 +81,7 @@ class IpoptLiftedMultipleShooting:
 
     def stage_objective(x, u, cf):
       return (
-          support.state_cost(Q, x_goal, x, task.quaternion_starts)
+          support.state_cost(Q, x_goal, x, task.quaternion_w_idxs)
           + (u - u_ref).dot(R @ (u - u_ref))
       )
 
@@ -119,7 +119,7 @@ class IpoptLiftedMultipleShooting:
 
       cost = (
           jp.sum(per_stage_cost)
-          + support.state_cost(Qf, x_goal, xs[-1], task.quaternion_starts)
+          + support.state_cost(Qf, x_goal, xs[-1], task.quaternion_w_idxs)
       )
       return cost
 

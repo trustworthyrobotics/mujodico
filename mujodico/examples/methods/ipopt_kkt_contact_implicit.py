@@ -96,9 +96,9 @@ class IpoptKKTContactImplicit:
       du = us - u_ref
 
       cost = (
-          jp.sum(jax.vmap(lambda x: support.state_cost(Qf, x_goal, x, task.quaternion_starts))(xs[:-1]))
+          jp.sum(jax.vmap(lambda x: support.state_cost(Qf, x_goal, x, task.quaternion_w_idxs))(xs[:-1]))
           + jp.sum((du @ R) * du)
-          + support.state_cost(Qf, x_goal, xs[-1], task.quaternion_starts)
+          + support.state_cost(Qf, x_goal, xs[-1], task.quaternion_w_idxs)
       )
       return cost
 

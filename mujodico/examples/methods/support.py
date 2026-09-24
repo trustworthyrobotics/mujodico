@@ -127,20 +127,11 @@ def extract_contact_indices(
   return efc_contact_addresses, socs
 
 
-import numpy as np
-import jax.numpy as jnp
-
-try:
-    import casadi as ca
-except ImportError:
-    ca = None
-
-
 def state_cost(
     Q,
     x_goal,
     x,
-    quaternion_starts: tuple[int, ...],
+    quaternion_w_idxs: tuple[int, ...],
 ):
   try:
     import casadi as ca
@@ -158,28 +149,28 @@ def state_cost(
 
   e = x - x_goal
 
-  for start in quaternion_starts:
+  for i in quaternion_w_idxs:
     if backend == 'jax':
-      e = e.at[start:start + 4].set(0.0)
+      e = e.at[i:i+4].set(0.0)
     elif backend == 'numpy':
-      e[start:start + 4] = 0.0
+      e[i:i+4] = 0.0
     elif backend == 'csadi':
       e = ca.vertcat(
-          e[:start],
+          e[:i],
           ca.DM.zeros(4, 1),
-          e[start + 4:],
+          e[i+4:],
       )
 
   cost = e.T @ Q @ e
 
-  for start in quaternion_starts:
-    q = x[start:start+4]
-    q_goal = x_goal[start:start+4]
+  for i in quaternion_w_idxs:
+    q = x[i:i+4]
+    q_goal = x_goal[i:i+4]
     if backend == 'jax':
       q = mjx._src.math.normalize(q)
       q_goal = mjx._src.math.normalize(q_goal)
 
-    Q_block = Q[start:start+4, start:start+4]
+    Q_block = Q[i:i+4, i:i+4]
 
     if backend == 'jax':
       weight = jp.mean(jp.diag(Q_block))
