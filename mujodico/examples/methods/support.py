@@ -139,56 +139,40 @@ def extract_contact_indices(
 
 
 def state_cost(
-    Q,
-    x_goal,
-    x,
+    Q: jax.Array | np.ndarray,
+    x_goal: jax.Array | np.ndarray,
+    x: jax.Array | np.ndarray,
     quaternion_w_idxs: list[int],
 ):
-  try:
-    import casadi as ca
-  except ImportError:
-    ca = None
-
-  if ca is not None and isinstance(x, (ca.SX, ca.MX, ca.DM)):
-    backend = 'casadi'
-  elif isinstance(x, jax.Array):
-    backend = 'jax'
-  elif isinstance(x, np.ndarray):
-    backend = 'numpy'
-  else:
-    raise TypeError(f'Unsupported type: {type(x)}')
+  backend = 'jax' if isinstance(x, jax.Array) else 'numpy'
 
   e = x - x_goal
 
   for i in quaternion_w_idxs:
     if backend == 'jax':
       e = e.at[i:i+4].set(0.0)
-    elif backend == 'numpy':
+    else:
       e[i:i+4] = 0.0
-    elif backend == 'csadi':
-      e = ca.vertcat(
-          e[:i],
-          ca.DM.zeros(4, 1),
-          e[i+4:],
-      )
 
   cost = e.T @ Q @ e
 
   for i in quaternion_w_idxs:
     q = x[i:i+4]
     q_goal = x_goal[i:i+4]
+
     if backend == 'jax':
       q = mjx._src.math.normalize(q)
       q_goal = mjx._src.math.normalize(q_goal)
+    else:
+      q = q / np.linalg.norm(q)
+      q_goal = q_goal / np.linalg.norm(q_goal)
 
     Q_block = Q[i:i+4, i:i+4]
 
     if backend == 'jax':
       weight = jp.mean(jp.diag(Q_block))
-    elif backend == 'numpy':
+    else:
       weight = np.mean(np.diag(Q_block))
-    elif backend == 'casadi':
-      weight = ca.trace(Q_block) / 4.0
 
     cost += weight * (1.0 - (q.T @ q_goal)**2)
 
@@ -196,8 +180,8 @@ def state_cost(
 
 
 def control_cost(
-    R,
-    u_ref,
-    u,
+    R: jax.Array | np.ndarray,
+    u_ref: jax.Array | np.ndarray,
+    u: jax.Array | np.ndarray,
 ):
-  return (u - u_ref) @ R @ (u - u_ref)
+  return (u - u_ref).T @ R @ (u - u_ref)
