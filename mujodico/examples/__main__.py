@@ -1,6 +1,7 @@
 import os
 import time
 import csv
+import copy
 from pathlib import Path
 
 from absl import app
@@ -33,12 +34,6 @@ _CONTACT_APPROX = flags.DEFINE_string(
     ' Contact approximation for planning.\n(required)',
     required=True,
 )
-_HESS_APPROX = flags.DEFINE_string(
-    'hess_approx',
-    'gaussnewton',
-    f'<{"|".join([t.value for t in support.HessianApproxType])}>:'
-    ' Trajectory optimization Hessian approximation.'
-)
 _ITERATIONS = flags.DEFINE_integer(
     'iterations', 500, 'Number of solver iterations', lower_bound=0,
 )
@@ -59,8 +54,6 @@ def _main(argv) -> None:
 
   contact_approx = mjx.ContactApproxType._resolve(_CONTACT_APPROX.value)
 
-  hess_approx = support.HessianApproxType._resolve(_HESS_APPROX.value)
-
   result_dir = Path(__file__).resolve().parent / 'result'
   result_dir.mkdir(exist_ok=True)
   result_file = result_dir / f'{task_cls.__name__}_{contact_approx.value}_{method_cls.__name__}.csv'
@@ -71,9 +64,16 @@ def _main(argv) -> None:
     if f.tell() == 0:
       writer.writerow(['seed', 'goal_error', 'solve_time_sec', 'solver_iters'])
 
+    method = None
     for seed in range(_SEED.value, _SEED.value + _TESTS.value):
       task = task_cls(seed)
-      method = method_cls(task, contact_approx, hess_approx)
+      if method is None:
+        method = method_cls(task, contact_approx)
+      elif hasattr(method, 'update'):
+        method.update(task)
+      else:
+        method = method_cls(task, contact_approx)
+
       iters = _ITERATIONS.value
 
       tic = time.perf_counter()
@@ -92,13 +92,13 @@ def _main(argv) -> None:
       f.flush()
 
       print(f'''
-  Task: {task_cls.__name__}
-  Method: {method_cls.__name__}
-    seed: {seed}
-    goal error: {goal_error:.8f}
-    solve time: {solve_time:.4f} sec
-    iterations: {iters}
-  ''')
+Task: {task_cls.__name__}
+Method: {method_cls.__name__}
+  seed: {seed}
+  goal error: {goal_error:.8f}
+  solve time: {solve_time:.4f} sec
+  iterations: {iters}
+''')
 
   if _TESTS.value == 1:
     task.visualize_trajectory(xs_nominal)

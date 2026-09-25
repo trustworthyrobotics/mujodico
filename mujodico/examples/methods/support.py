@@ -33,6 +33,17 @@ class HessianApproxType(enum.Enum):
     )
 
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class TranscriptionParams:
+  x_0: jax.Array
+  x_goal: jax.Array
+  Q: jax.Array
+  Qf: jax.Array
+  u_ref: jax.Array
+  R: jax.Array
+
+
 def step_given_efc_force(
     m: Model, x: jax.Array, u: jax.Array, efc_force: jax.Array
   ) -> jax.Array:
@@ -131,7 +142,7 @@ def state_cost(
     Q,
     x_goal,
     x,
-    quaternion_w_idxs: tuple[int, ...],
+    quaternion_w_idxs: list[int],
 ):
   try:
     import casadi as ca
@@ -182,3 +193,11 @@ def state_cost(
     cost += weight * (1.0 - (q.T @ q_goal)**2)
 
   return cost
+
+
+def control_cost(
+    R,
+    u_ref,
+    u,
+):
+  return (u - u_ref) @ R @ (u - u_ref)
