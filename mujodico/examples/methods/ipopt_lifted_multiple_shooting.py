@@ -23,13 +23,10 @@ class IpoptLiftedMultipleShooting:
   def __init__(
       self,
       task: Task,
-      contact_approx: mjx.ContactApproxType,
       *,
-      gauss_newton: bool=True,
+      gauss_newton: bool = True,
   ):
-    self.transcription = LiftedMultipleShootingTranscription(
-        task, contact_approx=contact_approx
-    )
+    self.transcription = LiftedMultipleShootingTranscription(task)
     trans = self.transcription
 
     N = trans.N
@@ -207,20 +204,26 @@ class IpoptLiftedMultipleShooting:
 
   def solve(
       self,
+      traj_init: dict,
       *,
-      xs_init: np.ndarray,
-      us_init: np.ndarray,
-      iterations: int,
-      **kwargs,
+      iterations: int = 500,
+      verbose: bool = True,
   ):
+    xs_init = traj_init['xs']
+    us_init = traj_init['us']
+
     N = self.transcription.N
     nw = self.transcription.nw
     nu = us_init.shape[-1]
 
-    ws_init = np.hstack([us_init, np.zeros((N, nw - nu))])
+    cfs_init = traj_init.get('cfs', np.zeros((N, nw - nu)))
+
+    ws_init = np.hstack([us_init, cfs_init])
     vars_init = self._pack(xs_init, ws_init)
 
     self.problem.add_option('max_iter', iterations)
+    if not verbose:
+      self.problem.add_option('print_level', 0)
 
     self._dynamics_time = 0
     tic = time.perf_counter()
@@ -237,8 +240,14 @@ Method: {self.__class__.__name__}
 ''')
 
     xs_opt, ws_opt = self._unpack(vars_opt)
+    us_opt = ws_opt[:, :nu]
+    cfs_opt = ws_opt[:, nu:]
 
-    return np.asarray(xs_opt), np.asarray(ws_opt[:, :nu])
+    return {
+        'xs': xs_opt,
+        'us': us_opt,
+        'cfs': cfs_opt,
+    }
 
   def _pack(self, xs: jax.Array | np.ndarray, ws: jax.Array | np.ndarray):
     N = self.transcription.N

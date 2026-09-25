@@ -27,12 +27,12 @@ class IpoptKKTContactImplicit:
   def __init__(
       self,
       task: Task,
-      contact_approx: mjx.ContactApproxType,
-      hess_approx: support.HessianApproxType,
   ):
     self.task = task
 
     model = task.model
+
+    contact_approx = mjx.ContactApproxType.CONIC
 
     mjx_model = mjx.put_model(
         model,
@@ -96,7 +96,7 @@ class IpoptKKTContactImplicit:
       du = us - u_ref
 
       cost = (
-          jp.sum(jax.vmap(lambda x: support.state_cost(Qf, x_goal, x, task.quaternion_w_idxs))(xs[:-1]))
+          jp.sum(jax.vmap(lambda x: support.state_cost(Q, x_goal, x, task.quaternion_w_idxs))(xs[:-1]))
           + jp.sum((du @ R) * du)
           + support.state_cost(Qf, x_goal, xs[-1], task.quaternion_w_idxs)
       )
@@ -222,17 +222,20 @@ class IpoptKKTContactImplicit:
 
   def solve(
       self,
+      traj_init: dict,
       *,
-      xs_init: np.ndarray,
-      us_init: np.ndarray,
-      iterations: int,
-      **kwargs,
+      iterations: int = 500,
+      verbose: bool = True,
   ):
-    cfs_init = np.full((self.task.horizon, self.nc), 1e-6)
+    xs_init = traj_init['xs']
+    us_init = traj_init['us']
+    cfs_init = traj_init.get('cfs', np.full((self.task.horizon, self.nc), 1e-6))
 
     vars_init = self._pack(xs_init, us_init, cfs_init)
 
     self.problem.add_option('max_iter', iterations)
+    if not verbose:
+      self.problem.add_option('print_level', 0)
 
     self._dynamics_time = 0
     tic = time.perf_counter()
@@ -250,7 +253,11 @@ Method: {self.__class__.__name__}
 
     xs_opt, us_opt, cfs_opt = self._unpack(vars_opt)
 
-    return np.asarray(xs_opt), np.asarray(us_opt)
+    return {
+        'xs': xs_opt,
+        'us': us_opt,
+        'cfs': cfs_opt,
+    }
 
   def _pack(
       self,

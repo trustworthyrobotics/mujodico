@@ -8,15 +8,11 @@ import numpy as np
 
 class LiftedMultipleShootingTranscription:
 
-  def __init__(
-      self,
-      task: Task,
-      contact_approx: mjx.ContactApproxType
-  ):
+  def __init__(self, task: Task):
     model = mjx.put_model(
         task.model,
         impl='jax',
-        contact_approximation=contact_approx,
+        contact_approximation=task.contact_approx,
         contact_smoothing=task.contact_smoothing * 0.001,
     )
     data = mjx.make_data(model, impl=model.impl)

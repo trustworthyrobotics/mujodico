@@ -20,8 +20,8 @@ class IpoptSingleShooting:
   def __init__(
       self,
       task: Task,
-      contact_approx: mjx.ContactApproxType,
-      hess_approx: support.HessianApproxType,
+      contact_approx: mjx.ContactApproxType = mjx.ContactApproxType.HUNT_CROSSLEY,
+      hess_approx: support.HessianApproxType = support.HessianApproxType.GaussNewton,
   ):
     model = task.model
 
@@ -134,17 +134,21 @@ class IpoptSingleShooting:
 
   def solve(
       self,
+      traj_init: dict,
       *,
-      us_init: np.ndarray,
-      iterations: int,
-      **kwargs,
+      iterations: int = 500,
+      verbose: bool = True,
   ):
+    us_init = traj_init['us']
+
     N, nu = self.task.horizon, self.task.nu
     assert us_init.shape == (N, nu)
 
     vars_init = us_init.ravel()
 
-    self.problem.add_option("max_iter", iterations)
+    self.problem.add_option('max_iter', iterations)
+    if not verbose:
+      self.problem.add_option('print_level', 0)
 
     self._dynamics_time = 0
     tic = time.perf_counter()
@@ -163,6 +167,9 @@ Method: {self.__class__.__name__}
     us_opt = jp.array(us_opt).reshape(N, nu)
 
     x_0 = jp.array(self.task.x_0)
-    xs_opt = self.rollout(x_0, us_opt)
+    xs_rollout = self.rollout(x_0, us_opt)
 
-    return np.asarray(xs_opt), np.asarray(us_opt)
+    return {
+        'us': us_opt,
+        'xs': xs_rollout,
+    }

@@ -27,13 +27,6 @@ _TASK = flags.DEFINE_string(
     f'<{"|".join(get_task_names())}>\n(required)',
     required=True,
 )
-_CONTACT_APPROX = flags.DEFINE_string(
-    'contact_approx',
-    None,
-    f'<{"|".join([t.value for t in mjx.ContactApproxType])}>:'
-    ' Contact approximation for planning.\n(required)',
-    required=True,
-)
 _ITERATIONS = flags.DEFINE_integer(
     'iterations', 500, 'Number of solver iterations', lower_bound=0,
 )
@@ -52,11 +45,9 @@ def _main(argv) -> None:
   method_cls = parse_method_name(_METHOD.value)
   task_cls = parse_task_name(_TASK.value)
 
-  contact_approx = mjx.ContactApproxType._resolve(_CONTACT_APPROX.value)
-
   result_dir = Path(__file__).resolve().parent / 'result'
   result_dir.mkdir(exist_ok=True)
-  result_file = result_dir / f'{task_cls.__name__}_{contact_approx.value}_{method_cls.__name__}.csv'
+  result_file = result_dir / f'{task_cls.__name__}_{method_cls.__name__}.csv'
   print(result_file)
 
   with open(result_file, 'a', newline='') as f:
@@ -68,24 +59,28 @@ def _main(argv) -> None:
     for seed in range(_SEED.value, _SEED.value + _TESTS.value):
       task = task_cls(seed)
       if method is None:
-        method = method_cls(task, contact_approx)
+        method = method_cls(task)
       elif hasattr(method, 'update'):
         method.update(task)
       else:
-        method = method_cls(task, contact_approx)
+        method = method_cls(task)
 
       iters = _ITERATIONS.value
 
       tic = time.perf_counter()
-      xs_nominal, us_nominal = method.solve(
-        xs_init=task.xs_init,
-        us_init=task.us_init,
+
+      traj = method.solve(
+        traj_init={
+            'xs': task.xs_init,
+            'us': task.us_init,
+        },
         iterations=iters,
       )
+
       solve_time = time.perf_counter() - tic
 
       goal_error = support.state_cost(
-          task.Q, task.x_goal, xs_nominal[-1], task.quaternion_w_idxs
+          task.Q, task.x_goal, traj['xs'][-1], task.quaternion_w_idxs
       )
 
       writer.writerow([seed, goal_error, solve_time, iters])
@@ -101,7 +96,7 @@ Method: {method_cls.__name__}
 ''')
 
   if _TESTS.value == 1:
-    task.visualize_trajectory(xs_nominal)
+    task.visualize_trajectory(traj['xs'])
 
 
 def main():

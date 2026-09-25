@@ -1,6 +1,7 @@
 import dataclasses
 import time
 import mujoco
+from mujodico.mjx import ContactApproxType
 import numpy as np
 
 try:
@@ -25,6 +26,7 @@ class Task:
   u_ref: np.ndarray
   R: np.ndarray
   contact_smoothing: float
+  contact_approx: ContactApproxType = ContactApproxType.HUNT_CROSSLEY
 
   @property
   def nx(self):

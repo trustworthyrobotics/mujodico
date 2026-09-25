@@ -20,8 +20,8 @@ class IpoptMultipleShooting:
   def __init__(
       self,
       task: Task,
-      contact_approx: mjx.ContactApproxType,
-      hess_approx: support.HessianApproxType,
+      *,
+      gauss_newton: bool = True,
   ):
     self.task = task
 
@@ -30,14 +30,14 @@ class IpoptMultipleShooting:
     mjx_model = mjx.put_model(
         model,
         impl='jax',
-        contact_approximation=contact_approx,
+        contact_approximation=task.contact_approx,
         contact_smoothing=0.0,
     )
 
     mjx_smooth_model = mjx.put_model(
         model,
         impl=mjx_model.impl,
-        contact_approximation=contact_approx,
+        contact_approximation=task.contact_approx,
         contact_smoothing=task.contact_smoothing,
     )
 
@@ -88,7 +88,7 @@ class IpoptMultipleShooting:
       xnext = var[nx + nu :]
 
       lagrangian = stage_objective(x, u) * scale0
-      if hess_approx == support.HessianApproxType.Full:
+      if not gauss_newton:
         lagrangian += jp.sum(stage_constraint(x, u, xnext) * scale1)
 
       return lagrangian
@@ -124,14 +124,13 @@ class IpoptMultipleShooting:
       xs, us = self._unpack(vars)
 
       lagrange = lagrange.reshape(N, nx)
-      obj_factor = jp.repeat(obj_factor, N)
 
       def stage_lagrangian_hess(x, u, xnext, scale1, scale0):
         var = jp.concatenate([x.ravel(), u.ravel(), xnext.ravel()])
         hess = jax.hessian(stage_lagrangian)(var, scale1, scale0)
         return hess[jp.tril_indices(hess.shape[0])]
 
-      per_stage_lagrangian_hess = jax.vmap(stage_lagrangian_hess)(
+      per_stage_lagrangian_hess = jax.vmap(stage_lagrangian_hess, in_axes=(0,0,0,0,None))(
           xs[:-1], us, xs[1:], lagrange, obj_factor
       )
 
@@ -188,9 +187,6 @@ class IpoptMultipleShooting:
 
       @timed
       def hessian(self, vars, lagrange, objective_factor):
-        if hess_approx == support.HessianApproxType.LBFGS:
-          raise AttributeError()  # cyipopt defaults to L-BFGS if hessian() throws
-
         return np.asarray(
             lagrangian_hessian_entries(
                 jp.asarray(vars),
@@ -232,15 +228,19 @@ class IpoptMultipleShooting:
 
   def solve(
       self,
+      traj_init: dict,
       *,
-      xs_init: np.ndarray,
-      us_init: np.ndarray,
-      iterations: int,
-      **kwargs,
+      iterations: int = 500,
+      verbose: bool = True,
   ):
-    vars_init = self._pack(xs_init, us_init)
+    vars_init = self._pack(
+      xs=traj_init['xs'],
+      us=traj_init['us'],
+    )
 
-    self.problem.add_option("max_iter", iterations)
+    self.problem.add_option('max_iter', iterations)
+    if not verbose:
+      self.problem.add_option('print_level', 0)
 
     self._dynamics_time = 0
     tic = time.perf_counter()
@@ -258,7 +258,10 @@ Method: {self.__class__.__name__}
 
     xs_opt, us_opt = self._unpack(vars_opt)
 
-    return np.asarray(xs_opt), np.asarray(us_opt)
+    return {
+        'xs': xs_opt,
+        'us': us_opt,
+    }
 
   def _pack(self, xs: jax.Array | np.ndarray, us: jax.Array | np.ndarray):
     N, nx, nu = self.task.horizon, self.task.nx, self.task.nu

@@ -23,33 +23,30 @@ class JaxPasFatropLiftedMultipleShooting:
   def __init__(
       self,
       task: Task,
-      contact_approx: mjx.ContactApproxType,
-      hess_approx: support.HessianApproxType,
+      *,
+      gauss_newton: bool = True,
   ):
-    if hess_approx == support.HessianApproxType.GaussNewton:
+    if gauss_newton:
       hessian_mode = 'cost'
-    elif hess_approx == support.HessianApproxType.Full:
-      hessian_mode = 'exact_lagrangian'
     else:
-      raise NotImplementedError(
-          'JAX PAS FATROP does not implement the LBFGS Hessian option.'
-      )
+      hessian_mode = 'exact_lagrangian'
 
     self.task = task
-    self.problem = ContactProblem(task, contact_approx=contact_approx)
+    self.problem = ContactProblem(task)
     self.hessian_mode = hessian_mode
 
   def solve(
       self,
+      traj_init: dict,
       *,
-      xs_init: np.ndarray,
-      us_init: np.ndarray,
       iterations: int,
       stagewise: bool = False,
       gpu_line_search: bool = False,
       max_soc: int = 4,
-      **kwargs,
   ):
+    xs_init = traj_init['xs']
+    us_init = traj_init['us']
+
     options = FatropRefOptions(
         max_iter=iterations,
         linear_backend='pas',
@@ -59,7 +56,6 @@ class JaxPasFatropLiftedMultipleShooting:
         enable_watchdog=False,
         max_soc=max_soc,
         use_gpu_line_search=gpu_line_search,
-        **kwargs,
     )
 
     tic = time.perf_counter()
@@ -80,7 +76,11 @@ Method: {self.__class__.__name__}
   accepted steps: {result.accepted_steps}
 ''')
 
-    return np.asarray(result.x), np.asarray(result.u[:, :self.task.nu])
+    return {
+        'xs': np.asarray(result.x),
+        'us': np.asarray(result.u[:, :self.task.nu]),
+        'cfs': np.asarray(result.u[:, self.task.nu:]),
+    }
 
 
 class ContactProblem:
@@ -89,11 +89,10 @@ class ContactProblem:
     CasADi's variable bounds are represented by identity path rows here because
     FATROP's IPM internally introduces slacks and bound multipliers for them.
     """
-    def __init__(self, task, contact_approx=mjx.ContactApproxType.HUNT_CROSSLEY,
-                 dtype=jp.float64):
+    def __init__(self, task, dtype=jp.float64):
         self.task, self.nu, self.dtype = task, task.nu, dtype
         model = mjx.put_model(
-            task.model, impl='jax', contact_approximation=contact_approx,
+            task.model, impl='jax', contact_approximation=task.contact_approx,
             contact_smoothing=task.contact_smoothing * 0.01)
         if dtype == jp.float32:
             def cast_leaf(value):
