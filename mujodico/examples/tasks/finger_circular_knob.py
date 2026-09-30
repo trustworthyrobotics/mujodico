@@ -84,9 +84,13 @@ class FingerCircularKnob(Task):
         contact_smoothing=contact_smoothing,
     )
 
-  def _update_visualization(
-      self, server: viser.ViserServer, k: int, xs: np.ndarray
-  ):
+  def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
+    super().update_visualization(server, traj, k)
+
+    if '/grid' not in server.scene._handle_from_node_name:
+      server.scene.add_grid('/grid')
+
+    xs = traj['xs']
     ts = np.arange(xs.shape[0]) * self.model.opt.timestep
     t_range = [min(ts), max(ts)]
 
@@ -95,33 +99,32 @@ class FingerCircularKnob(Task):
     y_pad = max(y_max - y_min, 1e-5) * 0.05
     y_range = np.rad2deg([y_min - y_pad, y_max + y_pad])
 
-    fig1 = go.Figure()
+    fig = go.Figure()
     plotly_util.add_line(
-        fig=fig1,
+        fig=fig,
         x=ts[:k+1],
         y=np.rad2deg(xs[:k+1, 2]),
         name='Angle',
         color='blue',
     )
     plotly_util.add_line(
-        fig=fig1,
+        fig=fig,
         x=t_range,
         y=np.rad2deg([self.x_goal[2]] * 2),
         name='Angle goal',
         color='black',
         linestyle='dash',
     )
-    fig1.update_layout(
+    fig.update_layout(
         xaxis_title='Time (sec)',
         yaxis_title='Angle (deg)',
         xaxis={'range': t_range},
         yaxis={'range': y_range, 'dtick': 45},
     )
-    if not hasattr(self, 'plot1'):
-      server.scene.add_grid('grid')
-      self.plot1 = server.gui.add_plotly(fig1, aspect=0.8)
+    if not hasattr(server, 'plotly'):
+      server.plotly = server.gui.add_plotly(fig)
     else:
-      self.plot1.figure = fig1
+      server.plotly.figure = fig
 
 
 if __name__ == '__main__':

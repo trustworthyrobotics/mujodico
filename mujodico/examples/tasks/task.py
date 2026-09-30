@@ -157,28 +157,20 @@ Task: {self.__class__.__name__}
   contact_smoothing = {self.contact_smoothing}
 ''')
 
-  def visualize_trajectory(self, xs: np.ndarray):
+  def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
     model = self.model
     data = mujoco.MjData(model)
 
-    server = viser.ViserServer()
-    scene = mjviser.ViserMujocoScene(server, model, num_envs=1)
-    scene.camera_tracking_enabled = False
+    if not hasattr(server, 'mj_scene'):
+      mj_scene = mjviser.ViserMujocoScene(server, model, num_envs=1)
+      mj_scene.camera_tracking_enabled = False
+      server.mj_scene = mj_scene
 
-    while True:
-      for k in range(xs.shape[0]):
-        tic = time.time()
+    data.qpos = traj['xs'][k, :model.nq]
+    mujoco.mj_kinematics(model, data)
+    server.mj_scene.update_from_mjdata(data)
 
-        data.qpos = xs[k, : model.nq]
-        mujoco.mj_kinematics(model, data)
-        scene.update_from_mjdata(data)
+    if not hasattr(server, 'info_panel'):
+      server.info_panel = server.gui.add_markdown('')
+    server.info_panel.content = str(traj.get('info', ''))
 
-        self._update_visualization(server, k, xs)
-
-        remain = model.opt.timestep - (time.time() - tic)
-        if remain > 0:
-          time.sleep(remain)
-      time.sleep(3.0)
-
-  def _update_visualization(self, server: viser.ViserServer, k: int, xs: np.ndarray):
-    pass

@@ -96,9 +96,14 @@ class PushMultiSphere2d(Task):
         contact_smoothing=contact_smoothing,
     )
 
-  def _update_visualization(
-      self, server: viser.ViserServer, k: int, xs: np.ndarray
-  ):
+  def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
+    super().update_visualization(server, traj, k)
+
+    if '/grid' not in server.scene._handle_from_node_name:
+      server.scene.add_grid('/grid')
+
+    xs = traj['xs']
+
     fig = go.Figure()
     plotly_util.add_line(
         fig=fig,
@@ -150,11 +155,10 @@ class PushMultiSphere2d(Task):
         xaxis={'range': [-1, 1]},
         yaxis={'range': [-1, 1], 'scaleanchor': 'x', 'scaleratio': 1},
     )
-    if not hasattr(self, 'plot'):
-      server.scene.add_grid('grid')
-      self.plot = server.gui.add_plotly(fig)
+    if not hasattr(server, 'plotly'):
+      server.plotly = server.gui.add_plotly(fig)
     else:
-      self.plot.figure = fig
+      server.plotly.figure = fig
 
 
 if __name__ == '__main__':

@@ -1,7 +1,6 @@
 import os
 import time
 import csv
-import copy
 from pathlib import Path
 
 from absl import app
@@ -12,6 +11,7 @@ import mujoco
 from mujodico import mjx
 from mujodico.examples.methods import get_method_names, parse_method_name, support
 from mujodico.examples.tasks import get_task_names, parse_task_name
+from mujodico.examples.visualizer import Visualizer
 import numpy as np
 
 
@@ -48,12 +48,15 @@ def _main(argv) -> None:
   result_dir = Path(__file__).resolve().parent / 'result'
   result_dir.mkdir(exist_ok=True)
   result_file = result_dir / f'{task_cls.__name__}_{method_cls.__name__}.csv'
-  print(result_file)
+  print(f'Writing results to "{result_file}"')
 
   with open(result_file, 'a', newline='') as f:
     writer = csv.writer(f)
     if f.tell() == 0:
       writer.writerow(['seed', 'goal_error', 'solve_time_sec', 'solver_iters'])
+
+    visualizer = Visualizer()
+    visualizer.run()
 
     method = None
     for seed in range(_SEED.value, _SEED.value + _TESTS.value):
@@ -79,29 +82,28 @@ def _main(argv) -> None:
 
       solve_time = time.perf_counter() - tic
 
+
       goal_error = support.state_cost(
           task.Q, task.x_goal, traj['xs'][-1], task.quaternion_w_idxs
       )
 
+
       writer.writerow([seed, goal_error, solve_time, iters])
       f.flush()
 
-      print(f'''
-Task: {task_cls.__name__}
-Method: {method_cls.__name__}
-  seed: {seed}
-  goal error: {goal_error:.8f}
-  solve time: {solve_time:.4f} sec
-  iterations: {iters}
-''')
+      traj['info'] = f'''
+- Task: {task_cls.__name__}(seed={seed})
+  - goal error: {goal_error:.8f}
+- Method: {method_cls.__name__}
+  - solve time: {solve_time:.4f} sec
+  - iterations: {iters}
+'''
+      visualizer.update(task, traj)
 
   if _TESTS.value == 1:
-    task.visualize_trajectory(traj['xs'])
-
-
-def main():
-  app.run(_main)
+    while True:
+      time.sleep(3600)
 
 
 if __name__ == '__main__':
-  main()
+  app.run(_main)

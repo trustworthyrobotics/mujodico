@@ -144,22 +144,24 @@ class AllegroCube(Task):
         col=1,
     )
 
-  def _update_visualization(
-      self, server: viser.ViserServer, k: int, xs: np.ndarray
-  ):
+  def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
+    super().update_visualization(server, traj, k)
+
+    if '/grid' not in server.scene._handle_from_node_name:
+      server.scene.add_grid('/grid')
+
     fig = plotly.subplots.make_subplots(
         rows=4, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.02,
     )
     for object_dof in (0, 1, 2, 3):
-      self._plot_object_dof(fig, k, xs, object_dof)
+      self._plot_object_dof(fig, k, traj['xs'], object_dof)
 
-    if not hasattr(self, 'plot'):
-      server.scene.add_grid('grid')
-      self.plot = server.gui.add_plotly(fig, aspect=1.5)
+    if not hasattr(server, 'plotly'):
+      server.plotly = server.gui.add_plotly(fig)
     else:
-      self.plot.figure = fig
+      server.plotly.figure = fig
 
 
 if __name__ == '__main__':
