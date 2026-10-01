@@ -1,29 +1,29 @@
-from mujodico.examples.tasks import allegro_ball
-from mujodico.examples.tasks import allegro_cube
-from mujodico.examples.tasks import allegro_pen
-from mujodico.examples.tasks import finger_circular_knob
-from mujodico.examples.tasks import fingers_sphere_2d
-from mujodico.examples.tasks import push_box_2d
-from mujodico.examples.tasks import push_multisphere_2d
-from mujodico.examples.tasks import push_sphere_1d
-from mujodico.examples.tasks import push_sphere_2d
-from mujodico.examples.tasks import push_circular_knob
-from mujodico.examples.tasks import push_square_knob
-from mujodico.examples.tasks.task import Task as Task
+from mujodico.examples.tasks.allegro_ball import AllegroBall
+from mujodico.examples.tasks.allegro_cube import AllegroCube
+from mujodico.examples.tasks.allegro_pen import AllegroPen
+from mujodico.examples.tasks.finger_circular_knob import FingerCircularKnob
+from mujodico.examples.tasks.fingers_sphere_2d import FingersSphere2d
+from mujodico.examples.tasks.push_box_2d import PushBox2d
+from mujodico.examples.tasks.push_circular_knob import PushCircularKnob
+from mujodico.examples.tasks.push_multisphere_2d import PushMultiSphere2d
+from mujodico.examples.tasks.push_sphere_1d import PushSphere1d
+from mujodico.examples.tasks.push_sphere_2d import PushSphere2d
+from mujodico.examples.tasks.push_square_knob import PushSquareKnob
+from mujodico.examples.tasks.task import Task
 
 
 _TASKS = [
-    push_sphere_1d.PushSphere1d,
-    push_sphere_2d.PushSphere2d,
-    push_box_2d.PushBox2d,
-    push_multisphere_2d.PushMultiSphere2d,
-    push_circular_knob.PushCircularKnob,
-    push_square_knob.PushSquareKnob,
-    finger_circular_knob.FingerCircularKnob,
-    fingers_sphere_2d.FingersSphere2d,
-    allegro_ball.AllegroBall,
-    allegro_cube.AllegroCube,
-    allegro_pen.AllegroPen,
+    PushSphere1d,
+    PushSphere2d,
+    PushBox2d,
+    PushMultiSphere2d,
+    PushCircularKnob,
+    PushSquareKnob,
+    FingerCircularKnob,
+    FingersSphere2d,
+    AllegroBall,
+    AllegroCube,
+    AllegroPen,
 ]
 
 

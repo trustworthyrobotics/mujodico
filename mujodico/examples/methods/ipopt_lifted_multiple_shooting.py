@@ -2,9 +2,7 @@ import time
 import jax
 import jax.numpy as jp
 from mujodico import mjx
-from mujodico.examples.methods.lifted_multiple_shooting_transcription import (
-    LiftedMultipleShootingTranscription
-)
+from mujodico.examples import methods
 from mujodico.examples.tasks import Task
 import numpy as np
 
@@ -26,7 +24,7 @@ class IpoptLiftedMultipleShooting:
       *,
       gauss_newton: bool = True,
   ):
-    self.transcription = LiftedMultipleShootingTranscription(task)
+    self.transcription = methods.LiftedMultipleShootingTranscription(task)
     trans = self.transcription
 
     N = trans.N

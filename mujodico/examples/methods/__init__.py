@@ -1,16 +1,17 @@
-from mujodico.examples.methods import ipopt_kkt_contact_implicit
-from mujodico.examples.methods import ipopt_lifted_multiple_shooting
-from mujodico.examples.methods import ipopt_multiple_shooting
-from mujodico.examples.methods import ipopt_single_shooting
-from mujodico.examples.methods import jax_pas_fatrop_lifted_multiple_shooting
+from mujodico.examples.methods.ipopt_kkt_contact_implicit import IpoptKKTContactImplicit
+from mujodico.examples.methods.ipopt_lifted_multiple_shooting import IpoptLiftedMultipleShooting
+from mujodico.examples.methods.ipopt_multiple_shooting import IpoptMultipleShooting
+from mujodico.examples.methods.ipopt_single_shooting import IpoptSingleShooting
+from mujodico.examples.methods.jax_pas_fatrop_lifted_multiple_shooting import JaxPasFatropLiftedMultipleShooting
+from mujodico.examples.methods.transcription_lifted_multiple_shooting import LiftedMultipleShootingTranscription
 
 
 _METHODS = [
-    ipopt_kkt_contact_implicit.IpoptKKTContactImplicit,
-    ipopt_lifted_multiple_shooting.IpoptLiftedMultipleShooting,
-    ipopt_multiple_shooting.IpoptMultipleShooting,
-    ipopt_single_shooting.IpoptSingleShooting,
-    jax_pas_fatrop_lifted_multiple_shooting.JaxPasFatropLiftedMultipleShooting,
+    IpoptKKTContactImplicit,
+    IpoptLiftedMultipleShooting,
+    IpoptMultipleShooting,
+    IpoptSingleShooting,
+    JaxPasFatropLiftedMultipleShooting,
 ]
 
 
