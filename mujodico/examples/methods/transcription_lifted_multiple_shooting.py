@@ -63,10 +63,6 @@ class LiftedMultipleShootingTranscription:
         constraints = constraints.at[i].set(tangent.dot(tangent) - normal * normal)
       return constraints
 
-    def terminal_inequality(x, params):
-      del x
-      return jp.zeros(0)
-
     u_lb, u_ub = task.u_bounds
     cf_lb = np.zeros(ncf)
     cf_ub = np.full(ncf, jp.inf)
@@ -80,7 +76,6 @@ class LiftedMultipleShootingTranscription:
     self.terminal_cost = terminal_cost
     self.stage_equality_constraint = stage_equality
     self.stage_inequality_constraint = stage_inequality
-    self.terminal_inequality_constraint = terminal_inequality
 
     self.x_bounds = x_bounds
     self.w_bounds = w_bounds
@@ -91,7 +86,6 @@ class LiftedMultipleShootingTranscription:
 
     self.n_stage_eq = nx + ncf
     self.n_stage_ineq = len(socs)
-    self.n_terminal_ineq = 0
 
     self._task = task
     self.update(task)

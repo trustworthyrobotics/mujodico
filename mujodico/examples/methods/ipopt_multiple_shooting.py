@@ -79,9 +79,9 @@ class IpoptMultipleShooting:
 
       lagrange = lagrange.reshape(N, nx)
 
-      def stage_lagrangian_hess(x, u, xnext, scale1, scale0, params):
+      def stage_lagrangian_hess(x, u, xnext, constr_scale, cost_scale, params):
         var = jp.concatenate([x.ravel(), u.ravel(), xnext.ravel()])
-        hess = jax.hessian(stage_lagrangian)(var, scale1, scale0, params)
+        hess = jax.hessian(stage_lagrangian)(var, constr_scale, cost_scale, params)
         return hess[jp.tril_indices(hess.shape[0])]
 
       per_stage_lagrangian_hess = jax.vmap(
@@ -89,10 +89,11 @@ class IpoptMultipleShooting:
       )(
           xs[:-1], us, xs[1:], lagrange, obj_factor, params
       )
+      terminal_hess = jax.hessian(trans.terminal_cost)(xs[-1], params)
 
       return jp.concatenate([
           per_stage_lagrangian_hess.ravel(),
-          params.Qf[jp.tril_indices(nx)] * 2 * obj_factor,
+          terminal_hess[jp.tril_indices(nx)] * obj_factor,
       ])
 
     vars_trace = self._pack(xs=jp.zeros((N+1, nx)), us=jp.zeros((N, nu)))

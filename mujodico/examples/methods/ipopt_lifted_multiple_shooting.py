@@ -16,7 +16,6 @@ except ImportError as e:
 
 
 class IpoptLiftedMultipleShooting:
-  # TODO(wei-chen): Handle terminal equality and inequality constraints.
 
   def __init__(
       self,
@@ -86,8 +85,11 @@ class IpoptLiftedMultipleShooting:
       stage_hessians = jax.vmap(stage_hess, in_axes=(0,0,0,0,0,None,None))(
           xs[:-1], ws, xs[1:], eq_lagrange, ineq_lagrange, obj_factor, params,
       )
-      terminal_hess = params.Qf[jp.tril_indices(nx)] * 2 * obj_factor
-      return jp.concatenate([stage_hessians.ravel(), terminal_hess])
+      terminal_hess = jax.hessian(trans.terminal_cost)(xs[-1], params)
+      return jp.concatenate([
+          stage_hessians.ravel(),
+          terminal_hess[jp.tril_indices(nx)] * obj_factor,
+      ])
 
     vars_trace = self._pack(
         xs=jp.zeros((N + 1, nx)),
