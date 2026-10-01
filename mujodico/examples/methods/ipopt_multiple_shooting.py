@@ -1,8 +1,7 @@
 import time
 import jax
 import jax.numpy as jp
-from mujodico import mjx
-from mujodico.examples.methods import support
+from mujodico.examples import methods
 from mujodico.examples.tasks import Task
 import numpy as np
 
@@ -23,133 +22,91 @@ class IpoptMultipleShooting:
       *,
       gauss_newton: bool = True,
   ):
-    self.task = task
+    self.transcription = methods.MultipleShootingTranscription(task)
+    trans = self.transcription
 
-    model = task.model
+    N = trans.N
+    nx = trans.nx
+    nu = trans.nu
 
-    mjx_model = mjx.put_model(
-        model,
-        impl='jax',
-        contact_approximation=task.contact_approx,
-        contact_smoothing=0.0,
-    )
-
-    mjx_smooth_model = mjx.put_model(
-        model,
-        impl=mjx_model.impl,
-        contact_approximation=task.contact_approx,
-        contact_smoothing=task.contact_smoothing,
-    )
-
-    mjx_data = mjx.make_data(mjx_model, impl=mjx_model.impl)
-
-    N = task.horizon
-    nx = task.nx
-    nu = task.nu
-
-    x_goal = jp.array(task.x_goal)
-    Q = jp.array(task.Q)
-    Qf = jp.array(task.Qf)
-    u_ref = jp.array(task.u_ref)
-    R = jp.array(task.R)
-
-    def step(x, u):
-      nq, nv = mjx_model.nq, mjx_model.nv
-      d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
-
-      d0 = mjx.step(mjx_model, d)
-      xnext = jp.concatenate((d0.qpos, d0.qvel, d0.act))
-
-      d1 = mjx.step(mjx_smooth_model, d)
-      xnext_smooth = jp.concatenate((d1.qpos, d1.qvel, d1.act))
-
-      return (
-          jax.lax.stop_gradient(xnext)
-          + xnext_smooth
-          - jax.lax.stop_gradient(xnext_smooth)
-      )
-
-    def stage_objective(x, u):
-      return (
-          support.state_cost(Q, x_goal, x, task.quaternion_w_idxs)
-          + (u - u_ref).dot(R @ (u - u_ref))
-      )
-
-    def stage_constraint(x, u, xnext):
-      return xnext - step(x, u)
-
-    def stage_lagrangian(var, scale1, scale0):
+    def stage_lagrangian(var, constr_scale, cost_scale, params):
       assert var.size == nx + nu + nx
-      assert scale1.size == nx
-      assert scale0.size == 1
-
       x = var[:nx]
       u = var[nx : nx + nu]
       xnext = var[nx + nu :]
-
-      lagrangian = stage_objective(x, u) * scale0
+      value = trans.stage_cost(x, u, params) * cost_scale
       if not gauss_newton:
-        lagrangian += jp.sum(stage_constraint(x, u, xnext) * scale1)
+        constr = trans.stage_equality_constraint(x, u, xnext, params)
+        value += jp.vdot(constr, constr_scale)
+      return value
 
-      return lagrangian
-
-    def objective(vars: jax.Array):
+    def objective(vars: jax.Array, params):
       xs, us = self._unpack(vars)
+      stage_costs = jax.vmap(trans.stage_cost, in_axes=(0,0,None))(xs[:-1], us, params)
+      terminal_cost = trans.terminal_cost(xs[-1], params)
+      return jp.sum(stage_costs) + terminal_cost
 
-      per_stage_cost = jax.vmap(stage_objective)(xs[:-1], us)
-
-      cost = (
-          jp.sum(per_stage_cost)
-          + support.state_cost(Qf, x_goal, xs[-1], task.quaternion_w_idxs)
-      )
-      return cost
-
-    def constraints(vars: jax.Array):
+    def constraints(vars: jax.Array, params):
       xs, us = self._unpack(vars)
-
-      per_stage_constraint = jax.vmap(stage_constraint)(xs[:-1], us, xs[1:])
+      per_stage_constraint = jax.vmap(
+          trans.stage_equality_constraint, in_axes=(0,0,0,None)
+      )(xs[:-1], us, xs[1:], params)
       return per_stage_constraint.ravel()
 
     def constraints_jacobian_entries(vars: jax.Array):
       xs, us = self._unpack(vars)
 
-      def stage_constraints_jac(x, u):
-        A, B = jax.jacfwd(step, argnums=(0, 1))(x, u)
-        return jp.concatenate([(-A).reshape(-1), (-B).reshape(-1), jp.ones(nx)])
+      def stage_constraints_jac(x, u, xnext):
+        var = jp.concatenate([x, u, xnext])
 
-      per_stage_constraints_jac = jax.vmap(stage_constraints_jac)(xs[:-1], us)
-      return per_stage_constraints_jac.ravel()
+        def local_constraint(var):
+          x = var[:nx]
+          u = var[nx:nx+nu]
+          xnext = var[nx+nu:]
+          return trans.stage_equality_constraint(x, u, xnext, trans.params)
 
-    def lagrangian_hessian_entries(vars, lagrange, obj_factor):
+        jacobian = jax.jacfwd(local_constraint)(var)
+        return jp.concatenate([
+          jacobian[:, :nx].ravel(),
+          jacobian[:, nx:nx+nu].ravel(),
+          jp.diag(jacobian[:, nx+nu:]),
+        ])
+
+      return jax.vmap(stage_constraints_jac)(xs[:-1], us, xs[1:]).ravel()
+
+    def lagrangian_hessian_entries(vars, lagrange, obj_factor, params):
       xs, us = self._unpack(vars)
 
       lagrange = lagrange.reshape(N, nx)
 
-      def stage_lagrangian_hess(x, u, xnext, scale1, scale0):
+      def stage_lagrangian_hess(x, u, xnext, scale1, scale0, params):
         var = jp.concatenate([x.ravel(), u.ravel(), xnext.ravel()])
-        hess = jax.hessian(stage_lagrangian)(var, scale1, scale0)
+        hess = jax.hessian(stage_lagrangian)(var, scale1, scale0, params)
         return hess[jp.tril_indices(hess.shape[0])]
 
-      per_stage_lagrangian_hess = jax.vmap(stage_lagrangian_hess, in_axes=(0,0,0,0,None))(
-          xs[:-1], us, xs[1:], lagrange, obj_factor
+      per_stage_lagrangian_hess = jax.vmap(
+          stage_lagrangian_hess, in_axes=(0,0,0,0,None,None)
+      )(
+          xs[:-1], us, xs[1:], lagrange, obj_factor, params
       )
 
       return jp.concatenate([
           per_stage_lagrangian_hess.ravel(),
-          Qf[jp.tril_indices(nx)] * 2,
+          params.Qf[jp.tril_indices(nx)] * 2 * obj_factor,
       ])
 
     vars_trace = self._pack(xs=jp.zeros((N+1, nx)), us=jp.zeros((N, nu)))
 
-    objective_grad = jax.jit(jax.grad(objective)).lower(vars_trace).compile()
-    objective = jax.jit(objective).lower(vars_trace).compile()
+    params_trace = trans.params
+    objective_grad = jax.jit(jax.grad(objective)).lower(vars_trace, params_trace).compile()
+    objective = jax.jit(objective).lower(vars_trace, params_trace).compile()
 
-    constraints = jax.jit(constraints).lower(vars_trace).compile()
+    constraints = jax.jit(constraints).lower(vars_trace, params_trace).compile()
     constraints_jacobian_entries = jax.jit(constraints_jacobian_entries).lower(vars_trace).compile()
     constraints_jacobian_structure = self._constraints_jacobian_structure()
 
     lagrangian_hessian_entries = jax.jit(lagrangian_hessian_entries).lower(
-        vars_trace, jp.ones(N * nx), jp.array(1.0),
+      vars_trace, jp.ones(N * nx), jp.array(1.0), params_trace,
     ).compile()
     lagrangian_hessian_structure = self._lagrangian_hessian_structure()
 
@@ -165,17 +122,20 @@ class IpoptMultipleShooting:
 
     class NLP:
 
+      def __init__(self, params):
+        self.params = params
+
       @timed
       def objective(self, vars):
-        return float(objective(jp.asarray(vars)))
+        return float(objective(jp.asarray(vars), self.params))
 
       @timed
       def gradient(self, vars):
-        return np.asarray(objective_grad(jp.asarray(vars)))
+        return np.asarray(objective_grad(jp.asarray(vars), self.params))
 
       @timed
       def constraints(self, vars):
-        return np.asarray(constraints(jp.asarray(vars)))
+        return np.asarray(constraints(jp.asarray(vars), self.params))
 
       @timed
       def jacobian(self, vars):
@@ -192,6 +152,7 @@ class IpoptMultipleShooting:
                 jp.asarray(vars),
                 jp.asarray(lagrange),
                 jp.asarray(objective_factor),
+                self.params,
             )
         )
 
@@ -199,27 +160,38 @@ class IpoptMultipleShooting:
       def hessianstructure(self):
         return lagrangian_hessian_structure
 
-    x_lb, x_ub = task.x_bounds
-    xs_lb = np.repeat(x_lb[None, :], N + 1, axis=0)
-    xs_lb[0] = task.x_0
-    xs_ub = np.repeat(x_ub[None, :], N + 1, axis=0)
-    xs_ub[0] = task.x_0
+    self._NLP = NLP
+    self._refresh_problem()
 
-    u_lb, u_ub = task.u_bounds
-    us_lb = np.repeat(u_lb[None, :], N, axis=0)
-    us_ub = np.repeat(u_ub[None, :], N, axis=0)
+  def update(self, task: Task):
+    self.transcription.update(task)
+    self._refresh_problem()
+
+  def _refresh_problem(self):
+    trans = self.transcription
+    N = trans.N
+
+    x_lb, x_ub = trans.x_bounds
+    xs_lb = np.repeat(np.asarray(x_lb)[None, :], N + 1, axis=0)
+    xs_lb[0] = np.asarray(trans.params.x_0)
+    xs_ub = np.repeat(np.asarray(x_ub)[None, :], N + 1, axis=0)
+    xs_ub[0] = np.asarray(trans.params.x_0)
+
+    u_lb, u_ub = trans.u_bounds
+    us_lb = np.repeat(np.asarray(u_lb)[None, :], N, axis=0)
+    us_ub = np.repeat(np.asarray(u_ub)[None, :], N, axis=0)
 
     vars_lb = self._pack(xs_lb, us_lb)
     vars_ub = self._pack(xs_ub, us_ub)
 
-    n_constraints = N * nx
+    n_constraints = N * trans.nx
     constraints_lb = np.zeros(n_constraints)
     constraints_ub = np.zeros(n_constraints)
 
     self.problem = cyipopt.Problem(
         n=vars_lb.size,
         m=n_constraints,
-        problem_obj=NLP(),
+        problem_obj=self._NLP(trans.params),
         lb=vars_lb,
         ub=vars_ub,
         cl=constraints_lb,
@@ -245,7 +217,7 @@ class IpoptMultipleShooting:
     self._dynamics_time = 0
     tic = time.perf_counter()
 
-    vars_opt, info = self.problem.solve(vars_init)
+    vars_opt, _info = self.problem.solve(vars_init)
 
     total_time = time.perf_counter() - tic
 
@@ -264,7 +236,7 @@ Method: {self.__class__.__name__}
     }
 
   def _pack(self, xs: jax.Array | np.ndarray, us: jax.Array | np.ndarray):
-    N, nx, nu = self.task.horizon, self.task.nx, self.task.nu
+    N, nx, nu = self.transcription.N, self.transcription.nx, self.transcription.nu
     assert xs.shape == (N + 1, nx)
     assert us.shape == (N, nu)
 
@@ -276,7 +248,7 @@ Method: {self.__class__.__name__}
     ])
 
   def _unpack(self, vars: jax.Array | np.ndarray):
-    N, nx, nu = self.task.horizon, self.task.nx, self.task.nu
+    N, nx, nu = self.transcription.N, self.transcription.nx, self.transcription.nu
     n_vars = (N + 1) * nx + N * nu
     assert vars.shape == (n_vars,)
 
@@ -289,7 +261,7 @@ Method: {self.__class__.__name__}
     return xs, us
 
   def _constraints_jacobian_structure(self):
-    N, nx, nu = self.task.horizon, self.task.nx, self.task.nu
+    N, nx, nu = self.transcription.N, self.transcription.nx, self.transcription.nu
 
     x_rows, x_cols = np.indices((nx, nx))
     u_rows, u_cols = np.indices((nx, nu))
@@ -317,7 +289,7 @@ Method: {self.__class__.__name__}
     )
 
   def _lagrangian_hessian_structure(self):
-    N, nx, nu = self.task.horizon, self.task.nx, self.task.nu
+    N, nx, nu = self.transcription.N, self.transcription.nx, self.transcription.nu
 
     stage_i, stage_j = np.tril_indices(nx + nu + nx)
     qf_i, qf_j = np.tril_indices(nx)
