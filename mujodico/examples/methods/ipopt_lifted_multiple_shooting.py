@@ -3,17 +3,9 @@ import jax
 import jax.numpy as jp
 from mujodico import mjx
 from mujodico.examples import methods
+from mujodico.examples.methods import support
 from mujodico.examples.tasks import Task
 import numpy as np
-
-try:
-  import cyipopt
-except ImportError as e:
-  raise ImportError(
-      'Optional solver dependency not installed. Install it with:\n\n'
-      '    pip install cyipopt'
-  ) from e
-
 
 class IpoptLiftedMultipleShooting:
 
@@ -23,6 +15,8 @@ class IpoptLiftedMultipleShooting:
       *,
       gauss_newton: bool = True,
   ):
+    self._cyipopt = support.load_cyipopt()
+
     self.transcription = methods.LiftedMultipleShootingTranscription(task)
     trans = self.transcription
 
@@ -192,7 +186,7 @@ class IpoptLiftedMultipleShooting:
     constraints_lb = np.tile(stage_lb, N)
     constraints_ub = np.tile(stage_ub, N)
 
-    self.problem = cyipopt.Problem(
+    self.problem = self._cyipopt.Problem(
         n=vars_lb.size,
         m=constraints_lb.size,
         problem_obj=self._NLP(self.transcription.params),

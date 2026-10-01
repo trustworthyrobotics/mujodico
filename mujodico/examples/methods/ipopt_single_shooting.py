@@ -6,14 +6,6 @@ from mujodico.examples.methods import support
 from mujodico.examples.tasks import Task
 import numpy as np
 
-try:
-  import cyipopt
-except ImportError as e:
-  raise ImportError(
-      "Optional solver dependency not installed. Install it with:\n\n"
-      "    pip install cyipopt"
-  ) from e
-
 
 class IpoptSingleShooting:
 
@@ -23,6 +15,8 @@ class IpoptSingleShooting:
       contact_approx: mjx.ContactApproxType = mjx.ContactApproxType.HUNT_CROSSLEY,
       hess_approx: support.HessianApproxType = support.HessianApproxType.GaussNewton,
   ):
+    cyipopt = support.load_cyipopt()
+
     model = task.model
 
     mjx_model = mjx.put_model(

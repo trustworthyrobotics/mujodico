@@ -8,14 +8,6 @@ from mujodico.mjx._src import constraint
 from mujodico.mjx._src import solver_conic
 import numpy as np
 
-try:
-  import cyipopt
-except ImportError as e:
-  raise ImportError(
-      'Optional solver dependency not installed. Install it with:\n\n'
-      '    pip install cyipopt'
-  ) from e
-
 
 _CONSTITUTIVE_RELATIONS_FUNC = {
     mjx.ContactApproxType.CONIC: solver_conic.constitutive_relations,
@@ -28,6 +20,8 @@ class IpoptKKTContactImplicit:
       self,
       task: Task,
   ):
+    self._cyipopt = support.load_cyipopt()
+
     self.task = task
 
     model = task.model
@@ -210,7 +204,7 @@ class IpoptKKTContactImplicit:
       np.asarray(constitutive_ub)
     ]), N)
 
-    self.problem = cyipopt.Problem(
+    self.problem = self._cyipopt.Problem(
         n=vars_lb.size,
         m=constraints_lb.size,
         problem_obj=NLP(),

@@ -56,7 +56,6 @@ def _main(argv) -> None:
       writer.writerow(['seed', 'goal_error', 'solve_time_sec', 'solver_iters'])
 
     visualizer = Visualizer()
-    visualizer.run()
 
     method = None
     for seed in range(_SEED.value, _SEED.value + _TESTS.value):
@@ -67,6 +66,8 @@ def _main(argv) -> None:
         method.update(task)
       else:
         method = method_cls(task)
+
+      visualizer.run()
 
       iters = _ITERATIONS.value
 
@@ -82,11 +83,9 @@ def _main(argv) -> None:
 
       solve_time = time.perf_counter() - tic
 
-
       goal_error = support.state_cost(
           task.Q, task.x_goal, traj['xs'][-1], task.quaternion_w_idxs
       )
-
 
       writer.writerow([seed, goal_error, solve_time, iters])
       f.flush()

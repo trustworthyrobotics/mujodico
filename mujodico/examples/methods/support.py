@@ -1,12 +1,26 @@
 from dataclasses import dataclass
 import enum
+import importlib
 import jax
+import logging
 from jax import numpy as jp
 from mujodico import mjx
 # pylint: disable=g-importing-member
 from mujodico.mjx._src.types import Model
 # pylint: enable=g-importing-member
 import numpy as np
+
+
+def load_cyipopt():
+  try:
+    cyipopt = importlib.import_module('cyipopt')
+    logging.getLogger('cyipopt').setLevel(logging.WARNING)
+    return cyipopt
+  except ImportError as e:
+    raise ImportError(
+        'Optional solver dependency not installed. Install it with:\n\n'
+        '    pip install cyipopt'
+    ) from e
 
 
 class HessianApproxType(enum.Enum):
