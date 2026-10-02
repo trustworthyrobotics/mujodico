@@ -2,10 +2,24 @@ from mujodico.examples.methods.ipopt_kkt_contact_implicit import IpoptKKTContact
 from mujodico.examples.methods.ipopt_lifted_multiple_shooting import IpoptLiftedMultipleShooting
 from mujodico.examples.methods.ipopt_multiple_shooting import IpoptMultipleShooting
 from mujodico.examples.methods.ipopt_single_shooting import IpoptSingleShooting
-from mujodico.examples.methods.jax_pas_fatrop_lifted_multiple_shooting import JaxPasFatropLiftedMultipleShooting
+from mujodico.examples.methods.ippas_lifted_multiple_shooting import IppasLiftedMultipleShooting
 from mujodico.examples.methods.transcription_lifted_multiple_shooting import LiftedMultipleShootingTranscription
 from mujodico.examples.methods.transcription_multiple_shooting import MultipleShootingTranscription
 from mujodico.examples.methods.transcription_single_shooting import SingleShootingTranscription
+
+
+__all__ = [
+    'IpoptKKTContactImplicit',
+    'IpoptLiftedMultipleShooting',
+    'IpoptMultipleShooting',
+    'IpoptSingleShooting',
+    'IppasLiftedMultipleShooting',
+    'LiftedMultipleShootingTranscription',
+    'MultipleShootingTranscription',
+    'SingleShootingTranscription',
+    'get_method_names',
+    'parse_method_name',
+]
 
 
 _METHODS = [
@@ -13,7 +27,7 @@ _METHODS = [
     IpoptLiftedMultipleShooting,
     IpoptMultipleShooting,
     IpoptSingleShooting,
-    JaxPasFatropLiftedMultipleShooting,
+    IppasLiftedMultipleShooting,
 ]
 
 

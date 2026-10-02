@@ -12,6 +12,24 @@ from mujodico.examples.tasks.push_square_knob import PushSquareKnob
 from mujodico.examples.tasks.task import Task
 
 
+__all__ = [
+    'AllegroBall',
+    'AllegroCube',
+    'AllegroPen',
+    'FingerCircularKnob',
+    'FingersSphere2d',
+    'PushBox2d',
+    'PushCircularKnob',
+    'PushMultiSphere2d',
+    'PushSphere1d',
+    'PushSphere2d',
+    'PushSquareKnob',
+    'Task',
+    'get_task_names',
+    'parse_task_name',
+]
+
+
 _TASKS = [
     PushSphere1d,
     PushSphere2d,

@@ -13,12 +13,7 @@ from mujodico.trajopt._src.fatrop_ref import FatropRefOptions
 from mujodico.trajopt._src.fatrop_ref import FatropReferenceJAX
 
 
-class JaxPasFatropLiftedMultipleShooting:
-  """Lifted contact FATROP using the JAX PAS linear-system backend.
-
-  The lifted problem is shared with the official FATROP benchmark so this
-  method has the same contact-force variables and inequality ordering.
-  """
+class IppasLiftedMultipleShooting:
 
   def __init__(
       self,
