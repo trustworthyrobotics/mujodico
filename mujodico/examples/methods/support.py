@@ -23,30 +23,6 @@ def load_cyipopt():
     ) from e
 
 
-class HessianApproxType(enum.Enum):
-  GaussNewton = 'gaussnewton'
-  Full = 'full'
-  LBFGS = 'lbfgs'
-
-  @classmethod
-  def _resolve(cls, value: str | None):
-    if isinstance(value, cls):
-      return value
-
-    if value is None:
-      return cls.GaussNewton
-
-    name = value.lower().strip().translate(str.maketrans('', '', ' -_'))
-    for member in cls:
-      if member.value.lower() == name:
-        return member
-
-    raise ValueError(
-        'unknown hessian approximation: value should be one of '
-        f'<{"|".join([member.value for member in cls])}>'
-    )
-
-
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class TranscriptionParams:

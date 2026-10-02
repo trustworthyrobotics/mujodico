@@ -5,6 +5,7 @@ from mujodico.examples.methods.ipopt_single_shooting import IpoptSingleShooting
 from mujodico.examples.methods.jax_pas_fatrop_lifted_multiple_shooting import JaxPasFatropLiftedMultipleShooting
 from mujodico.examples.methods.transcription_lifted_multiple_shooting import LiftedMultipleShootingTranscription
 from mujodico.examples.methods.transcription_multiple_shooting import MultipleShootingTranscription
+from mujodico.examples.methods.transcription_single_shooting import SingleShootingTranscription
 
 
 _METHODS = [

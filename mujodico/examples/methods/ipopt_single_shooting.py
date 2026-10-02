@@ -2,6 +2,7 @@ import time
 import jax
 import jax.numpy as jp
 from mujodico import mjx
+from mujodico.examples import methods
 from mujodico.examples.methods import support
 from mujodico.examples.tasks import Task
 import numpy as np
@@ -12,119 +13,71 @@ class IpoptSingleShooting:
   def __init__(
       self,
       task: Task,
-      contact_approx: mjx.ContactApproxType = mjx.ContactApproxType.HUNT_CROSSLEY,
-      hess_approx: support.HessianApproxType = support.HessianApproxType.GaussNewton,
   ):
-    cyipopt = support.load_cyipopt()
+    self._cyipopt = support.load_cyipopt()
+    self.transcription = methods.SingleShootingTranscription(task)
+    trans = self.transcription
 
-    model = task.model
+    N = trans.N
+    nu = trans.nu
 
-    mjx_model = mjx.put_model(
-        model,
-        impl='jax',
-        contact_approximation=contact_approx,
-        contact_smoothing=0.0,
-    )
-
-    mjx_smooth_model = mjx.put_model(
-        model,
-        impl=mjx_model.impl,
-        contact_approximation=contact_approx,
-        contact_smoothing=task.contact_smoothing,
-    )
-
-    mjx_data = mjx.make_data(mjx_model, impl=mjx_model.impl)
-
-    N = task.horizon
-    nu = task.nu
-
-    x_0 = jp.array(task.x_0)
-    x_goal = jp.array(task.x_goal)
-    Q = jp.array(task.Q)
-    Qf = jp.array(task.Qf)
-    u_ref = jp.array(task.u_ref)
-    R = jp.array(task.R)
-
-    def step(x, u):
-      nq, nv = mjx_model.nq, mjx_model.nv
-      d = mjx_data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
-
-      d0 = mjx.step(mjx_model, d)
-      xnext = jp.concatenate((d0.qpos, d0.qvel, d0.act))
-
-      d1 = mjx.step(mjx_smooth_model, d)
-      xnext_smooth = jp.concatenate((d1.qpos, d1.qvel, d1.act))
-
-      return (
-          jax.lax.stop_gradient(xnext)
-          + xnext_smooth
-          - jax.lax.stop_gradient(xnext_smooth)
-      )
-
-    def rollout(x_0, us):
-      def scan_step(x, u):
-        x_next = step(x, u)
-        return x_next, x_next
-
-      _, xs = jax.lax.scan(scan_step, x_0, us)
-      return jp.concatenate([x_0[None], xs], axis=0)
-
-    def objective(vars):
+    def objective(vars, params):
       us = vars.reshape(N, nu)
-      xs = rollout(x_0, us)
-
-      du = us - u_ref
-
-      cost = (
-          jp.sum(jax.vmap(lambda x: support.state_cost(Qf, x_goal, x, task.quaternion_w_idxs))(xs[:-1]))
-          + jp.sum((du @ R) * du)
-          + support.state_cost(Qf, x_goal, xs[-1], task.quaternion_w_idxs)
-      )
-      return cost
+      return trans.objective(us, params)
 
     vars_trace = jp.zeros((N, nu)).ravel()
+    params_trace = trans.params
 
-    objective_grad = jax.jit(jax.grad(objective)).lower(vars_trace).compile()
-    objective = jax.jit(objective).lower(vars_trace).compile()
+    objective_grad = jax.jit(jax.grad(objective)).lower(vars_trace, params_trace).compile()
+    objective = jax.jit(objective).lower(vars_trace, params_trace).compile()
 
-    self._dynamics_time = 0
+    self._eval_time = [0] * 2
 
-    def timed(fn):
-      def wrapped(*args, **kwargs):
-        tic = time.perf_counter()
-        out = fn(*args, **kwargs)
-        self._dynamics_time += time.perf_counter() - tic
-        return out
-      return wrapped
+    def timed(index):
+      def decorate(fn):
+        def wrapped(*args, **kwargs):
+          tic = time.perf_counter()
+          out = fn(*args, **kwargs)
+          self._eval_time[index] += time.perf_counter() - tic
+          return out
+        return wrapped
+      return decorate
 
     class NLP:
+      def __init__(self, params):
+        self.params = params
 
-      @timed
+      @timed(index=0)
       def objective(self, vars):
-        return float(objective(jp.asarray(vars)))
+        return float(objective(jp.asarray(vars), self.params))
 
-      @timed
+      @timed(index=1)
       def gradient(self, vars):
-        return np.asarray(objective_grad(jp.asarray(vars)))
+        return np.asarray(objective_grad(jp.asarray(vars), self.params))
 
-    u_lb, u_ub = task.u_bounds
-    us_lb = np.repeat(u_lb[None, :], N, axis=0)
-    us_ub = np.repeat(u_ub[None, :], N, axis=0)
+    self._NLP = NLP
+    self.update(task)
 
-    vars_lb = us_lb.ravel()
-    vars_ub = us_ub.ravel()
-
-    problem = cyipopt.Problem(
-        n=vars_lb.size,
-        m=0,
-        problem_obj=NLP(),
-        lb=vars_lb,
-        ub=vars_ub,
-    )
-
+  def update(self, task: Task):
+    self.transcription.update(task)
     self.task = task
-    self.rollout = rollout
-    self.problem = problem
+    self._refresh_problem()
+
+  def _refresh_problem(self):
+    trans = self.transcription
+    N = trans.N
+
+    u_lb, u_ub = trans.u_bounds
+    us_lb = np.repeat(np.asarray(u_lb)[None, :], N, axis=0)
+    us_ub = np.repeat(np.asarray(u_ub)[None, :], N, axis=0)
+
+    self.problem = self._cyipopt.Problem(
+        n=us_lb.size,
+        m=0,
+        problem_obj=self._NLP(trans.params),
+        lb=us_lb.ravel(),
+        ub=us_ub.ravel(),
+    )
 
   def solve(
       self,
@@ -135,7 +88,7 @@ class IpoptSingleShooting:
   ):
     us_init = traj_init['us']
 
-    N, nu = self.task.horizon, self.task.nu
+    N, nu = self.transcription.N, self.transcription.nu
     assert us_init.shape == (N, nu)
 
     vars_init = us_init.ravel()
@@ -144,7 +97,7 @@ class IpoptSingleShooting:
     if not verbose:
       self.problem.add_option('print_level', 0)
 
-    self._dynamics_time = 0
+    self._eval_time = [0] * 2
     tic = time.perf_counter()
 
     us_opt, info = self.problem.solve(vars_init)
@@ -154,14 +107,16 @@ class IpoptSingleShooting:
     print(f'''
 Method: {self.__class__.__name__}
   total time: {total_time:.6f} sec
-    dynamics time: {self._dynamics_time:.6f} sec / {self._dynamics_time/total_time*100:.2f}%
-    ipopt time:    {total_time-self._dynamics_time:.6f} sec / {(1-self._dynamics_time/total_time)*100:.2f}%
+    dynamics time: {self._eval_time[0]:.6f} sec / {self._eval_time[0]/total_time*100:.2f}%
+    gradient time: {self._eval_time[1]:.6f} sec / {self._eval_time[1]/total_time*100:.2f}%
+    ipopt time:    {total_time-sum(self._eval_time):.6f} sec / {(1-sum(self._eval_time)/total_time)*100:.2f}%
 ''')
 
     us_opt = jp.array(us_opt).reshape(N, nu)
 
-    x_0 = jp.array(self.task.x_0)
-    xs_rollout = self.rollout(x_0, us_opt)
+    xs_rollout = self.transcription.rollout(
+        self.transcription.params.x_0, us_opt
+    )
 
     return {
         'us': us_opt,
