@@ -14,7 +14,7 @@ _CONSTITUTIVE_RELATIONS_FUNC = {
 }
 
 
-class IpoptKKTContactImplicit:
+class IpoptContactImplicitShooting:
 
   def __init__(
       self,
