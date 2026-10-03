@@ -1,4 +1,6 @@
 import time
+import importlib
+import logging
 import jax
 import jax.numpy as jp
 from mujodico import mjx
@@ -14,7 +16,15 @@ class IpoptSingleShooting:
       self,
       task: Task,
   ):
-    self._cyipopt = support.load_cyipopt()
+    try:
+      self._cyipopt = importlib.import_module('cyipopt')
+      logging.getLogger('cyipopt').setLevel(logging.WARNING)
+    except ImportError as e:
+      raise ImportError(
+          'Optional solver dependency not installed. Install it with:\n\n'
+          '    pip install cyipopt'
+      ) from e
+
     self.transcription = methods.SingleShootingTranscription(task)
     trans = self.transcription
 

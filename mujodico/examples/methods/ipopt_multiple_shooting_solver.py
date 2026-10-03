@@ -1,12 +1,11 @@
 from collections.abc import Callable
 import time
-from typing import Generic, TypeVar, overload
-
+import importlib
+import logging
+from typing import TypeVar, overload
 import jax
 import jax.numpy as jp
 import numpy as np
-
-from mujodico.examples.methods import support
 
 
 ParamsT = TypeVar('ParamsT')
@@ -49,7 +48,15 @@ class IpoptMultipleShootingSolver:
       params_trace: ParamsT | None = None,
       gauss_newton: bool = True,
   ):
-    self._cyipopt = support.load_cyipopt()
+    try:
+      self._cyipopt = importlib.import_module('cyipopt')
+      logging.getLogger('cyipopt').setLevel(logging.WARNING)
+    except ImportError as e:
+      raise ImportError(
+          'Optional solver dependency not installed. Install it with:\n\n'
+          '    pip install cyipopt'
+      ) from e
+
     self.N = N
     self.nx = nx
     self.nu = nu

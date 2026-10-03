@@ -56,6 +56,7 @@ def _main(argv) -> None:
       writer.writerow(['seed', 'goal_error', 'solve_time_sec', 'solver_iters'])
 
     visualizer = Visualizer()
+    visualizer.run()
 
     method = None
     for seed in range(_SEED.value, _SEED.value + _TESTS.value):
@@ -66,8 +67,6 @@ def _main(argv) -> None:
         method.update(task)
       else:
         method = method_cls(task)
-
-      visualizer.run()
 
       iters = _ITERATIONS.value
 
