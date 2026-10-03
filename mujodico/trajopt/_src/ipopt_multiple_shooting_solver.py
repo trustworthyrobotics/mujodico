@@ -1,8 +1,8 @@
 from collections.abc import Callable
-import time
+from typing import TypeVar, overload
 import importlib
 import logging
-from typing import TypeVar, overload
+import time
 import jax
 import jax.numpy as jp
 import numpy as np
@@ -23,11 +23,16 @@ Bounds = tuple[jax.Array | np.ndarray, jax.Array | np.ndarray]
 
 
 class IpoptMultipleShootingSolver:
-  """Sparse Ipopt solver for finite-horizon problems with local constraints.
+  """Solves the mathematical program using IPOPT.
 
-  Constraint callbacks return vectors; inequality callbacks use g(z) <= 0.
-  Omitted constraints are treated as empty. Bounds are (lower, upper) pairs.
-  Params are passed to solve and may change between solves.
+    minimizeₓ,ᵤ   ∑ₜ₌₀ᴺ⁻¹ stage_cost(xₜ, uₜ, params) + terminal_cost(x_N, params)
+    subject to    initial_equality_constraint(x₀, params) = 0
+                  stage_equality_constraint(xₜ, uₜ, xₜ₊₁, params) = 0   for t=0,...,N-1
+                  stage_inequality_constraint(xₜ, uₜ, params) ≤ 0      for t=0,...,N-1
+                  terminal_equality_constraint(x_N, params) = 0
+                  terminal_inequality_constraint(x_N, params) ≤ 0
+                  x_lb ≤ xₜ ≤ x_ub                                    for t=0,...,N
+                  u_lb ≤ uₜ ≤ u_ub                                    for t=0,...,N-1
   """
 
   def __init__(

@@ -1,5 +1,5 @@
 import numpy as np
-
+from mujodico import trajopt
 from mujodico.examples import methods
 from mujodico.examples.tasks import Task
 
@@ -12,10 +12,10 @@ class IpoptLiftedMultipleShooting:
 
   def _create_solver(self):
     trans = self.transcription
-    self.solver = methods.IpoptMultipleShootingSolver(
-        trans.N,
-        trans.nx,
-        trans.nw,
+    self.solver = trajopt.IpoptMultipleShootingSolver(
+        N=trans.N,
+        nx=trans.nx,
+        nu=trans.nw,
         stage_cost=trans.stage_cost,
         terminal_cost=trans.terminal_cost,
         initial_equality_constraint=lambda x, params: x - params.x_0,

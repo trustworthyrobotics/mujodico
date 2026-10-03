@@ -1,3 +1,4 @@
+from mujodico import trajopt
 from mujodico.examples import methods
 from mujodico.examples.tasks import Task
 
@@ -8,7 +9,7 @@ class IpoptMultipleShooting:
     self.transcription = methods.MultipleShootingTranscription(task)
 
     trans = self.transcription
-    self.solver = methods.IpoptMultipleShootingSolver(
+    self.solver = trajopt.IpoptMultipleShootingSolver(
         trans.N,
         trans.nx,
         trans.nu,
