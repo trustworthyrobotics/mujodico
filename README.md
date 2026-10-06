@@ -6,6 +6,7 @@ This package extends MuJoCo with differentiable contact dynamics and provides tr
 
 ```sh
 pip install -e .
+pip install -e .
 ```
 
 ## Usage

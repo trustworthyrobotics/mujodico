@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name="mujodico"
-version = "3.14.0"
+version = "3.15.0"
 authors = [
     {name = "Wei-Chen Li", email = "williamrob104@gmail.com"},
 ]
@@ -31,7 +31,7 @@ dependencies = [
     "etils[epath]",
     "jax",
     "jaxlib",
-    "mujoco>=3.14.0.dev0",
+    "mujoco>=3.15.0.dev0",
     "scipy",
     "trimesh",
 ]
@@ -46,9 +46,8 @@ dev = [
 ]
 
 [project.scripts]
-mjx-testspeed = "mujodidico.mjx.testspeed:main"
-mjx-viewer = "mujodidico.mjx.viewer:main"
-mujodico-examples = "mujodico.examples.examples:main"
+mjx-testspeed = "mujodico.mjx.testspeed:main"
+mjx-viewer = "mujodico.mjx.viewer:main"
 
 [project.urls]
 Homepage = "https://github.com/wei-chen-li/mujodico"

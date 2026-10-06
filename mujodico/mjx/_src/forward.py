@@ -35,9 +35,7 @@ from mujodico.mjx._src import support
 # pylint: disable=g-importing-member
 from mujodico.mjx._src.types import BiasType
 from mujodico.mjx._src.types import ContactApproxType
-from mujodico.mjx._src import support
 # pylint: disable=g-importing-member
-from mujodico.mjx._src.types import BiasType
 from mujodico.mjx._src.types import Data
 from mujodico.mjx._src.types import DataJAX
 from mujodico.mjx._src.types import DisableBit
@@ -516,7 +514,7 @@ def forward(m: Model, d: Data) -> Data:
   d = fwd_actuation(m, d)
   d = fwd_acceleration(m, d)
 
-  if d._impl.efc_J.size == 0:
+  if d._impl.efc_J.size == 0:  # pyrefly: ignore[missing-attribute]
     d = d.replace(qacc=d.qacc_smooth)
     return d
 
