@@ -4,8 +4,17 @@ This package extends MuJoCo with differentiable contact dynamics and provides tr
 
 ## Installation
 
+The recommended way to install this package is via [PyPI](https://pypi.org/project/mujodico/):
+
 ```sh
-pip install -e .
+pip install mujodico
+```
+
+For local development, install from a checkout:
+
+```sh
+git clone https://github.com/wei-chen-li/mujodico.git
+cd mujodico
 pip install -e .
 ```
 
@@ -63,7 +72,7 @@ python -m mujodico.examples --help
 
 ## Versioning
 
-The `major.minor.micro` portion of the version number matches the version of MuJoCo. Optionally, if we release updates to MuJoDiCo that target the same version of MuJoCo, a `.postN` suffix is added, for example `3.0.1.post2` represents the second update to MuJoDiCo for MuJoCo 3.0.1.
+The `major.minor.micro` portion of the version number matches the version of MuJoCo. Optionally, if we release updates to MuJoDiCo that target the same version of MuJoCo, a `.postN` suffix is added, for example `3.15.0.post2` represents the second update to MuJoDiCo for MuJoCo 3.15.0.
 
 ## License and Disclaimer
 
