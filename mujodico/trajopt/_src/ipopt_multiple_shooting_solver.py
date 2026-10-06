@@ -18,7 +18,8 @@ LocalEqualityConstraint = Callable[
 LocalInequalityConstraint = Callable[
   [jax.Array, jax.Array, jax.Array, ParamsT], jax.Array | np.ndarray
 ]
-TerminalConstraint = Callable[[jax.Array, ParamsT], jax.Array | np.ndarray]
+TerminalEqualityConstraint = Callable[[jax.Array, ParamsT], jax.Array | np.ndarray]
+TerminalInequalityConstraint = Callable[[jax.Array, ParamsT], jax.Array | np.ndarray]
 Bounds = tuple[jax.Array | np.ndarray, jax.Array | np.ndarray]
 
 
@@ -27,12 +28,12 @@ class IpoptMultipleShootingSolver:
 
     minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ stage_cost(xₖ, uₖ, params) + terminal_cost(x_N, params)
     subject to    initial_equality_constraint(x₀, params) = 0
-                  local_equality_constraint(xₖ, uₖ, xₖ₊₁, params) = 0   for k=0,...,N-1
-                  local_inequality_constraint(xₖ, uₖ, xₖ₊₁, params) ≤ 0 for k=0,...,N-1
+                  local_equality_constraint(xₖ, uₖ, xₖ₊₁, params) = 0    for k=0,...,N-1
+                  local_inequality_constraint(xₖ, uₖ, xₖ₊₁, params) ≤ 0  for k=0,...,N-1
                   terminal_equality_constraint(x_N, params) = 0
                   terminal_inequality_constraint(x_N, params) ≤ 0
-                  x_lb ≤ xₖ ≤ x_ub                                     for k=0,...,N
-                  u_lb ≤ uₖ ≤ u_ub                                     for k=0,...,N-1
+                  x_lb ≤ xₖ ≤ x_ub                                      for k=0,...,N
+                  u_lb ≤ uₖ ≤ u_ub                                      for k=0,...,N-1
   """
 
   def __init__(
@@ -46,8 +47,8 @@ class IpoptMultipleShootingSolver:
       initial_equality_constraint: InitialEqualityConstraint | None = None,
       local_equality_constraint: LocalEqualityConstraint | None = None,
       local_inequality_constraint: LocalInequalityConstraint | None = None,
-      terminal_equality_constraint: TerminalConstraint | None = None,
-      terminal_inequality_constraint: TerminalConstraint | None = None,
+      terminal_equality_constraint: TerminalEqualityConstraint | None = None,
+      terminal_inequality_constraint: TerminalInequalityConstraint | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
       params_trace: ParamsT | None = None,
@@ -84,13 +85,7 @@ class IpoptMultipleShootingSolver:
       del x, params
       return jp.zeros((0,))
 
-    def empty_local_equality(
-        x: jax.Array, u: jax.Array, xnext: jax.Array, params: ParamsT
-    ) -> jax.Array:
-      del x, u, xnext, params
-      return jp.zeros((0,))
-
-    def empty_local_inequality(
+    def empty_local_constraint(
         x: jax.Array, u: jax.Array, xnext: jax.Array, params: ParamsT
     ) -> jax.Array:
       del x, u, xnext, params
@@ -104,12 +99,12 @@ class IpoptMultipleShootingSolver:
     self.local_equality_constraint = (
         local_equality_constraint
         if local_equality_constraint is not None
-        else empty_local_equality
+        else empty_local_constraint
     )
     self.local_inequality_constraint = (
         local_inequality_constraint
         if local_inequality_constraint is not None
-        else empty_local_inequality
+        else empty_local_constraint
     )
     self.terminal_equality_constraint = (
         terminal_equality_constraint
