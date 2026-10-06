@@ -1,5 +1,4 @@
 import dataclasses
-import time
 import mujoco
 from mujodico.mjx import ContactApproxType
 import numpy as np
@@ -11,7 +10,7 @@ except ImportError as e:
   raise ImportError(
       "Optional visualization dependencies are not installed. "
       "Install them with:\n\n"
-      "    pip install mjviser"
+      "    pip install mjviser plotly"
   ) from e
 
 
@@ -173,4 +172,3 @@ Task: {self.__class__.__name__}
     if not hasattr(server, 'info_panel'):
       server.info_panel = server.gui.add_markdown('')
     server.info_panel.content = str(traj.get('info', ''))
-
