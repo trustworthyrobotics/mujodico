@@ -1,4 +1,5 @@
 import numpy as np
+import jax.numpy as jp
 from mujodico import trajopt
 from mujodico.examples import methods
 from mujodico.examples.tasks import Task
@@ -8,9 +9,7 @@ class IpoptLiftedMultipleShooting:
 
   def __init__(self, task: Task):
     self.transcription = methods.LiftedMultipleShootingTranscription(task)
-    self._create_solver()
 
-  def _create_solver(self):
     trans = self.transcription
     self.solver = trajopt.IpoptMultipleShootingSolver(
         N=trans.N,
@@ -19,8 +18,15 @@ class IpoptLiftedMultipleShooting:
         stage_cost=trans.stage_cost,
         terminal_cost=trans.terminal_cost,
         initial_equality_constraint=lambda x, params: x - params.x_0,
-        stage_equality_constraint=trans.stage_equality_constraint,
-        stage_inequality_constraint=trans.stage_inequality_constraint,
+        local_equality_constraint=lambda x, w, xnext, params: (
+            jp.concatenate([
+                xnext - trans.dynamics(x, w, params),
+                trans.stage_equality_constraint(x, w, params),
+            ])
+        ),
+        local_inequality_constraint=lambda x, w, xnext, params: (
+            trans.stage_inequality_constraint(x, w, params)
+        ),
         x_bounds=trans.x_bounds,
         u_bounds=trans.w_bounds,
         params_trace=self.transcription.params,

@@ -16,7 +16,9 @@ class IpoptMultipleShooting:
         stage_cost=trans.stage_cost,
         terminal_cost=trans.terminal_cost,
         initial_equality_constraint=lambda x, params: x - params.x_0,
-        stage_equality_constraint=trans.stage_equality_constraint,
+        local_equality_constraint=lambda x, u, xnext, params: (
+            xnext - trans.dynamics(x, u, params)
+        ),
         x_bounds=trans.x_bounds,
         u_bounds=trans.u_bounds,
         params_trace=self.transcription.params,

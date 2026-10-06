@@ -12,11 +12,11 @@ ParamsT = TypeVar('ParamsT')
 StageCost = Callable[[jax.Array, jax.Array, ParamsT], jax.Array | np.ndarray]
 TerminalCost = Callable[[jax.Array, ParamsT], jax.Array | np.ndarray]
 InitialEqualityConstraint = Callable[[jax.Array, ParamsT], jax.Array | np.ndarray]
-StageEqualityConstraint = Callable[
+LocalEqualityConstraint = Callable[
   [jax.Array, jax.Array, jax.Array, ParamsT], jax.Array | np.ndarray
 ]
-StageInequalityConstraint = Callable[
-  [jax.Array, jax.Array, ParamsT], jax.Array | np.ndarray
+LocalInequalityConstraint = Callable[
+  [jax.Array, jax.Array, jax.Array, ParamsT], jax.Array | np.ndarray
 ]
 TerminalConstraint = Callable[[jax.Array, ParamsT], jax.Array | np.ndarray]
 Bounds = tuple[jax.Array | np.ndarray, jax.Array | np.ndarray]
@@ -25,14 +25,14 @@ Bounds = tuple[jax.Array | np.ndarray, jax.Array | np.ndarray]
 class IpoptMultipleShootingSolver:
   """Solves the mathematical program using IPOPT.
 
-    minimizeₓ,ᵤ   ∑ₜ₌₀ᴺ⁻¹ stage_cost(xₜ, uₜ, params) + terminal_cost(x_N, params)
+    minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ stage_cost(xₖ, uₖ, params) + terminal_cost(x_N, params)
     subject to    initial_equality_constraint(x₀, params) = 0
-                  stage_equality_constraint(xₜ, uₜ, xₜ₊₁, params) = 0   for t=0,...,N-1
-                  stage_inequality_constraint(xₜ, uₜ, params) ≤ 0      for t=0,...,N-1
+                  local_equality_constraint(xₖ, uₖ, xₖ₊₁, params) = 0   for k=0,...,N-1
+                  local_inequality_constraint(xₖ, uₖ, xₖ₊₁, params) ≤ 0 for k=0,...,N-1
                   terminal_equality_constraint(x_N, params) = 0
                   terminal_inequality_constraint(x_N, params) ≤ 0
-                  x_lb ≤ xₜ ≤ x_ub                                    for t=0,...,N
-                  u_lb ≤ uₜ ≤ u_ub                                    for t=0,...,N-1
+                  x_lb ≤ xₖ ≤ x_ub                                     for k=0,...,N
+                  u_lb ≤ uₖ ≤ u_ub                                     for k=0,...,N-1
   """
 
   def __init__(
@@ -44,8 +44,8 @@ class IpoptMultipleShootingSolver:
       stage_cost: StageCost,
       terminal_cost: TerminalCost,
       initial_equality_constraint: InitialEqualityConstraint | None = None,
-      stage_equality_constraint: StageEqualityConstraint | None = None,
-      stage_inequality_constraint: StageInequalityConstraint | None = None,
+      local_equality_constraint: LocalEqualityConstraint | None = None,
+      local_inequality_constraint: LocalInequalityConstraint | None = None,
       terminal_equality_constraint: TerminalConstraint | None = None,
       terminal_inequality_constraint: TerminalConstraint | None = None,
       x_bounds: Bounds | None = None,
@@ -84,16 +84,16 @@ class IpoptMultipleShootingSolver:
       del x, params
       return jp.zeros((0,))
 
-    def empty_stage_equality(
+    def empty_local_equality(
         x: jax.Array, u: jax.Array, xnext: jax.Array, params: ParamsT
     ) -> jax.Array:
       del x, u, xnext, params
       return jp.zeros((0,))
 
-    def empty_stage_inequality(
-        x: jax.Array, u: jax.Array, params: ParamsT
+    def empty_local_inequality(
+        x: jax.Array, u: jax.Array, xnext: jax.Array, params: ParamsT
     ) -> jax.Array:
-      del x, u, params
+      del x, u, xnext, params
       return jp.zeros((0,))
 
     self.initial_equality_constraint = (
@@ -101,15 +101,15 @@ class IpoptMultipleShootingSolver:
         if initial_equality_constraint is not None
         else empty_state_constraint
     )
-    self.stage_equality_constraint = (
-        stage_equality_constraint
-        if stage_equality_constraint is not None
-        else empty_stage_equality
+    self.local_equality_constraint = (
+        local_equality_constraint
+        if local_equality_constraint is not None
+        else empty_local_equality
     )
-    self.stage_inequality_constraint = (
-        stage_inequality_constraint
-        if stage_inequality_constraint is not None
-        else empty_stage_inequality
+    self.local_inequality_constraint = (
+        local_inequality_constraint
+        if local_inequality_constraint is not None
+        else empty_local_inequality
     )
     self.terminal_equality_constraint = (
         terminal_equality_constraint
@@ -185,27 +185,27 @@ class IpoptMultipleShootingSolver:
     vars_trace = self._pack(jp.zeros((N + 1, nx)), jp.zeros((N, nu)))
 
     initial_trace = self.initial_equality_constraint(jp.zeros(nx), params_trace)
-    stage_eq_trace = self.stage_equality_constraint(
+    local_eq_trace = self.local_equality_constraint(
         jp.zeros(nx), jp.zeros(nu), jp.zeros(nx), params_trace
     )
-    stage_ineq_trace = self.stage_inequality_constraint(
-        jp.zeros(nx), jp.zeros(nu), params_trace
+    local_ineq_trace = self.local_inequality_constraint(
+        jp.zeros(nx), jp.zeros(nu), jp.zeros(nx), params_trace
     )
     terminal_eq_trace = self.terminal_equality_constraint(jp.zeros(nx), params_trace)
     terminal_ineq_trace = self.terminal_inequality_constraint(jp.zeros(nx), params_trace)
     n_initial_eq = initial_trace.size
-    n_stage_eq = stage_eq_trace.size
-    n_stage_ineq = stage_ineq_trace.size
+    n_local_eq = local_eq_trace.size
+    n_local_ineq = local_ineq_trace.size
     n_terminal_eq = terminal_eq_trace.size
     n_terminal_ineq = terminal_ineq_trace.size
     self._constraint_sizes = (
         n_initial_eq,
-        n_stage_eq,
-        n_stage_ineq,
+        n_local_eq,
+        n_local_ineq,
         n_terminal_eq,
         n_terminal_ineq,
     )
-    n_stage_constraints = n_stage_eq + n_stage_ineq
+    n_local_constraints = n_local_eq + n_local_ineq
 
     def objective(vars: jax.Array, params: ParamsT) -> jax.Array:
       xs, us = self._unpack(vars)
@@ -217,17 +217,17 @@ class IpoptMultipleShootingSolver:
     def constraints(vars: jax.Array, params: ParamsT) -> jax.Array:
       xs, us = self._unpack(vars)
       initial_eq = self.initial_equality_constraint(xs[0], params)
-      stage_eq = jax.vmap(
-          self.stage_equality_constraint, in_axes=(0, 0, 0, None)
+      local_eq = jax.vmap(
+          self.local_equality_constraint, in_axes=(0, 0, 0, None)
       )(xs[:-1], us, xs[1:], params)
-      stage_ineq = jax.vmap(
-          self.stage_inequality_constraint, in_axes=(0, 0, None)
-      )(xs[:-1], us, params)
+      local_ineq = jax.vmap(
+          self.local_inequality_constraint, in_axes=(0, 0, 0, None)
+      )(xs[:-1], us, xs[1:], params)
       terminal_eq = self.terminal_equality_constraint(xs[-1], params)
       terminal_ineq = self.terminal_inequality_constraint(xs[-1], params)
       return jp.concatenate([
           initial_eq.ravel(),
-          jp.concatenate([stage_eq, stage_ineq], axis=1).ravel(),
+          jp.concatenate([local_eq, local_ineq], axis=1).ravel(),
           terminal_eq.ravel(),
           terminal_ineq.ravel(),
       ])
@@ -238,7 +238,7 @@ class IpoptMultipleShootingSolver:
       xs, us = self._unpack(vars)
       initial_jac = jax.jacfwd(self.initial_equality_constraint)(xs[0], params)
 
-      def stage_jac(x: jax.Array, u: jax.Array, xnext: jax.Array) -> jax.Array:
+      def local_jac(x: jax.Array, u: jax.Array, xnext: jax.Array) -> jax.Array:
         local = jp.concatenate([x, u, xnext])
 
         def local_constraints(var: jax.Array) -> jax.Array:
@@ -246,22 +246,22 @@ class IpoptMultipleShootingSolver:
           u = var[nx:nx + nu]
           xnext = var[nx + nu:]
           return jp.concatenate([
-              self.stage_equality_constraint(x, u, xnext, params),
-              self.stage_inequality_constraint(x, u, params),
+              self.local_equality_constraint(x, u, xnext, params),
+              self.local_inequality_constraint(x, u, xnext, params),
           ])
 
         return jax.jacfwd(local_constraints)(local).ravel()
 
-      stage_jacs = jax.vmap(stage_jac)(xs[:-1], us, xs[1:])
+      local_jacs = jax.vmap(local_jac)(xs[:-1], us, xs[1:])
       terminal_jac = jax.jacfwd(lambda x: jp.concatenate([
           self.terminal_equality_constraint(x, params),
           self.terminal_inequality_constraint(x, params),
       ]))(xs[-1])
       return jp.concatenate([
-          initial_jac.ravel(), stage_jacs.ravel(), terminal_jac.ravel()
+          initial_jac.ravel(), local_jacs.ravel(), terminal_jac.ravel()
       ])
 
-    def stage_lagrangian(
+    def local_lagrangian(
         var: jax.Array,
         initial_lam: jax.Array,
         eq_lam: jax.Array,
@@ -277,9 +277,9 @@ class IpoptMultipleShootingSolver:
         if initial_lam.size:
           value += jp.vdot(initial_lam, self.initial_equality_constraint(x, params))
         if eq_lam.size:
-          value += jp.vdot(eq_lam, self.stage_equality_constraint(x, u, xnext, params))
+          value += jp.vdot(eq_lam, self.local_equality_constraint(x, u, xnext, params))
         if ineq_lam.size:
-          value += jp.vdot(ineq_lam, self.stage_inequality_constraint(x, u, params))
+          value += jp.vdot(ineq_lam, self.local_inequality_constraint(x, u, xnext, params))
       return value
 
     def terminal_lagrangian(
@@ -305,17 +305,17 @@ class IpoptMultipleShootingSolver:
     ) -> jax.Array:
       xs, us = self._unpack(vars)
       initial_lam = lagrange[:n_initial_eq]
-      stage_lam = lagrange[n_initial_eq:n_initial_eq + N * n_stage_constraints]
-      stage_lam = stage_lam.reshape((N, n_stage_constraints))
-      stage_eq_lam = stage_lam[:, :n_stage_eq]
-      stage_ineq_lam = stage_lam[:, n_stage_eq:]
-      terminal_lam = lagrange[n_initial_eq + N * n_stage_constraints:]
+      local_lam = lagrange[n_initial_eq:n_initial_eq + N * n_local_constraints]
+      local_lam = local_lam.reshape((N, n_local_constraints))
+      local_eq_lam = local_lam[:, :n_local_eq]
+      local_ineq_lam = local_lam[:, n_local_eq:]
+      terminal_lam = lagrange[n_initial_eq + N * n_local_constraints:]
       terminal_eq_lam = terminal_lam[:n_terminal_eq]
       terminal_ineq_lam = terminal_lam[n_terminal_eq:]
 
       initial_lams = jp.zeros((N, n_initial_eq)).at[0].set(initial_lam)
 
-      def stage_hessian(
+      def local_hessian(
           x: jax.Array,
           u: jax.Array,
           xnext: jax.Array,
@@ -324,24 +324,24 @@ class IpoptMultipleShootingSolver:
           ineq_lam: jax.Array,
       ) -> jax.Array:
         local = jp.concatenate([x, u, xnext])
-        return jax.hessian(stage_lagrangian)(
+        return jax.hessian(local_lagrangian)(
             local, init_lam, eq_lam, ineq_lam, obj_factor, params
         )
 
-      stage_hessians = jax.vmap(stage_hessian)(
-          xs[:-1], us, xs[1:], initial_lams, stage_eq_lam, stage_ineq_lam
+      local_hessians = jax.vmap(local_hessian)(
+          xs[:-1], us, xs[1:], initial_lams, local_eq_lam, local_ineq_lam
       )
-      stage_hessians = stage_hessians.at[1:, :nx, :nx].add(
-          stage_hessians[:-1, nx + nu:, nx + nu:]
+      local_hessians = local_hessians.at[1:, :nx, :nx].add(
+          local_hessians[:-1, nx + nu:, nx + nu:]
       )
       terminal_hessian = jax.hessian(terminal_lagrangian)(
           xs[-1], terminal_eq_lam, terminal_ineq_lam, obj_factor, params
       )
-      terminal_hessian += stage_hessians[-1, nx + nu:, nx + nu:]
-      stage_i, stage_j = np.tril_indices(2 * nx + nu)
-      stage_mask = (stage_i < nx + nu) | (stage_j < nx + nu)
+      terminal_hessian += local_hessians[-1, nx + nu:, nx + nu:]
+      local_i, local_j = np.tril_indices(2 * nx + nu)
+      local_mask = (local_i < nx + nu) | (local_j < nx + nu)
       return jp.concatenate([
-          stage_hessians[:, stage_i[stage_mask], stage_j[stage_mask]].ravel(),
+          local_hessians[:, local_i[local_mask], local_j[local_mask]].ravel(),
           terminal_hessian[jp.tril_indices(nx)],
       ])
 
@@ -363,12 +363,12 @@ class IpoptMultipleShootingSolver:
     ).compile()
     constraints_jacobian_structure = self._make_constraints_jacobian_structure(
         n_initial_eq,
-        n_stage_constraints,
+        n_local_constraints,
         n_terminal_eq + n_terminal_ineq,
     )
     lagrangian_hessian_entries = jax.jit(lagrangian_hessian_entries).lower(
         vars_trace,
-        jp.ones(n_initial_eq + N * n_stage_constraints + n_terminal_eq + n_terminal_ineq),
+        jp.ones(n_initial_eq + N * n_local_constraints + n_terminal_eq + n_terminal_ineq),
         jp.array(1.0),
         params_trace,
     ).compile()
@@ -431,14 +431,14 @@ class IpoptMultipleShootingSolver:
   def _constraint_bounds(self) -> tuple[np.ndarray, np.ndarray]:
     constraint_sizes = self._constraint_sizes
     assert constraint_sizes is not None
-    n_initial_eq, n_stage_eq, n_stage_ineq, n_terminal_eq, n_terminal_ineq = constraint_sizes
-    stage_constraints = np.concatenate([
-        np.zeros(n_stage_eq),
-        np.full(n_stage_ineq, -np.inf),
+    n_initial_eq, n_local_eq, n_local_ineq, n_terminal_eq, n_terminal_ineq = constraint_sizes
+    local_constraints = np.concatenate([
+        np.zeros(n_local_eq),
+        np.full(n_local_ineq, -np.inf),
     ])
     lower = np.concatenate([
         np.zeros(n_initial_eq),
-        np.tile(stage_constraints, self.N),
+        np.tile(local_constraints, self.N),
         np.zeros(n_terminal_eq),
         np.full(n_terminal_ineq, -np.inf),
     ])
@@ -448,7 +448,7 @@ class IpoptMultipleShootingSolver:
   def _make_constraints_jacobian_structure(
       self,
       n_initial_eq: int,
-      n_stage: int,
+      n_local: int,
       n_terminal: int,
   ) -> tuple[np.ndarray, np.ndarray]:
     rows = []
@@ -457,14 +457,14 @@ class IpoptMultipleShootingSolver:
       init_rows, init_cols = np.indices((n_initial_eq, self.nx))
       rows.append(init_rows.ravel())
       cols.append(init_cols.ravel())
-    if n_stage:
-      local_rows, local_cols = np.indices((n_stage, 2 * self.nx + self.nu))
-      for stage in range(self.N):
-        rows.append(local_rows.ravel() + n_initial_eq + stage * n_stage)
-        cols.append(local_cols.ravel() + stage * (self.nx + self.nu))
+    if n_local:
+      local_rows, local_cols = np.indices((n_local, 2 * self.nx + self.nu))
+      for k in range(self.N):
+        rows.append(local_rows.ravel() + n_initial_eq + k * n_local)
+        cols.append(local_cols.ravel() + k * (self.nx + self.nu))
     if n_terminal:
       terminal_rows, terminal_cols = np.indices((n_terminal, self.nx))
-      rows.append(terminal_rows.ravel() + n_initial_eq + self.N * n_stage)
+      rows.append(terminal_rows.ravel() + n_initial_eq + self.N * n_local)
       cols.append(terminal_cols.ravel() + self.N * (self.nx + self.nu))
     if not rows:
       return np.zeros(0, dtype=np.int32), np.zeros(0, dtype=np.int32)

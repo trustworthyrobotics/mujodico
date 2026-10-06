@@ -23,13 +23,13 @@ class LiftedMultipleShootingTranscription:
     nu = task.nu
     ncf = int(addresses.size)
 
-    def contact_force(x, u):
+    def step1(x, u):
       nq, nv = model.nq, model.nv
       d = data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
       d = mjx.forward(model, d)
       return d._impl.efc_force[addresses]
 
-    def transition(x, u, cf):
+    def step2(x, u, cf):
       efc_force = jp.zeros(data._impl.nefc)
       efc_force = efc_force.at[addresses].set(cf)
       return support.step_given_efc_force(model, x, u, efc_force)
@@ -47,11 +47,13 @@ class LiftedMultipleShootingTranscription:
     def terminal_cost(x, params):
       return support.state_cost(params.Qf, params.x_goal, x, task.quaternion_w_idxs)
 
-    def stage_equality(x, w, xnext, params):
+    def dynamics(x, w, params):
       u, cf = unpack_control(w)
-      defect = xnext - transition(x, u, cf)
-      force_consistency = cf - contact_force(x, u)
-      return jp.concatenate([defect, force_consistency])
+      return step2(x, u, cf)
+
+    def stage_equality(x, w, params):
+      u, cf = unpack_control(w)
+      return cf - step1(x, u)
 
     def stage_inequality(x, w, params):
       del x
@@ -74,6 +76,7 @@ class LiftedMultipleShootingTranscription:
 
     self.stage_cost = stage_cost
     self.terminal_cost = terminal_cost
+    self.dynamics = dynamics
     self.stage_equality_constraint = stage_equality
     self.stage_inequality_constraint = stage_inequality
 

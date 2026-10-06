@@ -47,13 +47,12 @@ class MultipleShootingTranscription:
     def terminal_cost(x, params):
       return support.state_cost(params.Qf, params.x_goal, x, task.quaternion_w_idxs)
 
-    def stage_equality_constraint(x, u, xnext, params):
-      del params
-      return xnext - step(x, u)
+    def dynamics(x, u, params):
+      return step(x, u)
 
     self.stage_cost = stage_cost
     self.terminal_cost = terminal_cost
-    self.stage_equality_constraint = stage_equality_constraint
+    self.dynamics = dynamics
     self.x_bounds = task.x_bounds
     self.u_bounds = task.u_bounds
     self.N = task.horizon
