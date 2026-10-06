@@ -13,7 +13,7 @@ class LiftedMultipleShootingTranscription:
         task.model,
         impl='jax',
         contact_approximation=task.contact_approx,
-        contact_smoothing=task.contact_smoothing * 0.001,
+        contact_smoothing=task.contact_smoothing * 0.01,
     )
     data = mjx.make_data(model, impl=model.impl)
 
