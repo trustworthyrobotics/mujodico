@@ -1,0 +1,215 @@
+from abc import ABC, abstractmethod
+import importlib
+import numpy as np
+
+
+class AbstractNLPModel(ABC):
+
+  @property
+  @abstractmethod
+  def num_vars(self) -> int:
+    """Number of decision variables in the optimization problem."""
+
+  @property
+  @abstractmethod
+  def var_bounds(self) -> tuple[np.ndarray, np.ndarray]:
+    """Lower and upper variable bounds, each shaped ``(num_vars,)``."""
+
+  @property
+  @abstractmethod
+  def num_constraints(self) -> int:
+    """Number of nonlinear constraints in the optimization problem."""
+
+  @property
+  @abstractmethod
+  def constraint_bounds(self) -> tuple[np.ndarray, np.ndarray]:
+    """Lower and upper constraint bounds, each shaped ``(num_constraints,)``."""
+
+  @abstractmethod
+  def objective(self, x: np.ndarray) -> float:
+    """Evaluate the scalar objective at a decision vector shaped ``(num_vars,)``."""
+
+  @abstractmethod
+  def gradient(self, x: np.ndarray) -> np.ndarray:
+    """Evaluate the objective gradient, returned as an array shaped ``(num_vars,)``."""
+
+  @abstractmethod
+  def constraints(self, x: np.ndarray) -> np.ndarray:
+    """Evaluate the constraint vector, returned as an array shaped ``(num_constraints,)``."""
+
+  @abstractmethod
+  def jacobian_structure(self) -> list[tuple[int, int]]:
+    """Return 0-based ``(row, column)`` indices for the sparse constraint Jacobian.
+
+    The order of the pairs defines the order of values returned by
+    :meth:`jacobian_entries`.
+    """
+
+  @abstractmethod
+  def jacobian_entries(self, x) -> np.ndarray:
+    """Return Jacobian values in the order specified by :meth:`jacobian_structure`."""
+
+  @abstractmethod
+  def hessian_structure(self) -> list[tuple[int, int]]:
+    """Return 0-based ``(row, column)`` indices for the sparse Lagrangian Hessian.
+
+    The order of the pairs defines the order of values returned by
+    :meth:`hessian_entries`. Use a triangular representation when required by
+    the target solver.
+    """
+
+  @abstractmethod
+  def hessian_entries(
+      self,
+      x: np.ndarray,
+      lagrange: np.ndarray,
+      objective_factor: float = 1.0,
+  ) -> np.ndarray:
+    """Return Hessian values in the order specified by :meth:`hessian_structure`."""
+
+  def to_nlpmodels_jl(self, x0: np.ndarray | None = None):
+    """Wrap this NLP as an ``NLPModels.AbstractNLPModel`` in Julia. The returned Julia
+    model can be passed directly to solvers such as NLPModelsIpopt or MadNLP.
+    ``x0`` is the initial guess required by NLPModels.
+    """
+    return _to_nlpmodels_jl(self, x0)
+
+
+_JULIA_ADAPTER_SETUP = r"""
+using NLPModels
+using PythonCall
+
+mutable struct PythonNLPModel{T,S<:AbstractVector{T}} <: NLPModels.AbstractNLPModel{T,S}
+  meta::NLPModels.NLPModelMeta{T,S}
+  counters::NLPModels.Counters
+  py_nlp::PythonCall.Py
+  jrows::Vector{Int}
+  jcols::Vector{Int}
+  hrows::Vector{Int}
+  hcols::Vector{Int}
+end
+
+function PythonNLPModel(py_nlp, x0, lvar, uvar, lcon, ucon, jrows, jcols, hrows, hcols)
+  n, m = length(x0), length(lcon)
+  meta = NLPModels.NLPModelMeta(n; x0=Float64.(x0), lvar=Float64.(lvar),
+      uvar=Float64.(uvar), ncon=m, lcon=Float64.(lcon), ucon=Float64.(ucon),
+      nnzj=length(jrows), nnzh=length(hrows), sparse_jacobian=true,
+      sparse_hessian=true, hess_available=true)
+  return PythonNLPModel(meta, NLPModels.Counters(), PythonCall.Py(py_nlp),
+      Int.(jrows), Int.(jcols), Int.(hrows), Int.(hcols))
+end
+
+function NLPModels.obj(nlp::PythonNLPModel, x::AbstractVector{T}) where {T}
+  return PythonCall.pyconvert(Float64,
+      PythonCall.pycall(PythonCall.pygetattr(nlp.py_nlp, "objective"), x))
+end
+function NLPModels.grad!(nlp::PythonNLPModel,
+                         x::AbstractVector{T}, g::AbstractVector{T}) where {T}
+  copyto!(g, PythonCall.pyconvert(Vector{Float64},
+      PythonCall.pycall(PythonCall.pygetattr(nlp.py_nlp, "gradient"), x)))
+  return g
+end
+function NLPModels.cons!(nlp::PythonNLPModel,
+                         x::AbstractVector{T}, c::AbstractVector{T}) where {T}
+  copyto!(c, PythonCall.pyconvert(Vector{Float64},
+      PythonCall.pycall(PythonCall.pygetattr(nlp.py_nlp, "constraints"), x)))
+  return c
+end
+function NLPModels.jac_structure!(nlp::PythonNLPModel,
+                                  rows::AbstractVector{I},
+                                  cols::AbstractVector{I}) where {I<:Integer}
+  copyto!(rows, nlp.jrows); copyto!(cols, nlp.jcols)
+  return rows, cols
+end
+function NLPModels.jac_coord!(nlp::PythonNLPModel,
+                              x::AbstractVector{T},
+                              vals::AbstractVector{T}) where {T}
+  copyto!(vals, PythonCall.pyconvert(Vector{Float64},
+      PythonCall.pycall(PythonCall.pygetattr(nlp.py_nlp, "jacobian_entries"), x)))
+  return vals
+end
+function NLPModels.hess_structure!(nlp::PythonNLPModel,
+                                   rows::AbstractVector{I},
+                                   cols::AbstractVector{I}) where {I<:Integer}
+  copyto!(rows, nlp.hrows); copyto!(cols, nlp.hcols)
+  return rows, cols
+end
+function NLPModels.hess_coord!(nlp::PythonNLPModel,
+                               x::AbstractVector{T},
+                               vals::AbstractVector{T};
+                               obj_weight=1, y=zeros(nlp.meta.ncon)) where {T}
+  return NLPModels.hess_coord!(nlp, x, y, vals; obj_weight=obj_weight)
+end
+function NLPModels.hess_coord!(nlp::PythonNLPModel,
+                               x::AbstractVector{T},
+                               y::AbstractVector{T},
+                               vals::AbstractVector{T};
+                               obj_weight=1) where {T}
+  copyto!(vals, PythonCall.pyconvert(Vector{Float64},
+      PythonCall.pycall(PythonCall.pygetattr(nlp.py_nlp, "hessian_entries"),
+                        x, y, obj_weight)))
+  return vals
+end
+"""
+_julia_module = None
+
+
+def _to_nlpmodels_jl(nlp: AbstractNLPModel, x0: np.ndarray | None = 0):
+  """Build and return the Julia NLPModels model for ``nlp``."""
+  try:
+    juliacall = importlib.import_module('juliacall')
+  except ImportError as e:
+    raise ImportError(
+        'Optional Julia bridge dependency not installed. Install juliacall with\n\n'
+        '    pip install juliacall'
+    ) from e
+
+  x0 = np.asarray(x0, dtype=np.float64) if x0 is not None else np.zeros(nlp.num_vars)
+  if x0.shape != (nlp.num_vars,):
+    raise ValueError(f'x0 must have shape ({nlp.num_vars},), got {x0.shape}')
+
+  var_lb, var_ub = (np.asarray(v, dtype=np.float64) for v in nlp.var_bounds)
+  con_lb, con_ub = (np.asarray(v, dtype=np.float64) for v in nlp.constraint_bounds)
+  if var_lb.shape != x0.shape or var_ub.shape != x0.shape:
+    raise ValueError('variable bounds must have shape (num_vars,)')
+  if con_lb.shape != (nlp.num_constraints,) or con_ub.shape != (nlp.num_constraints,):
+    raise ValueError('constraint bounds must have shape (num_constraints,)')
+
+  jr, jc = _structure(nlp.jacobian_structure(), nlp.num_constraints, nlp.num_vars)
+  hr, hc = _structure(nlp.hessian_structure(), nlp.num_vars, nlp.num_vars)
+
+  global _julia_module
+  if _julia_module is None:
+    try:
+      juliacall.Main.seval('using NLPModels')
+    except juliacall.JuliaError:
+      try:
+        juliacall.Main.seval('import Pkg; Pkg.add("NLPModels")')
+        juliacall.Main.seval('using NLPModels')
+      except juliacall.JuliaError as e:
+        raise RuntimeError(
+            'Could not install NLPModels in juliacall\'s Julia environment.'
+        ) from e
+
+    julia_module = juliacall.newmodule('PythonNLPModels')
+    julia_module.seval(_JULIA_ADAPTER_SETUP)
+    _julia_module = julia_module
+
+  # Julia NLPModels uses 1-based triplet indices; Python solvers use 0-based.
+  return _julia_module.PythonNLPModel(
+      nlp, x0, var_lb, var_ub, con_lb, con_ub, jr + 1, jc + 1, hr + 1, hc + 1
+  )
+
+
+def _structure(
+    structure: list[tuple[int, int]], nrows: int, ncols: int
+) -> tuple[np.ndarray, np.ndarray]:
+  indices = np.asarray(structure, dtype=np.int64)
+  if indices.size == 0:
+    indices = indices.reshape((0, 2))
+  if indices.ndim != 2 or indices.shape[1] != 2:
+    raise ValueError('sparse structure must be a list of (row, column) pairs')
+  rows, cols = indices[:, 0], indices[:, 1]
+  if np.any(rows < 0) or np.any(rows >= nrows) or np.any(cols < 0) or np.any(cols >= ncols):
+    raise ValueError('sparse structure indices must be 0-based and within bounds')
+  return rows, cols
