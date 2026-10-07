@@ -1,5 +1,5 @@
 """
-ProxDDP solves the following problem
+ALPAS solves the following problem
     minimizeₓ,ᵤ  ∑ₜ₌₀ᴺ⁻¹ ℓ(xₜ,uₜ) + ℓf(x_N)
     subject to   g(xₜ, uₜ, xₜ₊₁) = 0   t=0,...N−1
                  gi(x₀) = 0
@@ -15,7 +15,7 @@ import jax.numpy as jp
 import numpy as np
 
 
-class ProxDDP:
+class Alpas:
 
   def __init__(
       self,
@@ -115,7 +115,7 @@ class ProxDDP:
     )
 
     if options.verbose:
-      jax.debug.callback(lambda log: print(' ' * 33 + 'ProxDDP\n' + str(log)), log)
+      jax.debug.callback(lambda log: print(' ' * 34 + 'Alpas\n' + str(log)), log)
 
     return x, u
 

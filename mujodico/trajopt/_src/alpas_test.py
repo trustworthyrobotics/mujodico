@@ -8,7 +8,7 @@ from mujodico import trajopt
 import numpy as np
 
 
-class ProxDDPTest(parameterized.TestCase):
+class AlpasTest(parameterized.TestCase):
 
   @parameterized.parameters(
       *product(
@@ -75,7 +75,7 @@ class ProxDDPTest(parameterized.TestCase):
           -q - 1e-3,
       ])
 
-    solver = trajopt.ProxDDP(
+    solver = trajopt.Alpas(
         stage_cost=stage_cost,
         terminal_cost=terminal_cost,
         implicit_dynamics=implicit_dynamics,
@@ -88,7 +88,7 @@ class ProxDDPTest(parameterized.TestCase):
         params_example=params,
     )
 
-    options = trajopt.ProxDDP.Options(
+    options = trajopt.Alpas.Options(
         parallel_associative_scan=parallel,
     )
 
