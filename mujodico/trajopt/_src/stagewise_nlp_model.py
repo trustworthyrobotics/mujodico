@@ -1,25 +1,22 @@
-from collections.abc import Callable
-from typing import TypeVar, overload
 import time
+from typing import overload
+
 import jax
 import jax.numpy as jp
 import numpy as np
+
 from mujodico.trajopt._src.abstract_nlp_model import AbstractNLPModel
-
-
-ParamsT = TypeVar('ParamsT')
-StageCost = Callable[[jax.Array, jax.Array, ParamsT], jax.Array | np.ndarray]
-TerminalCost = Callable[[jax.Array, ParamsT], jax.Array | np.ndarray]
-InitialEqualityConstraint = Callable[[jax.Array, ParamsT], jax.Array | np.ndarray]
-LocalEqualityConstraint = Callable[
-  [jax.Array, jax.Array, jax.Array, ParamsT], jax.Array | np.ndarray
-]
-LocalInequalityConstraint = Callable[
-  [jax.Array, jax.Array, jax.Array, ParamsT], jax.Array | np.ndarray
-]
-TerminalEqualityConstraint = Callable[[jax.Array, ParamsT], jax.Array | np.ndarray]
-TerminalInequalityConstraint = Callable[[jax.Array, ParamsT], jax.Array | np.ndarray]
-Bounds = tuple[jax.Array | np.ndarray, jax.Array | np.ndarray]
+from mujodico.trajopt._src.types import (
+  Bounds,
+  InitialEqualityConstraint,
+  LocalEqualityConstraint,
+  LocalInequalityConstraint,
+  Params,
+  StageCost,
+  TerminalCost,
+  TerminalEqualityConstraint,
+  TerminalInequalityConstraint,
+)
 
 
 class StagewiseNLPModel(AbstractNLPModel):
@@ -50,7 +47,7 @@ class StagewiseNLPModel(AbstractNLPModel):
       terminal_inequality_constraint: TerminalInequalityConstraint | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
-      params: ParamsT | None = None,
+      params: Params | None = None,
       gauss_newton: bool = True,
   ):
     self.N = N
@@ -72,12 +69,12 @@ class StagewiseNLPModel(AbstractNLPModel):
     self._callback_time = 0.0
     self._conversion_time = 0.0
 
-    def empty_state_constraint(x: jax.Array, params: ParamsT) -> jax.Array:
+    def empty_state_constraint(x: jax.Array, params: Params) -> jax.Array:
       del x, params
       return jp.zeros((0,))
 
     def empty_local_constraint(
-        x: jax.Array, u: jax.Array, xnext: jax.Array, params: ParamsT
+        x: jax.Array, u: jax.Array, xnext: jax.Array, params: Params
     ) -> jax.Array:
       del x, u, xnext, params
       return jp.zeros((0,))
@@ -173,7 +170,7 @@ class StagewiseNLPModel(AbstractNLPModel):
       raise RuntimeError('Call update_params(params) before evaluating the NLP.')
     return self
 
-  def _evaluate(self, fn: Callable, *args) -> np.ndarray:
+  def _evaluate(self, fn, *args) -> np.ndarray:
     self._require_compiled()
     tic = time.perf_counter()
     jax_args = tuple(jp.asarray(arg) for arg in args)
@@ -203,7 +200,7 @@ class StagewiseNLPModel(AbstractNLPModel):
     return r
 
   @staticmethod
-  def _get_params_signature(params: ParamsT) -> tuple:
+  def _get_params_signature(params: Params) -> tuple:
     leaves, treedef = jax.tree_util.tree_flatten(params)
     leaf_signatures = []
     for leaf in leaves:
@@ -211,14 +208,14 @@ class StagewiseNLPModel(AbstractNLPModel):
       leaf_signatures.append((value.shape, value.dtype.str))
     return treedef, tuple(leaf_signatures)
 
-  def update_params(self, params: ParamsT) -> None:
+  def update_params(self, params: Params) -> None:
     self._params = params
     signature = self._get_params_signature(params)
     if signature != self._params_signature:
       self._compile(params)
       self._params_signature = signature
 
-  def _compile(self, params_trace: ParamsT) -> None:
+  def _compile(self, params_trace: Params) -> None:
     N, nx, nu = self.N, self.nx, self.nu
     vars_trace = self._pack(jp.zeros((N + 1, nx)), jp.zeros((N, nu)))
 
@@ -245,14 +242,14 @@ class StagewiseNLPModel(AbstractNLPModel):
     )
     n_local_constraints = n_local_eq + n_local_ineq
 
-    def objective(vars: jax.Array, params: ParamsT) -> jax.Array:
+    def objective(vars: jax.Array, params: Params) -> jax.Array:
       xs, us = self._unpack(vars)
       stage_costs = jax.vmap(self.stage_cost, in_axes=(0, 0, None))(
           xs[:-1], us, params
       )
       return jp.sum(stage_costs) + self.terminal_cost(xs[-1], params)
 
-    def constraints(vars: jax.Array, params: ParamsT) -> jax.Array:
+    def constraints(vars: jax.Array, params: Params) -> jax.Array:
       xs, us = self._unpack(vars)
       initial_eq = self.initial_equality_constraint(xs[0], params)
       local_eq = jax.vmap(
@@ -271,7 +268,7 @@ class StagewiseNLPModel(AbstractNLPModel):
       ])
 
     def constraints_jacobian_entries(
-        vars: jax.Array, params: ParamsT
+        vars: jax.Array, params: Params
     ) -> jax.Array:
       xs, us = self._unpack(vars)
       initial_jac = jax.jacfwd(self.initial_equality_constraint)(xs[0], params)
@@ -305,7 +302,7 @@ class StagewiseNLPModel(AbstractNLPModel):
         eq_lam: jax.Array,
         ineq_lam: jax.Array,
         obj_factor: jax.Array,
-        params: ParamsT,
+        params: Params,
     ) -> jax.Array:
       x = var[:nx]
       u = var[nx:nx + nu]
@@ -325,7 +322,7 @@ class StagewiseNLPModel(AbstractNLPModel):
         eq_lam: jax.Array,
         ineq_lam: jax.Array,
         obj_factor: jax.Array,
-        params: ParamsT,
+        params: Params,
     ) -> jax.Array:
       value = obj_factor * self.terminal_cost(x, params)
       if not self._gauss_newton :
@@ -339,7 +336,7 @@ class StagewiseNLPModel(AbstractNLPModel):
         vars: jax.Array,
         lagrange: jax.Array,
         obj_factor: jax.Array,
-        params: ParamsT,
+        params: Params,
     ) -> jax.Array:
       xs, us = self._unpack(vars)
       initial_lam = lagrange[:n_initial_eq]

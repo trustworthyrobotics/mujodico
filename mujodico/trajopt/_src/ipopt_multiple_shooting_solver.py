@@ -3,14 +3,14 @@ import time
 import jax
 import numpy as np
 
-from mujodico.trajopt._src.stagewise_nlp_model import (
+from mujodico.trajopt._src.stagewise_nlp_model import StagewiseNLPModel
+from mujodico.trajopt._src.types import (
   Bounds,
   InitialEqualityConstraint,
   LocalEqualityConstraint,
   LocalInequalityConstraint,
-  ParamsT,
+  Params,
   StageCost,
-  StagewiseNLPModel,
   TerminalCost,
   TerminalEqualityConstraint,
   TerminalInequalityConstraint,
@@ -45,7 +45,7 @@ class IpoptMultipleShootingSolver:
       terminal_inequality_constraint: TerminalInequalityConstraint | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
-      params_trace: ParamsT | None = None,
+      params_trace: Params | None = None,
       gauss_newton: bool = True,
   ):
     self._nlp = StagewiseNLPModel(
@@ -67,7 +67,7 @@ class IpoptMultipleShootingSolver:
 
   def solve(
       self,
-      params: ParamsT,
+      params: Params,
       xs_init: jax.Array | np.ndarray,
       us_init: jax.Array | np.ndarray,
       **kwargs,
