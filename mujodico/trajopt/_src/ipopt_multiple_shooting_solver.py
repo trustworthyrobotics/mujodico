@@ -29,9 +29,9 @@ class IpoptMultipleShootingSolver:
     minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ stage_cost(xₖ, uₖ, params) + terminal_cost(x_N, params)
     subject to    initial_equality_constraint(x₀, params) = 0
                   local_equality_constraint(xₖ, uₖ, xₖ₊₁, params) = 0    for k=0,...,N-1
-                  local_inequality_constraint(xₖ, uₖ, xₖ₊₁, params) ≤ 0  for k=0,...,N-1
+                  local_inequality_constraint(xₖ, uₖ, xₖ₊₁, params) ≥ 0  for k=0,...,N-1
                   terminal_equality_constraint(x_N, params) = 0
-                  terminal_inequality_constraint(x_N, params) ≤ 0
+                  terminal_inequality_constraint(x_N, params) ≥ 0
                   x_lb ≤ xₖ ≤ x_ub                                      for k=0,...,N
                   u_lb ≤ uₖ ≤ u_ub                                      for k=0,...,N-1
   """
@@ -427,17 +427,16 @@ class IpoptMultipleShootingSolver:
     constraint_sizes = self._constraint_sizes
     assert constraint_sizes is not None
     n_initial_eq, n_local_eq, n_local_ineq, n_terminal_eq, n_terminal_ineq = constraint_sizes
-    local_constraints = np.concatenate([
-        np.zeros(n_local_eq),
-        np.full(n_local_ineq, -np.inf),
-    ])
-    lower = np.concatenate([
+    upper = np.concatenate([
         np.zeros(n_initial_eq),
-        np.tile(local_constraints, self.N),
+        np.tile(np.concatenate([
+            np.zeros(n_local_eq),
+            np.full(n_local_ineq, np.inf),
+        ]), self.N),
         np.zeros(n_terminal_eq),
-        np.full(n_terminal_ineq, -np.inf),
+        np.full(n_terminal_ineq, np.inf),
     ])
-    upper = np.zeros(lower.size)
+    lower = np.zeros(upper.size)
     return lower, upper
 
   def _make_constraints_jacobian_structure(

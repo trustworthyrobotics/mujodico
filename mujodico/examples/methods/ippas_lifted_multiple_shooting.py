@@ -45,7 +45,7 @@ class IppasLiftedMultipleShooting:
         values.append(jp.asarray(w_lb)[w_lb_idx] - w[w_lb_idx])
       if w_ub_idx.size:
         values.append(w[w_ub_idx] - jp.asarray(w_ub)[w_ub_idx])
-      values.append(trans.stage_inequality_constraint(x, w, trans.params))
+      values.append(-trans.stage_inequality_constraint(x, w, trans.params))
       return jp.concatenate(values) if values else jp.zeros((0,))
 
     return FatropReferenceJAX(

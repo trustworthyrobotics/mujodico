@@ -62,7 +62,7 @@ class LiftedMultipleShootingTranscription:
       for i, soc in enumerate(socs):
         normal = cf[soc.start_index]
         tangent = cf[soc.start_index+1:soc.start_index+soc.dim] / soc.friction
-        constraints = constraints.at[i].set(tangent.dot(tangent) - normal * normal)
+        constraints = constraints.at[i].set(normal * normal - tangent.dot(tangent))
       return constraints
 
     u_lb, u_ub = task.u_bounds
