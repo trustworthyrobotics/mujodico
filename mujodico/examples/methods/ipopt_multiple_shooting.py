@@ -36,13 +36,19 @@ class IpoptMultipleShooting:
         print_level=5 if verbose else 0,
     )
 
-    total_time = info['total_time_sec']
-    eval_time = info['eval_time_sec']
-    print(f'''
-Method: {self.__class__.__name__}
-  total time: {total_time:.6f} sec
-    dynamics time: {eval_time:.6f} sec / {eval_time/total_time*100:.2f}%
-    ipopt time:    {total_time-eval_time:.6f} sec / {(1-eval_time/total_time)*100:.2f}%
-''')
+    total_time = info['total_time']
+    component_time = {
+      'callback': info['callback_time'],
+      'conversion': info['conversion_time'],
+    }
+    component_time['ipopt'] = total_time - sum(component_time.values())
+    print(
+        f'Method: {self.__class__.__name__}\n'
+        f'  total time: {total_time:.6f} sec\n'
+        + '\n'.join([
+            f'    {name} time: {time:.6f} sec / {time/total_time*100:.2f}%'
+            for name, time in component_time.items()
+        ])
+    )
 
     return {'xs': xs_opt, 'us': us_opt}

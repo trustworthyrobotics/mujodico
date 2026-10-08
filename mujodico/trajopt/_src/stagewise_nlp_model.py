@@ -69,7 +69,8 @@ class StagewiseNLPModel(AbstractNLPModel):
     self._gauss_newton = gauss_newton
     self._params_signature = None
     self._constraint_sizes: tuple[int, int, int, int, int] | None = None
-    self._eval_time = 0.0
+    self._callback_time = 0.0
+    self._conversion_time = 0.0
 
     def empty_state_constraint(x: jax.Array, params: ParamsT) -> jax.Array:
       del x, params
@@ -127,13 +128,13 @@ class StagewiseNLPModel(AbstractNLPModel):
     return self._constraint_bounds()
 
   def objective(self, x: np.ndarray) -> float:
-    return float(self._evaluate(self._objective, jp.asarray(x)))
+    return float(self._evaluate(self._objective, x))
 
   def gradient(self, x: np.ndarray) -> np.ndarray:
-    return self._evaluate(self._objective_grad, jp.asarray(x))
+    return self._evaluate(self._objective_grad, x)
 
   def constraints(self, x: np.ndarray) -> np.ndarray:
-    return self._evaluate(self._constraints, jp.asarray(x))
+    return self._evaluate(self._constraints, x)
 
   def jacobian_structure(self) -> list[tuple[int, int]]:
     self._require_compiled()
@@ -141,7 +142,7 @@ class StagewiseNLPModel(AbstractNLPModel):
     return list(zip(rows.tolist(), cols.tolist()))
 
   def jacobian_entries(self, x: np.ndarray) -> np.ndarray:
-    return self._evaluate(self._jacobian_entries, jp.asarray(x))
+    return self._evaluate(self._jacobian_entries, x)
 
   def jacobian(self, x: np.ndarray) -> np.ndarray:
     return self.jacobian_entries(x)
@@ -159,9 +160,9 @@ class StagewiseNLPModel(AbstractNLPModel):
   ) -> np.ndarray:
     return self._evaluate(
         self._hessian_entries,
-        jp.asarray(x),
-        jp.asarray(lagrange),
-        jp.asarray(objective_factor),
+        x,
+        lagrange,
+        objective_factor,
     )
 
   def hessian(self, x, lagrange, objective_factor):
@@ -175,15 +176,31 @@ class StagewiseNLPModel(AbstractNLPModel):
   def _evaluate(self, fn: Callable, *args) -> np.ndarray:
     self._require_compiled()
     tic = time.perf_counter()
-    result = fn(*args, self._params)
-    self._eval_time += time.perf_counter() - tic
-    return np.asarray(result)
+    jax_args = tuple(jp.asarray(arg) for arg in args)
+    for arg in jax_args:
+      arg.block_until_ready()
+    self._conversion_time += time.perf_counter() - tic
+
+    tic = time.perf_counter()
+    result = fn(*jax_args, self._params)
+    if isinstance(result, jax.Array):
+      result.block_until_ready()
+    self._callback_time += time.perf_counter() - tic
+
+    tic = time.perf_counter()
+    result = np.asarray(result)
+    self._conversion_time += time.perf_counter() - tic
+    return result
 
   @property
-  def evaluation_time(self):
-    time = self._eval_time
-    self._eval_time = 0.0
-    return time
+  def stats(self):
+    r = {
+        'callback_time': self._callback_time,
+        'conversion_time': self._conversion_time,
+    }
+    self._callback_time = 0.0
+    self._conversion_time = 0.0
+    return r
 
   @staticmethod
   def _get_params_signature(params: ParamsT) -> tuple:

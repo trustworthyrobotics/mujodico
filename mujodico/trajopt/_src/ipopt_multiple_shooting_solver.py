@@ -86,8 +86,8 @@ class IpoptMultipleShootingSolver:
     total_time = time.perf_counter() - tic
 
     info.pop('x', None)
-    info['total_time_sec'] = total_time
-    info['eval_time_sec'] = nlp.evaluation_time
+    info['total_time'] = total_time
+    info.update(nlp.stats)
 
     xs_opt, us_opt = nlp._unpack(vars_opt)
     return np.asarray(xs_opt), np.asarray(us_opt), info
