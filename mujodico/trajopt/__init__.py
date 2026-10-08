@@ -1,7 +1,5 @@
-from mujodico.trajopt._src.ipopt_multiple_shooting_solver import IpoptMultipleShootingSolver
-from mujodico.trajopt._src.alpas import Alpas
+from mujodico.trajopt._src.ipopt_trajopt import IpoptTrajOpt
 
 __all__ = [
-    'Alpas',
-    'IpoptMultipleShootingSolver',
+    'IpoptTrajOpt',
 ]

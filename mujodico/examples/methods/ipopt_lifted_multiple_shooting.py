@@ -11,7 +11,7 @@ class IpoptLiftedMultipleShooting:
     self.transcription = methods.LiftedMultipleShootingTranscription(task)
 
     trans = self.transcription
-    self.solver = trajopt.IpoptMultipleShootingSolver(
+    self.solver = trajopt.IpoptTrajOpt(
         N=trans.N,
         nx=trans.nx,
         nu=trans.nw,
