@@ -120,6 +120,13 @@ class StagewiseNLPModel(AbstractNLPModel):
     return self.constraint_bounds[0].size
 
   @property
+  def constraint_sizes(self) -> tuple[int, int, int, int, int]:
+    """Counts of initial, local equality/inequality, and terminal constraints."""
+    self._require_compiled()
+    assert self._constraint_sizes is not None
+    return self._constraint_sizes
+
+  @property
   def constraint_bounds(self) -> tuple[np.ndarray, np.ndarray]:
     self._require_compiled()
     return self._constraint_bounds()
