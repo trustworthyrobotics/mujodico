@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import importlib
+import logging
 import numpy as np
 
 
@@ -68,11 +69,18 @@ class AbstractNLPModel(ABC):
     """Return Hessian values in the order specified by :meth:`hessian_structure`."""
 
   def to_nlpmodels_jl(self, x0: np.ndarray | None = None):
-    """Wrap this NLP as an ``NLPModels.AbstractNLPModel`` in Julia. The returned Julia
-    model can be passed directly to solvers such as NLPModelsIpopt or MadNLP.
+    """Wrap this NLP as an ``NLPModels.AbstractNLPModel`` in Julia.
+    The returned Julia model can be passed directly to solvers such as
+    NLPModelsIpopt or MadNLP.
     ``x0`` is the initial guess required by NLPModels.
     """
     return _to_nlpmodels_jl(self, x0)
+
+  def to_cyipopt(self):
+    """Build and return a ``cyipopt.Problem`` for this NLP.
+    The returned problem can be solved with ``problem.solve(x0)``.
+    """
+    return _to_cyipopt(self)
 
 
 _JULIA_ADAPTER_SETUP = r"""
@@ -154,8 +162,7 @@ end
 _julia_module = None
 
 
-def _to_nlpmodels_jl(nlp: AbstractNLPModel, x0: np.ndarray | None = 0):
-  """Build and return the Julia NLPModels model for ``nlp``."""
+def _to_nlpmodels_jl(nlp: AbstractNLPModel, x0: np.ndarray | None = None):
   try:
     juliacall = importlib.import_module('juliacall')
   except ImportError as e:
@@ -168,15 +175,15 @@ def _to_nlpmodels_jl(nlp: AbstractNLPModel, x0: np.ndarray | None = 0):
   if x0.shape != (nlp.num_vars,):
     raise ValueError(f'x0 must have shape ({nlp.num_vars},), got {x0.shape}')
 
-  var_lb, var_ub = (np.asarray(v, dtype=np.float64) for v in nlp.var_bounds)
-  con_lb, con_ub = (np.asarray(v, dtype=np.float64) for v in nlp.constraint_bounds)
-  if var_lb.shape != x0.shape or var_ub.shape != x0.shape:
-    raise ValueError('variable bounds must have shape (num_vars,)')
-  if con_lb.shape != (nlp.num_constraints,) or con_ub.shape != (nlp.num_constraints,):
-    raise ValueError('constraint bounds must have shape (num_constraints,)')
+  var_lb, var_ub = _validate_bounds(nlp.var_bounds, nlp.num_vars)
+  con_lb, con_ub = _validate_bounds(nlp.constraint_bounds, nlp.num_constraints)
 
-  jr, jc = _structure(nlp.jacobian_structure(), nlp.num_constraints, nlp.num_vars)
-  hr, hc = _structure(nlp.hessian_structure(), nlp.num_vars, nlp.num_vars)
+  jr, jc = _validate_structure(
+      nlp.jacobian_structure(), nlp.num_constraints, nlp.num_vars
+  )
+  hr, hc = _validate_structure(
+      nlp.hessian_structure(), nlp.num_vars, nlp.num_vars
+  )
 
   global _julia_module
   if _julia_module is None:
@@ -201,7 +208,76 @@ def _to_nlpmodels_jl(nlp: AbstractNLPModel, x0: np.ndarray | None = 0):
   )
 
 
-def _structure(
+class _CyIpoptCallbacks:
+  """Adapt an ``AbstractNLPModel`` to CyIpopt's callback interface."""
+
+  def __init__(self, nlp: AbstractNLPModel):
+    self._nlp = nlp
+    self._jac_rows, self._jac_cols = _validate_structure(
+        nlp.jacobian_structure(), nlp.num_constraints, nlp.num_vars
+    )
+    self._hess_rows, self._hess_cols = _validate_structure(
+        nlp.hessian_structure(), nlp.num_vars, nlp.num_vars
+    )
+
+  def objective(self, x):
+    return self._nlp.objective(x)
+
+  def gradient(self, x):
+    return self._nlp.gradient(x)
+
+  def constraints(self, x):
+    return self._nlp.constraints(x)
+
+  def jacobianstructure(self):
+    return self._jac_rows, self._jac_cols
+
+  def jacobian(self, x):
+    return self._nlp.jacobian_entries(x)
+
+  def hessianstructure(self):
+    return self._hess_rows, self._hess_cols
+
+  def hessian(self, x, lagrange, objective_factor):
+    return self._nlp.hessian_entries(x, lagrange, objective_factor)
+
+
+def _to_cyipopt(nlp: AbstractNLPModel):
+  try:
+    cyipopt = importlib.import_module('cyipopt')
+    logging.getLogger('cyipopt').setLevel(logging.WARNING)
+  except ImportError as e:
+    raise ImportError(
+        'Optional solver dependency not installed. Install it with:\n\n'
+        '    pip install cyipopt'
+    ) from e
+
+  callbacks = _CyIpoptCallbacks(nlp)
+  var_lb, var_ub = _validate_bounds(nlp.var_bounds, nlp.num_vars)
+  con_lb, con_ub = _validate_bounds(nlp.constraint_bounds, nlp.num_constraints)
+
+  return cyipopt.Problem(
+      n=nlp.num_vars,
+      m=nlp.num_constraints,
+      problem_obj=callbacks,
+      lb=var_lb,
+      ub=var_ub,
+      cl=con_lb,
+      cu=con_ub,
+  )
+
+
+def _validate_bounds(bounds, size: int):
+  lb, ub = (np.asarray(bound, dtype=np.float64) for bound in bounds)
+  expected_shape = (size,)
+  if lb.shape != expected_shape or ub.shape != expected_shape:
+    raise ValueError(f'bounds must each have shape {expected_shape}')
+  if not np.all(lb <= ub):
+    raise ValueError('lower bounds must be less than or equal to upper bounds')
+  return lb, ub
+
+
+def _validate_structure(
     structure: list[tuple[int, int]], nrows: int, ncols: int
 ) -> tuple[np.ndarray, np.ndarray]:
   indices = np.asarray(structure, dtype=np.int64)

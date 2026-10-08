@@ -60,17 +60,14 @@ class NonnegativeQuadraticNLP(abstract_nlp_model.AbstractNLPModel):
 
 class AbstractNLPModelTest(parameterized.TestCase):
 
-  def setUp(self):
-    super().setUp()
+  @parameterized.parameters('NLPModelsIpopt', 'MadNLP')
+  def test_solve_nlp(self, solver_package):
     try:
       juliacall = importlib.import_module('juliacall')
-      self.jl = juliacall.Main
+      jl = juliacall.Main
     except Exception as e:
       self.skipTest(f'juliacall/Julia is unavailable: {e}')
 
-  @parameterized.parameters('NLPModelsIpopt', 'MadNLP')
-  def test_solve_nlp(self, solver_package):
-    jl = self.jl
     try:
       jl.seval(f'using {solver_package}')
     except Exception as e:
@@ -86,9 +83,29 @@ class AbstractNLPModelTest(parameterized.TestCase):
     np.testing.assert_allclose(stats.solution, [1.0, 1.0], atol=1e-4)
     np.testing.assert_allclose(stats.objective, 1.0, atol=1e-6)
 
+  def test_solve_nlp_ipopt(self):
+    try:
+      importlib.import_module('cyipopt')
+    except Exception as e:
+      self.skipTest(f'cyipopt is unavailable: {e}')
+
+    cyipopt_nlp_problem = NonnegativeQuadraticNLP().to_cyipopt()
+    cyipopt_nlp_problem.add_option('print_level', 0)
+
+    x0 = [0.0, 0.0]
+    _, stats = cyipopt_nlp_problem.solve(x0)
+
+    np.testing.assert_allclose(stats['x'], [1.0, 1.0], atol=1e-4)
+    np.testing.assert_allclose(stats['obj_val'], 1.0, atol=1e-6)
+
   @parameterized.parameters('RelaxationSolver', 'PenaltySolver', 'Crossover')
   def test_solve_mpcc(self, solver_method):
-    jl = self.jl
+    try:
+      juliacall = importlib.import_module('juliacall')
+      jl = juliacall.Main
+    except Exception as e:
+      self.skipTest(f'juliacall/Julia is unavailable: {e}')
+
     try:
       jl.seval('using CCOpt; using MPCCModels')
     except Exception as e:
