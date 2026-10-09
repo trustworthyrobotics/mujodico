@@ -1,6 +1,6 @@
 import jax.numpy as jp
 from mujodico import trajopt
-from mujodico.examples.methods import support
+from mujodico.examples.methods import util
 from mujodico.examples.tasks import Task
 
 
@@ -18,12 +18,12 @@ class LiftedMultipleShootingTranscription:
     def stage_cost(x, w, params):
       u = w[:task.nu]
       return (
-          support.state_cost(params.Q, params.x_goal, x, task.quaternion_w_idxs)
-          + support.control_cost(params.R, params.u_ref, u)
+          util.state_cost(params.Q, params.x_goal, x, task.quaternion_w_idxs)
+          + util.control_cost(params.R, params.u_ref, u)
       )
 
     def terminal_cost(x, params):
-      return support.state_cost(params.Qf, params.x_goal, x, task.quaternion_w_idxs)
+      return util.state_cost(params.Qf, params.x_goal, x, task.quaternion_w_idxs)
 
     x_bounds = task.x_bounds
 
@@ -45,7 +45,7 @@ class LiftedMultipleShootingTranscription:
     if type(task) is not type(self._task):
       raise ValueError('Updated task must be of the same class.')
     self._task = task
-    self.params = support.TranscriptionParams(
+    self.params = util.TranscriptionParams(
         x_0=jp.asarray(task.x_0),
         x_goal=jp.asarray(task.x_goal),
         Q=jp.asarray(task.Q),

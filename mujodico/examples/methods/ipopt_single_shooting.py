@@ -3,9 +3,7 @@ import importlib
 import logging
 import jax
 import jax.numpy as jp
-from mujodico import mjx
 from mujodico.examples import methods
-from mujodico.examples.methods import support
 from mujodico.examples.tasks import Task
 import numpy as np
 

@@ -1,18 +1,11 @@
-import os
 import time
 import csv
 from pathlib import Path
-
 from absl import app
 from absl import flags
-import jax
-from jax import numpy as jp
-import mujoco
-from mujodico import mjx
-from mujodico.examples.methods import get_method_names, parse_method_name, support
+from mujodico.examples.methods import get_method_names, parse_method_name, util
 from mujodico.examples.tasks import get_task_names, parse_task_name
 from mujodico.examples.visualizer import Visualizer
-import numpy as np
 
 
 _METHOD = flags.DEFINE_string(
@@ -82,7 +75,7 @@ def _main(argv) -> None:
 
       solve_time = time.perf_counter() - tic
 
-      goal_error = support.state_cost(
+      goal_error = util.state_cost(
           task.Q, task.x_goal, traj['xs'][-1], task.quaternion_w_idxs
       )
 

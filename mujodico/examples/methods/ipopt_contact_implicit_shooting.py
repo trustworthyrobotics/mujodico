@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jp
 from mujodico import mjx
 from mujodico.examples.tasks import Task
-from mujodico.examples.methods import support
+from mujodico.examples.methods import util
 from mujodico.mjx._src import constraint
 from mujodico.mjx._src import solver_conic
 from mujodico.trajopt._src import transcriptions
@@ -100,9 +100,9 @@ class IpoptContactImplicitShooting:
       du = us - u_ref
 
       cost = (
-          jp.sum(jax.vmap(lambda x: support.state_cost(Q, x_goal, x, task.quaternion_w_idxs))(xs[:-1]))
+          jp.sum(jax.vmap(lambda x: util.state_cost(Q, x_goal, x, task.quaternion_w_idxs))(xs[:-1]))
           + jp.sum((du @ R) * du)
-          + support.state_cost(Qf, x_goal, xs[-1], task.quaternion_w_idxs)
+          + util.state_cost(Qf, x_goal, xs[-1], task.quaternion_w_idxs)
       )
       return cost
 
