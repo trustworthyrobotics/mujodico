@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jp
-from mujodico import mjx
+from mujodico import trajopt
 from mujodico.examples.methods import support
 from mujodico.examples.tasks import Task
 
@@ -8,35 +8,11 @@ from mujodico.examples.tasks import Task
 class MultipleShootingTranscription:
 
   def __init__(self, task: Task):
-    model = mjx.put_model(
-        task.model,
-        impl='jax',
-        contact_approximation=task.contact_approx,
-        contact_smoothing=0.0,
-    )
-    smooth_model = mjx.put_model(
-        task.model,
-        impl=model.impl,
+    dynamics = trajopt.shooting_transcription(
+        mjmodel=task.model,
         contact_approximation=task.contact_approx,
         contact_smoothing=task.contact_smoothing,
     )
-    data = mjx.make_data(model, impl=model.impl)
-
-    def step(x, u):
-      nq, nv = model.nq, model.nv
-      d = data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
-
-      next_data = mjx.step(model, d)
-      xnext = jp.concatenate((next_data.qpos, next_data.qvel, next_data.act))
-
-      smooth_data = mjx.step(smooth_model, d)
-      xnext_smooth = jp.concatenate((smooth_data.qpos, smooth_data.qvel, smooth_data.act))
-
-      return (
-          jax.lax.stop_gradient(xnext)
-          + xnext_smooth
-          - jax.lax.stop_gradient(xnext_smooth)
-      )
 
     def stage_cost(x, u, params):
       return (
@@ -46,9 +22,6 @@ class MultipleShootingTranscription:
 
     def terminal_cost(x, params):
       return support.state_cost(params.Qf, params.x_goal, x, task.quaternion_w_idxs)
-
-    def dynamics(x, u, params):
-      return step(x, u)
 
     self.stage_cost = stage_cost
     self.terminal_cost = terminal_cost
