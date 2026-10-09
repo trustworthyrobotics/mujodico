@@ -25,8 +25,6 @@ __all__ = [
     'PushSphere2d',
     'PushSquareKnob',
     'Task',
-    'get_task_names',
-    'parse_task_name',
 ]
 
 
