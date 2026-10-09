@@ -20,12 +20,12 @@ class IpoptLiftedMultipleShooting:
         initial_equality_constraint=lambda x, params: x - params.x_0,
         local_equality_constraint=lambda x, w, xnext, params: (
             jp.concatenate([
-                xnext - trans.dynamics(x, w, params),
-                trans.stage_equality_constraint(x, w, params),
+                xnext - trans.dynamics(x, w),
+                trans.stage_equality(x, w),
             ])
         ),
         local_inequality_constraint=lambda x, w, xnext, params: (
-            trans.stage_inequality_constraint(x, w, params)
+            trans.stage_inequality(x, w)
         ),
         x_bounds=trans.x_bounds,
         u_bounds=trans.w_bounds,

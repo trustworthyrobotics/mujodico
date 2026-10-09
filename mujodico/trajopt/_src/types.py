@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from numbers import Integral
 import jax
+import numpy as np
 
 
 _X = jax.Array
@@ -15,7 +16,7 @@ LocalEqualityConstraint = Callable[[_X, _U, _X, Params], jax.Array]
 LocalInequalityConstraint = Callable[[_X, _U, _X, Params], jax.Array]
 TerminalEqualityConstraint = Callable[[_X, Params], jax.Array]
 TerminalInequalityConstraint = Callable[[_X, Params], jax.Array]
-Bounds = tuple[jax.Array, jax.Array]
+Bounds = tuple[np.ndarray, np.ndarray]
 
 
 @dataclass

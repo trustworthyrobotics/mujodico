@@ -22,30 +22,30 @@ class IppasLiftedMultipleShooting:
   def _make_solver(self) -> FatropReferenceJAX:
     trans = self.transcription
 
+    n_stage_ineq = trans.stage_inequality(jp.zeros(trans.nx), np.zeros(trans.nw)).size
+
     x_lb, x_ub = trans.x_bounds
     w_lb, w_ub = trans.w_bounds
     x_lb_idx = jp.asarray(np.flatnonzero(np.isfinite(x_lb)).astype(np.int32))
     x_ub_idx = jp.asarray(np.flatnonzero(np.isfinite(x_ub)).astype(np.int32))
     w_lb_idx = jp.asarray(np.flatnonzero(np.isfinite(w_lb)).astype(np.int32))
     w_ub_idx = jp.asarray(np.flatnonzero(np.isfinite(w_ub)).astype(np.int32))
-    n_ineq = (
-        x_lb_idx.size + x_ub_idx.size + w_lb_idx.size + w_ub_idx.size
-        + trans.n_stage_ineq
-    )
-    ineq_lb = np.full(n_ineq, -np.inf)
-    ineq_ub = np.zeros(n_ineq)
+    n_ineq = x_lb_idx.size + x_ub_idx.size + w_lb_idx.size + w_ub_idx.size + n_stage_ineq
 
-    def stage_inequality(x, w):
+    ineq_lb = np.zeros(n_ineq)
+    ineq_ub = np.full(n_ineq, np.inf)
+
+    def stage_inequality_constraint(x, w):
       values = []
       if x_lb_idx.size:
-        values.append(jp.asarray(x_lb)[x_lb_idx] - x[x_lb_idx])
+        values.append(x[x_lb_idx] - jp.asarray(x_lb)[x_lb_idx])
       if x_ub_idx.size:
-        values.append(x[x_ub_idx] - jp.asarray(x_ub)[x_ub_idx])
+        values.append(jp.asarray(x_ub)[x_ub_idx] - x[x_ub_idx])
       if w_lb_idx.size:
-        values.append(jp.asarray(w_lb)[w_lb_idx] - w[w_lb_idx])
+        values.append(w[w_lb_idx] - jp.asarray(w_lb)[w_lb_idx])
       if w_ub_idx.size:
-        values.append(w[w_ub_idx] - jp.asarray(w_ub)[w_ub_idx])
-      values.append(-trans.stage_inequality_constraint(x, w, trans.params))
+        values.append(jp.asarray(w_ub)[w_ub_idx] - w[w_ub_idx])
+      values.append(trans.stage_inequality(x, w))
       return jp.concatenate(values) if values else jp.zeros((0,))
 
     return FatropReferenceJAX(
@@ -55,16 +55,12 @@ class IppasLiftedMultipleShooting:
         x0=trans.params.x_0,
         stage_cost=lambda x, w: trans.stage_cost(x, w, trans.params),
         terminal_cost=lambda x: trans.terminal_cost(x, trans.params),
-        transition=lambda x, w: trans.dynamics(x, w, trans.params),
-        stage_equality=lambda x, w: trans.stage_equality_constraint(x, w, trans.params),
-        stage_inequality=stage_inequality,
+        transition=lambda x, w: trans.dynamics(x, w),
+        stage_equality=lambda x, w: trans.stage_equality(x, w),
+        stage_inequality=stage_inequality_constraint,
         ineq_lb=ineq_lb,
         ineq_ub=ineq_ub,
     )
-
-  # TODO: Uncomment this when solver supports dynamic x0.
-  def update(self, task: Task):
-    self.transcription.update(task)
 
   def solve(
       self,

@@ -8,6 +8,7 @@ from mujodico.examples.tasks import Task
 from mujodico.examples.methods import support
 from mujodico.mjx._src import constraint
 from mujodico.mjx._src import solver_conic
+from mujodico.trajopt._src import transcriptions
 import numpy as np
 
 
@@ -82,7 +83,7 @@ class IpoptContactImplicitShooting:
       efc_force = jp.zeros(mjx_data._impl.nefc)
       efc_force = efc_force.at[efc_contact_mask].set(cf)
 
-      return support.step_given_efc_force(mjx_model, x, u, efc_force)
+      return transcriptions._step_given_efc_force(mjx_model, x, u, efc_force)
 
     contact_approx = mjx.ContactApproxType._resolve(contact_approx)
     if contact_approx not in _CONSTITUTIVE_RELATIONS_FUNC:
