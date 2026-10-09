@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from enum import Enum
 import jax
 import jax.numpy as jp
 import mujoco
@@ -103,18 +104,19 @@ def lifted_shooting_transcription(
   )
   data = mjx.make_data(model, impl=model.impl)
 
-  addresses, socs = _extract_contact_indices(model, data)
-  ncf = int(addresses.size)
+  cf_addresses, contacts = _extract_contact_indices(model)
+  elliptic_contacts = [c for c in contacts if c.type == _Contact.Type.ELLIPTIC]
+  ncf = int(cf_addresses.size)
 
   def step1(x: jax.Array, u: jax.Array) -> jax.Array:
     nq, nv = model.nq, model.nv
     d = data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
     d = mjx.forward(model, d)
-    return d._impl.efc_force[addresses]
+    return d._impl.efc_force[cf_addresses]
 
   def step2(x: jax.Array, u: jax.Array, cf: jax.Array) -> jax.Array:
     efc_force = jp.zeros(data._impl.nefc)
-    efc_force = efc_force.at[addresses].set(cf)
+    efc_force = efc_force.at[cf_addresses].set(cf)
     return _step_given_efc_force(model, x, u, efc_force)
 
   def unpack_control(w):
@@ -131,73 +133,96 @@ def lifted_shooting_transcription(
   def stage_inequality(x: jax.Array, w: jax.Array) -> jax.Array:
     del x
     _, cf = unpack_control(w)
-    constraints = jp.zeros(len(socs))
-    for i, soc in enumerate(socs):
-      normal = cf[soc.start_index]
-      tangent = cf[soc.start_index+1:soc.start_index+soc.dim] / soc.friction
+    constraints = jp.zeros(len(elliptic_contacts))
+    for i, contact in enumerate(elliptic_contacts):
+      normal = cf[contact.cf_index]
+      tangent = cf[contact.cf_index+1:contact.cf_index+contact.dim] / jp.asarray(contact.friction)
       constraints = constraints.at[i].set(normal * normal - tangent.dot(tangent))
     return constraints
 
   cf_lb = np.zeros(ncf)
   cf_ub = np.full(ncf, jp.inf)
-  for soc in socs:
-    cf_lb[soc.start_index+1:soc.start_index+soc.dim] = -np.inf
+  for contact in elliptic_contacts:
+    cf_lb[contact.cf_index+1:contact.cf_index+contact.dim] = -np.inf
 
   w_bounds = (np.concatenate([u_lb, cf_lb]), np.concatenate([u_ub, cf_ub]))
 
   return dynamics, stage_equality, stage_inequality, w_bounds
 
 
+def contact_implicit_transcription(
+    mjmodel: mujoco.MjModel,
+    u_bounds: Bounds | None = None,
+):
+  pass
+
+
 @dataclass(frozen=True)
-class _SOC:
-  start_index: int
+class _Contact:
+  class Type(Enum):
+    FRICTIONLESS = 'frictionless'
+    PYRAMIDAL = 'pyramidal'
+    ELLIPTIC = 'elliptic'
+
+  type: Type
+  efc_index: int
+  cf_index: int
   dim: int
-  friction: jax.Array
+  friction: np.ndarray
 
 
-def _extract_contact_indices(
-    mjx_model: mjx.Model, mjx_data: mjx.Data
-  ) -> tuple[np.ndarray, list[_SOC]]:
+def _extract_contact_indices(model: mjx.Model) -> tuple[np.ndarray, list[_Contact]]:
   """
   Returns
-    efc_contact_addresses: indices of efc_force that are contact forces
-    socs:
-      start_index: index of efc_contact_addresses that is the soc normal
-      dim: dimension of the soc
-      friction: friction coefficients of the soc
+    cf_addresses: integer indices into ``efc_force`` for all contact force
+                  components, in sorted order.
+    contacts: one record per contact, with these fields:
+      type: a ``_ContactType``
+      efc_index: starting index of this contact in ``efc_force``
+      cf_index: starting index of this contact in ``cf_addresses``
+      dim: the contact dimension; frictionless contacts always have dimension 1
+      friction: friction coefficients (size equals dim-1)
   """
-  efc_type = np.array(mjx_data._impl.efc_type)
-  efc_contact_addresses = np.nonzero(
+  data = mjx.make_data(model, impl=model.impl)
+  data = jax.jit(mjx.fwd_position)(model, data)
+
+  efc_type = np.asarray(data._impl.efc_type)
+  cf_addresses = np.nonzero(
       (efc_type == mjx.ConstraintType.CONTACT_FRICTIONLESS) |
       (efc_type == mjx.ConstraintType.CONTACT_PYRAMIDAL) |
       (efc_type == mjx.ConstraintType.CONTACT_ELLIPTIC)
   )[0]
 
-  contact_dim = np.array(mjx_data._impl.contact.dim)
-  contact_efc_address = np.array(mjx_data._impl.contact.efc_address)
-  contact_is_elliptic = (
-    efc_type[contact_efc_address] == mjx.ConstraintType.CONTACT_ELLIPTIC
-  )
+  contact_dim = np.asarray(data._impl.contact.dim)
+  contact_efc_address = np.asarray(data._impl.contact.efc_address)
+  contact_type = efc_type[contact_efc_address]
+  contact_friction = np.asarray(data._impl.contact.friction)
 
-  if np.any(contact_is_elliptic):
-    mjx_data = mjx.fwd_position(mjx_model, mjx_data)
-  conic_friction = mjx_data._impl.contact.friction
+  contacts = []
+  for i, efc_index in enumerate(contact_efc_address):
+    dim = int(contact_dim[i])
+    if contact_type[i] == mjx.ConstraintType.CONTACT_FRICTIONLESS:
+      type_ = _Contact.Type.FRICTIONLESS
+    elif contact_type[i] == mjx.ConstraintType.CONTACT_PYRAMIDAL:
+      type_ = _Contact.Type.PYRAMIDAL
+    elif contact_type[i] == mjx.ConstraintType.CONTACT_ELLIPTIC:
+      type_ = _Contact.Type.ELLIPTIC
+    else:
+      continue
 
-  socs = []
-  for i in np.nonzero(contact_is_elliptic)[0]:
-    start_index = np.nonzero(contact_efc_address[i] == efc_contact_addresses)[0][0]
-    dim = contact_dim[i]
-    soc = _SOC(
-        start_index=int(start_index),
-        dim=int(dim),
-        friction=conic_friction[i, :dim-1],
+    contact = _Contact(
+        type=type_,
+        dim=dim,
+        efc_index=int(efc_index),
+        cf_index=int(np.searchsorted(cf_addresses, efc_index)),
+        friction=contact_friction[i, :dim-1],
     )
-    socs.append(soc)
+    contacts.append(contact)
 
-    if not np.all(soc.friction > 1e-6):
-      raise ValueError('Near zero friction not allowed')
+    if not np.all(contact.friction > 1e-4):
+      raise ValueError('near zero friction not allowed')
 
-  return efc_contact_addresses, socs
+  return cf_addresses, contacts
 
 
 def _step_given_efc_force(
