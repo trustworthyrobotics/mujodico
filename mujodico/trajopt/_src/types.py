@@ -41,8 +41,8 @@ class LocalComplementarityConstraint:
   def size(self):
     return len(self.pairs)
 
-  def add_u_ineq_complementarity(self, u_index, ineq_index) -> None:
-    self._add_index_pairs(self.Side.U, u_index, self.Side.INEQ, ineq_index)
+  def add_ctrl_ineq_complementarity(self, ctrl_index, ineq_index) -> None:
+    self._add_index_pairs(self.Side.U, ctrl_index, self.Side.INEQ, ineq_index)
 
   def add_ineq_ineq_complementarity(self, ineq_index_1, ineq_index_2) -> None:
     self._add_index_pairs(self.Side.INEQ, ineq_index_1, self.Side.INEQ, ineq_index_2)

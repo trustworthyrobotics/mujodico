@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jp
 import mujoco
 from mujodico import mjx
-from mujodico.trajopt._src.types import Bounds
+from mujodico.trajopt._src.types import Bounds, LocalComplementarityConstraint
 import numpy as np
 
 
@@ -87,15 +87,6 @@ def lifted_shooting_transcription(
     stage_inequality: constraint ``stage_inequality(x, w) ≥ 0``.
     w_bounds: pair of lower and upper bounds for ``w``.
   """
-  nu = mjmodel.nu
-  if u_bounds is None:
-    u_lb = np.full(nu, -np.inf)
-    u_ub = np.full(nu, np.inf)
-  else:
-    u_lb, u_ub = u_bounds
-  if u_lb.size != nu or u_ub.size != nu:
-    raise ValueError('u lower and upper bounds have incorrect size')
-
   model = mjx.put_model(
       mjmodel,
       impl='jax',
@@ -106,6 +97,8 @@ def lifted_shooting_transcription(
 
   cf_addresses, contacts = _extract_contact_indices(model)
   elliptic_contacts = [c for c in contacts if c.type == _Contact.Type.ELLIPTIC]
+
+  nu = model.nu
   ncf = int(cf_addresses.size)
 
   def step1(x: jax.Array, u: jax.Array) -> jax.Array:
@@ -120,6 +113,7 @@ def lifted_shooting_transcription(
     return _step_given_efc_force(model, x, u, efc_force)
 
   def unpack_control(w):
+    assert w.size == nu + ncf
     return w[:nu], w[nu:]
 
   def dynamics(x: jax.Array, w: jax.Array) -> jax.Array:
@@ -136,15 +130,16 @@ def lifted_shooting_transcription(
     constraints = jp.zeros(len(elliptic_contacts))
     for i, contact in enumerate(elliptic_contacts):
       normal = cf[contact.cf_index]
-      tangent = cf[contact.cf_index+1:contact.cf_index+contact.dim] / jp.asarray(contact.friction)
+      tangent = cf[contact.cf_index+1:contact.cf_index+contact.dim] / contact.friction
       constraints = constraints.at[i].set(normal * normal - tangent.dot(tangent))
     return constraints
 
   cf_lb = np.zeros(ncf)
-  cf_ub = np.full(ncf, jp.inf)
+  cf_ub = np.full(ncf, np.inf)
   for contact in elliptic_contacts:
     cf_lb[contact.cf_index+1:contact.cf_index+contact.dim] = -np.inf
 
+  u_lb, u_ub = _check_u_bounds(u_bounds, nu)
   w_bounds = (np.concatenate([u_lb, cf_lb]), np.concatenate([u_ub, cf_ub]))
 
   return dynamics, stage_equality, stage_inequality, w_bounds
@@ -154,7 +149,124 @@ def contact_implicit_transcription(
     mjmodel: mujoco.MjModel,
     u_bounds: Bounds | None = None,
 ):
-  pass
+  """Builds a contact-implicit transcription.
+
+  The returned decision input ``w`` is ``[u, z]``. ``u`` is the actuator
+  control; ``z`` contains nonnegative contact force variables.
+  Uses Anitescu convex formulation for pyramidal contact.
+  Uses Stewart-Trinkle formulation for elliptic contact.
+
+  Args:
+    mjmodel: MuJoCo model to transcribe.
+    u_bounds: optional pair of lower and upper actuator control bounds.
+              Defaults to unbounded controls.
+
+  Returns:
+    dynamics: ``dynamics(x, w)`` returns the next state.
+    local_inequality: constraint ``local_inequality(x, w, xnext) ≥ 0``.
+    local_complementarity: local complementarity constraints.
+    w_bounds: pair of lower and upper bounds for ``w``.
+  """
+  model = mjx.put_model(
+      mjmodel,
+      impl='jax',
+      # As long as contact_approximation is not 'mujoco', efc_J and efc_pos
+      # will not be masked out (see mjx/constraint.py).
+      contact_approximation='conic',
+  )
+  data = mjx.make_data(model, impl=model.impl)
+
+  cf_addresses, contacts = _extract_contact_indices(model)
+
+  def z_dim(contact: _Contact) -> int:
+    if contact.type == _Contact.Type.FRICTIONLESS:
+      return contact.dim
+    elif contact.type == _Contact.Type.PYRAMIDAL:
+      return (contact.dim - 1) * 2
+    elif contact.type == _Contact.Type.ELLIPTIC:
+      return contact.dim * 2
+
+  nu = model.nu
+  nz = 0
+  z_indexes = []
+  for contact in contacts:
+    z_indexes.append(nz)
+    nz += z_dim(contact)
+
+  def efc_info(x: jax.Array) -> tuple[jax.Array, jax.Array]:
+    nq, nv = model.nq, model.nv
+    d = data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:])
+    d = mjx.fwd_position(model, d)
+    return d._impl.efc_J, d._impl.efc_pos
+
+  def unpack_control(w):
+    assert w.size == nu + nz
+    return w[:nu], w[nu:]
+
+  def dynamics(x: jax.Array, w: jax.Array) -> jax.Array:
+    u, z = unpack_control(w)
+
+    cf = jp.zeros(cf_addresses.size)
+    for z_index, contact in zip(z_indexes, contacts):
+      cf_dim = z_dim(contact) if contact.type != _Contact.Type.ELLIPTIC else contact.dim
+      z_k = z[z_index : z_index + z_dim(contact)]
+      cf_k = z_k[:cf_dim]
+      if contact.type == _Contact.Type.ELLIPTIC:
+        cf_k = cf_k.at[1:].add(-z_k[cf_dim:-1])
+      cf = cf.at[contact.cf_index : contact.cf_index + cf_dim].set(cf_k)
+
+    efc_force = jp.zeros(data._impl.nefc)
+    efc_force = efc_force.at[cf_addresses].set(cf)
+    return _step_given_efc_force(model, x, u, efc_force)
+
+  def local_inequality(x: jax.Array, w: jax.Array, x_next: jax.Array) -> jax.Array:
+    _, z = unpack_control(w)
+    v_next = x_next[model.nq:model.nq+model.nv]
+    efc_J, efc_pos = efc_info(x)
+    efc_J_next, efc_pos_next = efc_info(x_next)
+
+    constraints = []
+    for z_index, contact in zip(z_indexes, contacts):
+      if contact.type == _Contact.Type.FRICTIONLESS:
+        # 0 ≤ λₙ ⊥ ϕ(q⁺) ≥ 0
+        constraints.append(efc_pos_next[contact.efc_index][None])
+
+      elif contact.type == _Contact.Type.PYRAMIDAL:
+        # 0 ≤ λ ⊥ ϕ(q) + δt J(q) v⁺ ≥ 0
+        dt = model.opt.timestep
+        efc_indexs = jp.arange(contact.efc_index, contact.efc_index + z_dim(contact))
+        constraints.append(efc_pos[efc_indexs] + dt * efc_J[efc_indexs] @ v_next)
+
+      elif contact.type == _Contact.Type.ELLIPTIC:
+        # 0 ≤ λₙ ⊥ ϕ(q⁺) ≥ 0
+        # 0 ≤ λₜ₁ ⊥ Jₜ(q⁺) v⁺ + ν 1 ≥ 0
+        # 0 ≤ λₜ₂ ⊥ -Jₜ(q⁺) v⁺ + ν 1 ≥ 0
+        # 0 ≤ ν ⊥ λₙ - [λₜ₁ᵀ/μ  λₜ₂ᵀ/μ] 1 ≥ 0
+        vt_next = efc_J_next[contact.efc_index + 1 : contact.efc_index + contact.dim] @ v_next
+        z_k = z[z_index : z_index + z_dim(contact)]
+        lambdan = z_k[0]
+        lambdat = z_k[1:-1]
+        nu = z_k[-1]
+        friction = jp.tile(contact.friction, 2)
+        constraints.append(efc_pos_next[contact.efc_index][None])
+        constraints.append(jp.concatenate([vt_next, -vt_next]) + nu)
+        constraints.append((lambdan - jp.sum(lambdat / friction))[None])
+
+    return jp.concatenate(constraints) if constraints else jp.zeros((0,))
+
+  local_complementarity = LocalComplementarityConstraint()
+  if nz:
+    local_complementarity.add_ctrl_ineq_complementarity(
+        ctrl_index=np.arange(nu, nu + nz),
+        ineq_index=np.arange(0, nz),
+    )
+
+  u_lb, u_ub = _check_u_bounds(u_bounds, nu)
+  z_lb = np.zeros(nz)
+  z_ub = np.full(nz, np.inf)
+  w_bounds = (np.concatenate([u_lb, z_lb]), np.concatenate([u_ub, z_ub]))
+
+  return dynamics, local_inequality, local_complementarity, w_bounds
 
 
 @dataclass(frozen=True)
@@ -168,7 +280,7 @@ class _Contact:
   efc_index: int
   cf_index: int
   dim: int
-  friction: np.ndarray
+  friction: jax.Array
 
 
 def _extract_contact_indices(model: mjx.Model) -> tuple[np.ndarray, list[_Contact]]:
@@ -196,7 +308,7 @@ def _extract_contact_indices(model: mjx.Model) -> tuple[np.ndarray, list[_Contac
   contact_dim = np.asarray(data._impl.contact.dim)
   contact_efc_address = np.asarray(data._impl.contact.efc_address)
   contact_type = efc_type[contact_efc_address]
-  contact_friction = np.asarray(data._impl.contact.friction)
+  contact_friction = data._impl.contact.friction
 
   contacts = []
   for i, efc_index in enumerate(contact_efc_address):
@@ -234,10 +346,11 @@ def _step_given_efc_force(
     q⁺ = q ⊕ δt v⁺
   """
 
+  d = mjx.make_data(m, impl=m.impl)
+
   assert x.size == m.nq + m.nv + m.na
   assert u.size == m.nu
-
-  d = mjx.make_data(m, impl=m.impl)
+  assert efc_force.size == d._impl.nefc
 
   d = d.replace(
     qpos=x[:m.nq],
@@ -265,3 +378,11 @@ def _step_given_efc_force(
     raise NotImplementedError(f'integrator {m.opt.integrator} not implemented.')
 
   return jp.concatenate((d.qpos, d.qvel, d.act))
+
+
+def _check_u_bounds(u_bounds: Bounds | None, nu: int):
+  if u_bounds is None:
+    u_bounds = np.full(nu, -np.inf), np.full(nu, np.inf)
+  if u_bounds[0].size != nu or u_bounds[1].size != nu:
+    raise ValueError('u lower and upper bounds have incorrect size')
+  return u_bounds
