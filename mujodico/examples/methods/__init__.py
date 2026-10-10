@@ -1,17 +1,21 @@
+from mujodico.examples.methods.ccopt_contact_implicit import CcoptContactImplicit
 from mujodico.examples.methods.ipopt_lifted_multiple_shooting import IpoptLiftedMultipleShooting
 from mujodico.examples.methods.ipopt_multiple_shooting import IpoptMultipleShooting
 from mujodico.examples.methods.ipopt_single_shooting import IpoptSingleShooting
 from mujodico.examples.methods.ippas_lifted_multiple_shooting import IppasLiftedMultipleShooting
+from mujodico.examples.methods.transcription_contact_implicit import ContactImplicitTranscription
 from mujodico.examples.methods.transcription_lifted_multiple_shooting import LiftedMultipleShootingTranscription
 from mujodico.examples.methods.transcription_multiple_shooting import MultipleShootingTranscription
 from mujodico.examples.methods.transcription_single_shooting import SingleShootingTranscription
 
 
 __all__ = [
+    'CcoptContactImplicit',
     'IpoptLiftedMultipleShooting',
     'IpoptMultipleShooting',
     'IpoptSingleShooting',
     'IppasLiftedMultipleShooting',
+    'ContactImplicitTranscription',
     'LiftedMultipleShootingTranscription',
     'MultipleShootingTranscription',
     'SingleShootingTranscription',
@@ -19,6 +23,7 @@ __all__ = [
 
 
 _METHODS = [
+    CcoptContactImplicit,
     IpoptLiftedMultipleShooting,
     IpoptMultipleShooting,
     IpoptSingleShooting,

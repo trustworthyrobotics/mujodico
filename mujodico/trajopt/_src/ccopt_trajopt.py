@@ -122,7 +122,10 @@ class CcoptTrajOpt:
       except AttributeError:
         pass
 
-    xs_opt, us_opt = nlp._unpack(np.asarray(stats.solution))
+    # Ignore the vertical form variables in the solution.
+    vars_ops = np.asarray(stats.solution)[:nlp.num_vars]
+    xs_opt, us_opt = nlp._unpack(vars_ops)
+
     return np.asarray(xs_opt), np.asarray(us_opt), info
 
   def _ensure_julia_packages(self, packages: tuple[str, ...]) -> None:
@@ -187,9 +190,10 @@ class CcoptTrajOpt:
     julia = self._julia
     cc_type = julia.MPCCModels.CCType
     cc_values = [getattr(julia.MPCCModels, name) for name in cc_names]
-    return julia.MPCCModels.MPCCModel(
+    mpcc = julia.MPCCModels.MPCCModel(
         julia_nlp,
         julia.collect(julia.Int64, ind_cc1),
         julia.collect(julia.Int64, ind_cc2),
         julia.collect(cc_type, cc_values),
     )
+    return julia.MPCCModels.vertical_form(mpcc)
