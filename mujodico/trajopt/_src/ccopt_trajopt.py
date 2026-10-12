@@ -96,7 +96,7 @@ class CcoptTrajOpt:
       params: Params,
       xs_init: jax.Array | np.ndarray,
       us_init: jax.Array | np.ndarray,
-      method: Method = Method.RELAXATION,
+      method: Method,
       **kwargs,
   ) -> tuple[np.ndarray, np.ndarray, dict]:
     nlp = self._nlp

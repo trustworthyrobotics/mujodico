@@ -1,15 +1,14 @@
 import numpy as np
 from mujodico import trajopt
-from mujodico.examples.methods.transcription_contact_implicit import (
-    ContactImplicitTranscription,
-)
+from mujodico.examples import methods
 from mujodico.examples.tasks import Task
 
 
-class CcoptContactImplicit:
+class _CcoptContactImplicit:
 
-  def __init__(self, task: Task):
-    self.transcription = ContactImplicitTranscription(task)
+  def __init__(self, task: Task, method: trajopt.CcoptTrajOpt.Method):
+    self.transcription = methods.ContactImplicitTranscription(task)
+    self.method = method
 
     trans = self.transcription
     self.solver = trajopt.CcoptTrajOpt(
@@ -54,6 +53,7 @@ class CcoptContactImplicit:
         trans.params,
         xs_init,
         ws_init,
+        method=self.method,
         max_iter=iterations,
         print_level=3 if verbose else 5,
     )
@@ -66,6 +66,7 @@ class CcoptContactImplicit:
     component_time['ccopt'] = total_time - sum(component_time.values())
     print(
         f'Method: {self.__class__.__name__}\n'
+        f'  status: {info['status']}\n'
         f'  total time: {total_time:.6f} sec\n'
         + '\n'.join([
             f'    {name} time: {time:.6f} sec / {time/total_time*100:.2f}%'
@@ -79,3 +80,27 @@ class CcoptContactImplicit:
         'cfs': ws_opt[:, nu:],
         'info': info,
     }
+
+
+class CcoptRelaxationContactImplicit(_CcoptContactImplicit):
+  def __init__(self, task: Task):
+    super().__init__(
+        task=task,
+        method=trajopt.CcoptTrajOpt.Method.RELAXATION,
+    )
+
+
+class CcoptPenaltyContactImplicit(_CcoptContactImplicit):
+  def __init__(self, task: Task):
+    super().__init__(
+        task=task,
+        method=trajopt.CcoptTrajOpt.Method.PENALTY,
+    )
+
+
+class CcoptCrossoverContactImplicit(_CcoptContactImplicit):
+  def __init__(self, task: Task):
+    super().__init__(
+        task=task,
+        method=trajopt.CcoptTrajOpt.Method.CROSSOVER,
+    )
