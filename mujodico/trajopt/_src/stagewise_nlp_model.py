@@ -1,5 +1,6 @@
 import time
 from typing import overload
+from typing_extensions import override
 
 import jax
 import jax.numpy as jp
@@ -8,6 +9,7 @@ import numpy as np
 from mujodico.trajopt._src.abstract_nlp_model import AbstractNLPModel
 from mujodico.trajopt._src.types import (
   Bounds,
+  Callable,
   InitialEqualityConstraint,
   LocalEqualityConstraint,
   LocalInequalityConstraint,
@@ -47,8 +49,9 @@ class StagewiseNLPModel(AbstractNLPModel):
       terminal_inequality_constraint: TerminalInequalityConstraint | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
-      params: Params | None = None,
       gauss_newton: bool = True,
+      params: Params | None = None,
+      update_params: Callable[[dict, Params], Params] | None = None,
   ):
     self.N = N
     self.nx = nx
@@ -104,21 +107,26 @@ class StagewiseNLPModel(AbstractNLPModel):
         if terminal_inequality_constraint is not None
         else empty_state_constraint
     )
+    self.update_params = update_params
     if params is not None:
-      self.update_params(params)
+      self.set_params(params)
 
+  @override
   @property
   def num_vars(self) -> int:
     return (self.N + 1) * self.nx + self.N * self.nu
 
+  @override
   @property
   def var_bounds(self) -> tuple[np.ndarray, np.ndarray]:
     return self._variable_bounds()
 
+  @override
   @property
   def num_constraints(self) -> int:
     return self.constraint_bounds[0].size
 
+  @override
   @property
   def constraint_sizes(self) -> tuple[int, int, int, int, int]:
     """Counts of initial, local equality/inequality, and terminal constraints."""
@@ -126,41 +134,50 @@ class StagewiseNLPModel(AbstractNLPModel):
     assert self._constraint_sizes is not None
     return self._constraint_sizes
 
+  @override
   @property
   def constraint_bounds(self) -> tuple[np.ndarray, np.ndarray]:
     self._require_compiled()
     return self._constraint_bounds()
 
+  @override
   def objective(self, x: np.ndarray) -> float:
     return float(self._evaluate(self._objective, x))
 
+  @override
   def gradient(self, x: np.ndarray) -> np.ndarray:
     return self._evaluate(self._objective_grad, x)
 
+  @override
   def constraints(self, x: np.ndarray) -> np.ndarray:
     return self._evaluate(self._constraints, x)
 
+  @override
   def jacobian_structure(self) -> list[tuple[int, int]]:
     self._require_compiled()
     rows, cols = self._jacobian_structure
     return list(zip(rows.tolist(), cols.tolist()))
 
+  @override
   def jacobian_entries(self, x: np.ndarray) -> np.ndarray:
     return self._evaluate(self._jacobian_entries, x)
 
+  @override
   def jacobian(self, x: np.ndarray) -> np.ndarray:
     return self.jacobian_entries(x)
 
+  @override
   def hessian_structure(self) -> list[tuple[int, int]]:
     self._require_compiled()
     rows, cols = self._hessian_structure
     return list(zip(rows.tolist(), cols.tolist()))
 
+  @override
   def hessian_entries(
       self,
       x: np.ndarray,
       lagrange: np.ndarray,
-      objective_factor: float = 1.0,
+      objective_factor: float,
   ) -> np.ndarray:
     return self._evaluate(
         self._hessian_entries,
@@ -169,12 +186,18 @@ class StagewiseNLPModel(AbstractNLPModel):
         objective_factor,
     )
 
+  @override
   def hessian(self, x, lagrange, objective_factor):
     return self.hessian_entries(x, lagrange, objective_factor)
 
+  @override
+  def intermediate(self, stats: dict) -> None:
+    if self.update_params is not None:
+      self._params = self.update_params(stats, self._params)
+
   def _require_compiled(self):
     if self._params_signature is None or not hasattr(self, '_objective'):
-      raise RuntimeError('Call update_params(params) before evaluating the NLP.')
+      raise RuntimeError('Call set_params(params) before evaluating the NLP.')
     return self
 
   def _evaluate(self, fn, *args) -> np.ndarray:
@@ -215,7 +238,7 @@ class StagewiseNLPModel(AbstractNLPModel):
       leaf_signatures.append((value.shape, value.dtype.str))
     return treedef, tuple(leaf_signatures)
 
-  def update_params(self, params: Params) -> None:
+  def set_params(self, params: Params) -> None:
     self._params = params
     signature = self._get_params_signature(params)
     if signature != self._params_signature:

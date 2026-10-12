@@ -6,6 +6,7 @@ import numpy as np
 from mujodico.trajopt._src.stagewise_nlp_model import StagewiseNLPModel
 from mujodico.trajopt._src.types import (
   Bounds,
+  Callable,
   InitialEqualityConstraint,
   LocalEqualityConstraint,
   LocalInequalityConstraint,
@@ -45,8 +46,9 @@ class IpoptTrajOpt:
       terminal_inequality_constraint: TerminalInequalityConstraint | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
-      params_trace: Params | None = None,
       gauss_newton: bool = True,
+      params_trace: Params | None = None,
+      update_params: Callable[[dict, Params], Params] | None = None,
   ):
     self._nlp = StagewiseNLPModel(
         N=N,
@@ -61,8 +63,9 @@ class IpoptTrajOpt:
         terminal_inequality_constraint=terminal_inequality_constraint,
         x_bounds=x_bounds,
         u_bounds=u_bounds,
-        params=params_trace,
         gauss_newton=gauss_newton,
+        params=params_trace,
+        update_params=update_params,
     )
 
   def solve(
@@ -73,7 +76,7 @@ class IpoptTrajOpt:
       **kwargs,
   ) -> tuple[np.ndarray, np.ndarray, dict]:
     nlp = self._nlp
-    nlp.update_params(params)
+    nlp.set_params(params)
 
     vars_init = nlp._pack(np.asarray(xs_init), np.asarray(us_init))
 

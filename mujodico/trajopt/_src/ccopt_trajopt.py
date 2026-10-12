@@ -55,8 +55,8 @@ class CcoptTrajOpt:
       terminal_inequality_constraint: TerminalInequalityConstraint | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
-      params_trace: Params | None = None,
       gauss_newton: bool = True,
+      params_trace: Params | None = None,
   ):
     try:
       juliacall = importlib.import_module('juliacall')
@@ -80,8 +80,8 @@ class CcoptTrajOpt:
         terminal_inequality_constraint=terminal_inequality_constraint,
         x_bounds=x_bounds,
         u_bounds=u_bounds,
-        params=params_trace,
         gauss_newton=gauss_newton,
+        params=params_trace,
     )
     self._local_complementarity_constraint = local_complementarity_constraint
 
@@ -100,7 +100,7 @@ class CcoptTrajOpt:
       **kwargs,
   ) -> tuple[np.ndarray, np.ndarray, dict]:
     nlp = self._nlp
-    nlp.update_params(params)
+    nlp.set_params(params)
 
     vars_init = nlp._pack(np.asarray(xs_init), np.asarray(us_init))
 

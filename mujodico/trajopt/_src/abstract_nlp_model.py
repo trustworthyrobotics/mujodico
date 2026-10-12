@@ -47,7 +47,7 @@ class AbstractNLPModel(ABC):
     """
 
   @abstractmethod
-  def jacobian_entries(self, x) -> np.ndarray:
+  def jacobian_entries(self, x: np.ndarray) -> np.ndarray:
     """Return Jacobian values in the order specified by :meth:`jacobian_structure`."""
 
   @abstractmethod
@@ -64,9 +64,13 @@ class AbstractNLPModel(ABC):
       self,
       x: np.ndarray,
       lagrange: np.ndarray,
-      objective_factor: float = 1.0,
+      objective_factor: float,
   ) -> np.ndarray:
     """Return Hessian values in the order specified by :meth:`hessian_structure`."""
+
+  def intermediate(self, stats: dict) -> None:
+    """Called after each solver iteration."""
+    pass
 
   def to_nlpmodels_jl(self, x0: np.ndarray | None = None):
     """Wrap this NLP as an ``NLPModels.AbstractNLPModel`` in Julia.
@@ -219,27 +223,52 @@ class _CyIpoptCallbacks:
     self._hess_rows, self._hess_cols = _validate_structure(
         nlp.hessian_structure(), nlp.num_vars, nlp.num_vars
     )
+    self._x = None
 
   def objective(self, x):
+    self._x = x
     return self._nlp.objective(x)
 
   def gradient(self, x):
+    self._x = x
     return self._nlp.gradient(x)
 
   def constraints(self, x):
+    self._x = x
     return self._nlp.constraints(x)
 
   def jacobianstructure(self):
     return self._jac_rows, self._jac_cols
 
   def jacobian(self, x):
+    self._x = x
     return self._nlp.jacobian_entries(x)
 
   def hessianstructure(self):
     return self._hess_rows, self._hess_cols
 
   def hessian(self, x, lagrange, objective_factor):
+    self._x = x
     return self._nlp.hessian_entries(x, lagrange, objective_factor)
+
+  def intermediate(
+      self, alg_mod, iter, objective, inf_pr, inf_du, mu,
+      d_norm, regularization_size, alpha_du, alpha_pr, ls_trials,
+  ):
+    self._nlp.intermediate({
+        'x': self._x,
+        'alg_mod': alg_mod,
+        'iter': iter,
+        'objective': objective,
+        'inf_pr': inf_pr,
+        'inf_du': inf_du,
+        'mu': mu,
+        'd_norm': d_norm,
+        'regularization_size': regularization_size,
+        'alpha_du': alpha_du,
+        'alpha_pr': alpha_pr,
+        'ls_trials': ls_trials,
+    })
 
 
 def _to_cyipopt(nlp: AbstractNLPModel):
