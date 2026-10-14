@@ -105,8 +105,8 @@ function PythonNLPModel(py_nlp, x0, lvar, uvar, lcon, ucon, jrows, jcols, hrows,
   n, m = length(x0), length(lcon)
   meta = NLPModels.NLPModelMeta(n; x0=Float64.(x0), lvar=Float64.(lvar),
       uvar=Float64.(uvar), ncon=m, lcon=Float64.(lcon), ucon=Float64.(ucon),
-      nnzj=length(jrows), nnzh=length(hrows), sparse_jacobian=true,
-      sparse_hessian=true, hess_available=true)
+      nnzh=length(hrows), nnzj=length(jrows), sparse_jacobian=true, sparse_hessian=true,
+      jprod_available=false, jtprod_available=false, hprod_available=false)
   return PythonNLPModel(meta, NLPModels.Counters(), PythonCall.Py(py_nlp),
       Int.(jrows), Int.(jcols), Int.(hrows), Int.(hcols))
 end
@@ -115,43 +115,71 @@ function NLPModels.obj(nlp::PythonNLPModel, x::AbstractVector{T}) where {T}
   return PythonCall.pyconvert(Float64,
       PythonCall.pycall(PythonCall.pygetattr(nlp.py_nlp, "objective"), x))
 end
+
 function NLPModels.grad!(nlp::PythonNLPModel,
                          x::AbstractVector{T}, g::AbstractVector{T}) where {T}
   copyto!(g, PythonCall.pyconvert(Vector{Float64},
       PythonCall.pycall(PythonCall.pygetattr(nlp.py_nlp, "gradient"), x)))
   return g
 end
-function NLPModels.cons!(nlp::PythonNLPModel,
-                         x::AbstractVector{T}, c::AbstractVector{T}) where {T}
+
+function NLPModels.cons_lin!(nlp::PythonNLPModel,
+                             x::AbstractVector{T}, c::AbstractVector{T}) where {T}
+  @assert isempty(c)
+  return c
+end
+
+function NLPModels.cons_nln!(nlp::PythonNLPModel,
+                             x::AbstractVector{T}, c::AbstractVector{T}) where {T}
   copyto!(c, PythonCall.pyconvert(Vector{Float64},
       PythonCall.pycall(PythonCall.pygetattr(nlp.py_nlp, "constraints"), x)))
   return c
 end
-function NLPModels.jac_structure!(nlp::PythonNLPModel,
+
+function NLPModels.jac_lin_structure!(nlp::PythonNLPModel,
+                                      rows::AbstractVector{I},
+                                      cols::AbstractVector{I}) where {I<:Integer}
+  @assert isempty(rows) && isempty(cols)
+  return rows, cols
+end
+
+function NLPModels.jac_nln_structure!(nlp::PythonNLPModel,
                                   rows::AbstractVector{I},
                                   cols::AbstractVector{I}) where {I<:Integer}
   copyto!(rows, nlp.jrows); copyto!(cols, nlp.jcols)
   return rows, cols
 end
-function NLPModels.jac_coord!(nlp::PythonNLPModel,
+
+function NLPModels.jac_lin_coord!(nlp::PythonNLPModel,
+                                  x::AbstractVector{T},
+                                  vals::AbstractVector{T}) where {T}
+  @assert isempty(vals)
+  return vals
+end
+
+function NLPModels.jac_nln_coord!(nlp::PythonNLPModel,
                               x::AbstractVector{T},
                               vals::AbstractVector{T}) where {T}
   copyto!(vals, PythonCall.pyconvert(Vector{Float64},
       PythonCall.pycall(PythonCall.pygetattr(nlp.py_nlp, "jacobian_entries"), x)))
   return vals
 end
+
 function NLPModels.hess_structure!(nlp::PythonNLPModel,
                                    rows::AbstractVector{I},
                                    cols::AbstractVector{I}) where {I<:Integer}
   copyto!(rows, nlp.hrows); copyto!(cols, nlp.hcols)
   return rows, cols
 end
+
 function NLPModels.hess_coord!(nlp::PythonNLPModel,
                                x::AbstractVector{T},
                                vals::AbstractVector{T};
-                               obj_weight=1, y=zeros(nlp.meta.ncon)) where {T}
+                               obj_weight=1) where {T}
+  y = zeros(nlp.meta.ncon)
   return NLPModels.hess_coord!(nlp, x, y, vals; obj_weight=obj_weight)
 end
+
 function NLPModels.hess_coord!(nlp::PythonNLPModel,
                                x::AbstractVector{T},
                                y::AbstractVector{T},
