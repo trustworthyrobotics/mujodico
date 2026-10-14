@@ -123,7 +123,7 @@ class AbstractNLPModelTest(parameterized.TestCase):
           lpcc_solver_kwargs=print_options,
           bnlp_solver_kwargs=print_options,
       )
-      stats = jl.CCOpt.crossover(mpcc, julia_nlp.meta.x0, options)
+      stats = jl.CCOpt.crossover(mpcc, jl.MPCCModels.get_x0(mpcc), options)
     else:
       Solver = getattr(jl.CCOpt, solver_method)
       solver = Solver(mpcc, print_level=5)

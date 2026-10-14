@@ -18,8 +18,9 @@ from mujodico.trajopt._src.types import (
 )
 
 
-class CcoptTrajOpt:
-  """Solves the following stagewise MPCC with CCOpt.
+class CCOptTrajOpt:
+  """Solves the following stagewise MPCC with CCOpt
+  https://github.com/madsuite-org/CCOpt.jl
 
     minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ stage_cost(xₖ, uₖ, params) + terminal_cost(x_N, params)
     subject to    initial_equality_constraint(x₀, params) = 0
@@ -96,7 +97,7 @@ class CcoptTrajOpt:
       params: Params,
       xs_init: jax.Array | np.ndarray,
       us_init: jax.Array | np.ndarray,
-      method: Method,
+      method: Method = Method.RELAXATION,
       **kwargs,
   ) -> tuple[np.ndarray, np.ndarray, dict]:
     nlp = self._nlp
@@ -114,8 +115,6 @@ class CcoptTrajOpt:
     else:
       self._ensure_jl_packages(('CCOpt', 'MPCCModels'))
       mpcc = self._make_jl_mpcc(jl_nlp)
-      if not jl.MPCCModels.is_vertical(mpcc):
-        mpcc = jl.MPCCModels.vertical_form(mpcc)
 
       if method == self.Method.RELAXATION:
         solver = jl.CCOpt.RelaxationSolver(mpcc, **kwargs)
@@ -132,7 +131,7 @@ class CcoptTrajOpt:
             bnlp_solver_kwargs=jl_kwargs,
         )
         tic = time.perf_counter()
-        stats = jl.CCOpt.crossover(mpcc, mpcc.nlp.meta.parent.x0, options)
+        stats = jl.CCOpt.crossover(mpcc, jl.MPCCModels.get_x0(mpcc), options)
 
     total_time = time.perf_counter() - tic
     info = {'total_time': total_time}
@@ -149,17 +148,7 @@ class CcoptTrajOpt:
 
     return np.asarray(xs_opt), np.asarray(us_opt), info
 
-  def _kwargs_to_namedtuple(self, kwargs):
-    jl = self._jl
-    kwargs_keys = tuple(jl.Symbol(key) for key in kwargs)
-    kwargs_values = tuple(kwargs.values())
-    jl.seval(
-        '_kwargs_to_namedtuple(keys, values) = '
-        'NamedTuple{keys}(values)'
-    )
-    return jl._kwargs_to_namedtuple(kwargs_keys, kwargs_values)
-
-  def _make_jl_mpcc(self, jl_nlp):
+  def _make_jl_mpcc(self, jl_nlp, convert_vertical_form: bool = True):
     nlp = self._nlp
     n_initial_eq, n_local_eq, n_local_ineq, _, _ = nlp.constraint_sizes
     n_local_constraints = n_local_eq + n_local_ineq
@@ -225,6 +214,9 @@ class CcoptTrajOpt:
       mpcc = jl.MPCCModels.MPCCModel(jl_nlp, jl_ind_cc1, jl_ind_cc2, cc_types)
       assert jl.MPCCModels.is_vertical(mpcc)
 
+    if convert_vertical_form and not jl.MPCCModels.is_vertical(mpcc):
+      mpcc = jl.MPCCModels.vertical_form(mpcc)
+
     return mpcc
 
   def _ensure_jl_packages(self, packages: tuple[str, ...]) -> None:
@@ -242,3 +234,13 @@ class CcoptTrajOpt:
         raise RuntimeError(
             f'Could not load or install Julia package(s): {names}.'
         ) from e
+
+  def _kwargs_to_namedtuple(self, kwargs):
+    jl = self._jl
+    kwargs_keys = tuple(jl.Symbol(key) for key in kwargs)
+    kwargs_values = tuple(kwargs.values())
+    jl.seval(
+        '_kwargs_to_namedtuple(keys, values) = '
+        'NamedTuple{keys}(values)'
+    )
+    return jl._kwargs_to_namedtuple(kwargs_keys, kwargs_values)

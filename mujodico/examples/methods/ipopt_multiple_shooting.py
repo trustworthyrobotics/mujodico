@@ -9,7 +9,7 @@ class IpoptMultipleShooting:
     self.transcription = methods.MultipleShootingTranscription(task)
 
     trans = self.transcription
-    self.solver = trajopt.IpoptTrajOpt(
+    self.solver = trajopt.IPOptTrajOpt(
         trans.N,
         trans.nx,
         trans.nu,

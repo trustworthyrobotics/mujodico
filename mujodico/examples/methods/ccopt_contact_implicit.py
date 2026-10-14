@@ -6,12 +6,12 @@ from mujodico.examples.tasks import Task
 
 class _CcoptContactImplicit:
 
-  def __init__(self, task: Task, method: trajopt.CcoptTrajOpt.Method):
+  def __init__(self, task: Task, method: trajopt.CCOptTrajOpt.Method):
     self.transcription = methods.ContactImplicitTranscription(task)
     self.method = method
 
     trans = self.transcription
-    self.solver = trajopt.CcoptTrajOpt(
+    self.solver = trajopt.CCOptTrajOpt(
         N=trans.N,
         nx=trans.nx,
         nu=trans.nw,
@@ -86,7 +86,7 @@ class CcoptRelaxationContactImplicit(_CcoptContactImplicit):
   def __init__(self, task: Task):
     super().__init__(
         task=task,
-        method=trajopt.CcoptTrajOpt.Method.RELAXATION,
+        method=trajopt.CCOptTrajOpt.Method.RELAXATION,
     )
 
 
@@ -94,7 +94,7 @@ class CcoptPenaltyContactImplicit(_CcoptContactImplicit):
   def __init__(self, task: Task):
     super().__init__(
         task=task,
-        method=trajopt.CcoptTrajOpt.Method.PENALTY,
+        method=trajopt.CCOptTrajOpt.Method.PENALTY,
     )
 
 
@@ -102,5 +102,5 @@ class CcoptCrossoverContactImplicit(_CcoptContactImplicit):
   def __init__(self, task: Task):
     super().__init__(
         task=task,
-        method=trajopt.CcoptTrajOpt.Method.CROSSOVER,
+        method=trajopt.CCOptTrajOpt.Method.CROSSOVER,
     )

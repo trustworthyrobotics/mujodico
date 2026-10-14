@@ -47,7 +47,7 @@ class IpoptRelaxationContactImplicit:
         smoothing = jp.maximum(smoothing * 0.1, 1e-8)
       return params[0], smoothing
 
-    self.solver = trajopt.IpoptTrajOpt(
+    self.solver = trajopt.IPOptTrajOpt(
         N=trans.N,
         nx=trans.nx,
         nu=trans.nw,
