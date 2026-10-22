@@ -89,11 +89,10 @@ def _main(argv) -> None:
   - solve time: {solve_time:.4f} sec
   - iterations: {iters}
 '''
-      visualizer.update(task, traj)
+      visualizer.add(task, traj)
 
-  if _TESTS.value == 1:
-    while True:
-      time.sleep(3600)
+  while True:
+    time.sleep(3600)
 
 
 if __name__ == '__main__':
