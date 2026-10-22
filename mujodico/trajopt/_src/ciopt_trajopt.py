@@ -107,7 +107,7 @@ class CIOptTrajOpt(CCOptTrajOpt):
     jl_nlp = nlp.to_nlpmodels_jl(vars_init)
 
     self._ensure_jl_packages(('CIOpt', 'MPCCModels'))
-    mpcc = self._make_jl_mpcc(jl_nlp)
+    mpcc = self._make_jl_mpcc(jl_nlp, convert_vertical_form=False)
 
     if method == self.Method.IMPACT:
       solver = jl.CIOpt.ImpactSolver(mpcc, **kwargs)
@@ -123,8 +123,7 @@ class CIOptTrajOpt(CCOptTrajOpt):
       except AttributeError:
         pass
 
-    # Ignore the vertical form variables in the solution.
-    vars_ops = np.asarray(stats.x)[:nlp.num_vars]
+    vars_ops = np.asarray(stats.z)
     xs_opt, us_opt = nlp._unpack(vars_ops)
 
     return np.asarray(xs_opt), np.asarray(us_opt), info

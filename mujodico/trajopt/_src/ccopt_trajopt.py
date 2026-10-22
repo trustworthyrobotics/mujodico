@@ -114,7 +114,7 @@ class CCOptTrajOpt:
       stats = jl.NLPModelsIpopt.ipopt(jl_nlp, **kwargs)
     else:
       self._ensure_jl_packages(('CCOpt', 'MPCCModels'))
-      mpcc = self._make_jl_mpcc(jl_nlp)
+      mpcc = self._make_jl_mpcc(jl_nlp, convert_vertical_form=True)
 
       if method == self.Method.RELAXATION:
         solver = jl.CCOpt.RelaxationSolver(mpcc, **kwargs)
@@ -148,7 +148,7 @@ class CCOptTrajOpt:
 
     return np.asarray(xs_opt), np.asarray(us_opt), info
 
-  def _make_jl_mpcc(self, jl_nlp, convert_vertical_form: bool = True):
+  def _make_jl_mpcc(self, jl_nlp, convert_vertical_form: bool):
     nlp = self._nlp
     n_initial_eq, n_local_eq, n_local_ineq, _, _ = nlp.constraint_sizes
     n_local_constraints = n_local_eq + n_local_ineq

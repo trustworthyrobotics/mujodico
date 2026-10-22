@@ -95,6 +95,6 @@ class ImpactContactImplicit(_CioptContactImplicit):
 
   def _convert_kwargs(self, **kwargs) -> dict:
     return {
-        'max_outer_iters': kwargs['iterations'],
+        'max_total_inner_iters': kwargs['iterations'],
         'print_level': 1 if kwargs['verbose'] else 0,
     }
