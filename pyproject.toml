@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name="mujodico"
-version = "3.15.0"
+version = "3.17.0"
 authors = [
     {name = "Wei-Chen Li", email = "williamrob104@gmail.com"},
 ]
@@ -31,14 +31,14 @@ dependencies = [
     "etils[epath]",
     "jax",
     "jaxlib",
-    "mujoco>=3.15.0.dev0",
+    "mujoco>=3.17.0.dev0",
     "scipy",
     "trimesh",
 ]
 
 [project.optional-dependencies]
 warp = [
-    "warp-lang==1.17.0",
+    "warp-lang==1.18.0",
 ]
 dev = [
     "isort",

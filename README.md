@@ -77,5 +77,6 @@ The `major.minor.micro` portion of the version number matches the version of MuJ
 ## License and Disclaimer
 
 MuJoDiCo is licensed under the Apache License, Version 2.0. You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0.
+MuJoDiCo is licensed under the Apache License, Version 2.0. You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0.
 
 This project includes code adapted from [MuJoCo](https://github.com/google-deepmind/mujoco), which is licensed under Apache License, Version 2.0. You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0.

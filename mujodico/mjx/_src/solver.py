@@ -418,8 +418,21 @@ def _update_gradient(m: Model, d: Data, ctx: Context) -> Context:
   return ctx
 
 
-def _rescale(m: Model, value: jax.Array) -> jax.Array:
-  return value / (m.stat.meaninertia * max(1, m.nv))
+def _trace_m(m: Model, d: Data) -> jax.Array:
+  if not isinstance(d._impl, DataJAX):
+    raise ValueError('_trace_m requires JAX backend implementation.')
+  if not m.nv:
+    return jp.array(mujoco.mjMINVAL)
+  trace = (
+      d._impl.M[m.M_rowadr + m.M_rownnz - 1].sum()
+      if support.is_sparse(m)
+      else jp.trace(d._impl.M)
+  )
+  return jp.maximum(mujoco.mjMINVAL, trace)
+
+
+def _rescale(m: Model, d: Data, value: jax.Array) -> jax.Array:
+  return value / _trace_m(m, d)
 
 
 def _linesearch(m: Model, d: Data, ctx: Context) -> Context:
@@ -440,7 +453,7 @@ def _linesearch(m: Model, d: Data, ctx: Context) -> Context:
   ):
     raise ValueError('_lineasearch requires JAX backend implementation.')
 
-  smag = math.norm(ctx.search) * m.stat.meaninertia * max(1, m.nv)
+  smag = math.norm(ctx.search) * _trace_m(m, d)
   gtol = m.opt.tolerance * m.opt.ls_tolerance * smag
 
   # compute Mv, Jv
@@ -484,12 +497,21 @@ def _linesearch(m: Model, d: Data, ctx: Context) -> Context:
   point_fn = lambda a: _LSPoint.create(
       m, d, ctx, a, jv, quad, quad_gauss, uu, v0, uv, vv  # pyrefly: ignore[bad-argument-type]
   )
+  # initialize interval
+  p0 = point_fn(jp.array(0.0))
+
+  # set acceptance tolerance to avoid exceeding gtol in f32: Cauchy-Schwarz
+  # bound on the derivative magnitude of the active constraint rows at alpha = 0
+  rows_0 = jp.maximum(p0.cost - quad_gauss[0], 0.0)
+  rows_2 = jp.maximum(0.5 * p0.deriv_1 - quad_gauss[2], 0.0)
+  dmag = 2.0 * jp.sqrt(rows_0 * rows_2) + jp.abs(quad_gauss[1])
+  gtol_accept = jp.maximum(gtol, 8 * jp.finfo(dmag.dtype).eps * dmag)
 
   def cond(ctx: _LSContext) -> jax.Array:
     done = ctx.ls_iter >= m.opt.ls_iterations
     done |= ~ctx.swap  # if we did not adjust the interval
-    done |= (ctx.lo.deriv_0 < 0) & (ctx.lo.deriv_0 > -gtol)
-    done |= (ctx.hi.deriv_0 > 0) & (ctx.hi.deriv_0 < gtol)
+    done |= (jp.abs(ctx.lo.deriv_0) < gtol_accept) & (ctx.lo.cost < p0.cost)
+    done |= (jp.abs(ctx.hi.deriv_0) < gtol_accept) & (ctx.hi.cost < p0.cost)
 
     return ~done
 
@@ -514,7 +536,11 @@ def _linesearch(m: Model, d: Data, ctx: Context) -> Context:
     lo = jax.tree_util.tree_map(
         lambda x, y: jp.where(swap_lo_hi_next, y, x), lo, hi_next
     )
-    swap_hi_next = in_bracket(hi.deriv_0, hi_next.deriv_0)
+    # also accept a Newton step that crosses the minimizer from an undershooting
+    # hi, turning the one-sided search into an opposite-sign bracket
+    swap_hi_next = in_bracket(hi.deriv_0, hi_next.deriv_0) | (
+        (hi.deriv_0 < 0) & (hi_next.deriv_0 > 0)
+    )
     hi = jax.tree_util.tree_map(
         lambda x, y: jp.where(swap_hi_next, y, x), hi, hi_next
     )
@@ -528,12 +554,21 @@ def _linesearch(m: Model, d: Data, ctx: Context) -> Context:
     )
     swap = swap_lo_next | swap_lo_mid | swap_lo_hi_next
     swap = swap | swap_hi_next | swap_hi_mid | swap_hi_lo_next
+
+    # accept the lowest-cost converged candidate regardless of derivative sign
+    cand = jax.tree_util.tree_map(lambda *x: jp.stack(x), lo_next, hi_next, mid)
+    converged = (jp.abs(cand.deriv_0) < gtol_accept) & (cand.cost < p0.cost)
+    best = jp.argmin(jp.where(converged, cand.cost, jp.inf))
+    best = jax.tree_util.tree_map(lambda x: x[best], cand)
+    done = converged.any()
+    lo = jax.tree_util.tree_map(lambda x, y: jp.where(done, y, x), lo, best)
+    hi = jax.tree_util.tree_map(lambda x, y: jp.where(done, y, x), hi, best)
+    swap = swap & ~done
+
     ctx = ctx.replace(lo=lo, hi=hi, swap=swap, ls_iter=ctx.ls_iter + 1)
 
     return ctx
 
-  # initialize interval
-  p0 = point_fn(jp.array(0.0))
   lo = point_fn(p0.alpha - p0.deriv_0 / p0.deriv_1)
   lesser_fn = lambda x, y: jp.where(lo.deriv_0 < p0.deriv_0, x, y)
   hi = jax.tree_util.tree_map(lesser_fn, p0, lo)
@@ -560,8 +595,8 @@ def solve(m: Model, d: Data) -> Data:
     raise ValueError('solve requires JAX backend implementation.')
 
   def cond(ctx: Context) -> jax.Array:
-    improvement = _rescale(m, ctx.prev_cost - ctx.cost)
-    gradient = _rescale(m, math.norm(ctx.grad))
+    improvement = _rescale(m, d, ctx.prev_cost - ctx.cost)
+    gradient = _rescale(m, d, math.norm(ctx.grad))
 
     done = ctx.solver_niter >= m.opt.iterations
     done |= improvement < m.opt.tolerance
