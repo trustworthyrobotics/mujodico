@@ -49,7 +49,6 @@ _CLS_MAP = {
     'Model': mjwarp.Model,
     'Data': mjwarp.Data,
     'Option': mjwarp.Option,
-    'Statistic': mjwarp.Statistic,
 }
 
 
@@ -266,7 +265,7 @@ def _write_class_in_file(
   new_class_def = ast.ClassDef(
       name=target_cls_name,
       bases=[ast.Name(id=target_base_name, ctx=ast.Load())],
-      body=new_body_ast,  # pytype: disable=wrong-arg-types
+      body=new_body_ast,  # pyrefly: ignore[bad-argument-type]
       decorator_list=[],
       keywords=[],
       type_params=[],
@@ -413,10 +412,10 @@ def write_core_cls(
     extra_annotations: dict[str, type] | None = None,
     defaults: Optional[Dict[str, Any]] = None,
 ):
-  """Writes a core API class (e.g. Model/Data/Option/Statistic)."""
+  """Writes a core API class (e.g. Model/Data/Option)."""
   cls = _CLS_MAP[cls_name]
 
-  annotations = dict(cls.__annotations__)  # pytype: disable=attribute-error
+  annotations = dict(cls.__annotations__)
   if flatten_fields:
     annotations = _get_annotations_recursive(annotations)
 
@@ -449,7 +448,7 @@ def write_core_cls(
     shape_property = _DATA_SHAPE_PROPERTY_FIELD
 
   new_class_body = _build_new_class_body_ast(
-      keys,  # pyrefly: ignore[bad-argument-type]
+      keys,
       cls_name,
       annotations,
       defaults=defaults,
@@ -562,7 +561,6 @@ def main(argv):
   write_nested_dataclass(target_fpath, mjwarp._src.types.TileSet)
   write_nested_dataclass(target_fpath, mjwarp._src.types.BlockDim)
 
-  write_core_cls('Statistic', target_fpath, mjx_types_fpath, set_diff=False)
   write_core_cls(
       'Option', target_fpath, mjx_types_fpath,
       extra_annotations={'graph_mode': GraphMode},

@@ -77,7 +77,7 @@ def _clean_type(type_: str):
       'vec8i',
       'vec10',
       'vec10f',
-      'vec11',
+      'vec12',
       'vec16',
       'vec16f',
       'vec16i',
@@ -196,7 +196,6 @@ def _global_assignments():
       ('_m', 'mjwarp.Model'),
       ('_d', 'mjwarp.Data'),
       ('_o', 'mjwarp.Option'),
-      ('_s', 'mjwarp.Statistic'),
       ('_c', 'mjwarp.Contact'),
       ('_e', 'mjwarp.Constraint'),
       ('_cb', 'mjwp_types.Callback'),
@@ -271,7 +270,7 @@ def _warp_function(
 
   token_args = []
   if field_usage.render_context_in_caller:
-    token_args.append('_jax_token: wp.array[int],')  # pyrefly: ignore[bad-argument-type]
+    token_args.append('_jax_token: wp.array[int],')
 
   fn_call = f'mjwarp.{fn_name}(_m, _d{render_context_call_arg})'
   fn_args_raw = fn_args_model + fn_args_data + token_args + render_context_args
@@ -325,7 +324,7 @@ def _jax_shim_fn(
     elif mjwarp_field_info[arg].param_source == 'Model':
       arg_jax = (
           arg.replace('__', '.')
-          if arg.startswith('opt') or arg.startswith('stat')
+          if arg.startswith('opt')
           else arg
       )
       public_field = arg.split('__')[0] in mjx_types.Model.__annotations__
@@ -443,7 +442,7 @@ def create_jax_warp_shim(
       fn_name, field_usage, mjwarp_field_info, mjx_warp_field_info
   )
   fn_args_raw_str = '\n'.join(['    ' + arg for arg in fn_args_raw])
-  warp_fn_args = [arg.split(':')[0] for arg in fn_args_raw if '#' not in arg]  # pytype: disable=attribute-error
+  warp_fn_args = [arg.split(':')[0] for arg in fn_args_raw if '#' not in arg]
 
   fn_assignments_str = '\n'.join(fn_assignments)
   src += f"""
@@ -451,7 +450,6 @@ def create_jax_warp_shim(
 def _{fn_name}_shim(
 {fn_args_raw_str}
 ):
-  _m.stat = _s
   _m.opt = _o
   _m.callback = _cb
   _d.efc = _e

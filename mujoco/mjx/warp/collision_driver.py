@@ -23,7 +23,6 @@ import mujoco.mjx.third_party.mujoco_warp as mjwarp
 from mujoco.mjx.third_party.mujoco_warp._src import types as mjwp_types
 import warp as wp
 
-
 _m = mjwarp.Model(
     **{f.name: None for f in dataclasses.fields(mjwarp.Model) if f.init}
 )
@@ -32,9 +31,6 @@ _d = mjwarp.Data(
 )
 _o = mjwarp.Option(
     **{f.name: None for f in dataclasses.fields(mjwarp.Option) if f.init}
-)
-_s = mjwarp.Statistic(
-    **{f.name: None for f in dataclasses.fields(mjwarp.Statistic) if f.init}
 )
 _c = mjwarp.Contact(
     **{f.name: None for f in dataclasses.fields(mjwarp.Contact) if f.init}
@@ -46,12 +42,12 @@ _cb = mjwp_types.Callback(
     **{f.name: None for f in dataclasses.fields(mjwp_types.Callback) if f.init}
 )
 
-
 @ffi.format_args_for_warp
 def _collision_shim(
     # Model
     nworld: int,
     block_dim: mjwp_types.BlockDim,
+    body_weldid: wp.array[int],
     flex_activelayers: wp.array[int],
     flex_conaffinity: wp.array[int],
     flex_condim: wp.array[int],
@@ -64,7 +60,9 @@ def _collision_shim(
     flex_elemlayer: wp.array[int],
     flex_friction: wp.array[wp.vec3],
     flex_gap: wp.array[float],
+    flex_interp: wp.array[int],
     flex_margin: wp.array[float],
+    flex_passive: wp.array[int],
     flex_priority: wp.array[int],
     flex_radius: wp.array[float],
     flex_selfcollide: wp.array[int],
@@ -95,7 +93,6 @@ def _collision_shim(
     geom_solref: wp.array2d[wp.vec2],
     geom_type: wp.array[int],
     has_1d_flex: bool,
-    has_2d_flex: bool,
     has_3d_flex: bool,
     has_ellipsoid_geom: bool,
     has_flex_selfcollide: bool,
@@ -132,6 +129,7 @@ def _collision_shim(
     nmesh: int,
     nmeshdegmax: int,
     nmeshface: int,
+    npair: int,
     npolygonmax: int,
     nxn_geom_pair_filtered: wp.array[wp.vec2i],
     nxn_pairid: wp.array[wp.vec2i],
@@ -143,6 +141,8 @@ def _collision_shim(
     pair_dim: wp.array[int],
     pair_friction: wp.array2d[mjwp_types.vec5],
     pair_gap: wp.array2d[float],
+    pair_geom1: wp.array[int],
+    pair_geom2: wp.array[int],
     pair_margin: wp.array2d[float],
     pair_solimp: wp.array2d[mjwp_types.vec5],
     pair_solref: wp.array2d[wp.vec2],
@@ -156,6 +156,7 @@ def _collision_shim(
     opt__disableflags: int,
     opt__enableflags: int,
     opt__graph_conditional: bool,
+    opt__integrator: int,
     opt__sdf_initpoints: int,
     opt__sdf_iterations: int,
     opt__warn_overflow: int,
@@ -190,12 +191,12 @@ def _collision_shim(
     contact__vert: wp.array[wp.vec2i],
     contact__worldid: wp.array[int],
 ):
-  _m.stat = _s
   _m.opt = _o
   _m.callback = _cb
   _d.efc = _e
   _d.contact = _c
   _m.block_dim = block_dim
+  _m.body_weldid = body_weldid
   _m.flex_activelayers = flex_activelayers
   _m.flex_conaffinity = flex_conaffinity
   _m.flex_condim = flex_condim
@@ -208,7 +209,9 @@ def _collision_shim(
   _m.flex_elemlayer = flex_elemlayer
   _m.flex_friction = flex_friction
   _m.flex_gap = flex_gap
+  _m.flex_interp = flex_interp
   _m.flex_margin = flex_margin
+  _m.flex_passive = flex_passive
   _m.flex_priority = flex_priority
   _m.flex_radius = flex_radius
   _m.flex_selfcollide = flex_selfcollide
@@ -239,7 +242,6 @@ def _collision_shim(
   _m.geom_solref = geom_solref
   _m.geom_type = geom_type
   _m.has_1d_flex = has_1d_flex
-  _m.has_2d_flex = has_2d_flex
   _m.has_3d_flex = has_3d_flex
   _m.has_ellipsoid_geom = has_ellipsoid_geom
   _m.has_flex_selfcollide = has_flex_selfcollide
@@ -276,6 +278,7 @@ def _collision_shim(
   _m.nmesh = nmesh
   _m.nmeshdegmax = nmeshdegmax
   _m.nmeshface = nmeshface
+  _m.npair = npair
   _m.npolygonmax = npolygonmax
   _m.nxn_geom_pair_filtered = nxn_geom_pair_filtered
   _m.nxn_pairid = nxn_pairid
@@ -290,6 +293,7 @@ def _collision_shim(
   _m.opt.disableflags = opt__disableflags
   _m.opt.enableflags = opt__enableflags
   _m.opt.graph_conditional = opt__graph_conditional
+  _m.opt.integrator = opt__integrator
   _m.opt.sdf_initpoints = opt__sdf_initpoints
   _m.opt.sdf_iterations = opt__sdf_iterations
   _m.opt.warn_overflow = opt__warn_overflow
@@ -297,6 +301,8 @@ def _collision_shim(
   _m.pair_dim = pair_dim
   _m.pair_friction = pair_friction
   _m.pair_gap = pair_gap
+  _m.pair_geom1 = pair_geom1
+  _m.pair_geom2 = pair_geom2
   _m.pair_margin = pair_margin
   _m.pair_solimp = pair_solimp
   _m.pair_solref = pair_solref
@@ -471,6 +477,7 @@ def _collision_jax_impl(m: types.Model, d: types.Data):
   out = jf(
       d.qpos.shape[0],
       m._impl.block_dim,
+      m.body_weldid,
       m._impl.flex_activelayers,
       m._impl.flex_conaffinity,
       m._impl.flex_condim,
@@ -483,7 +490,9 @@ def _collision_jax_impl(m: types.Model, d: types.Data):
       m._impl.flex_elemlayer,
       m._impl.flex_friction,
       m._impl.flex_gap,
+      m.flex_interp,
       m._impl.flex_margin,
+      m._impl.flex_passive,
       m._impl.flex_priority,
       m._impl.flex_radius,
       m._impl.flex_selfcollide,
@@ -514,7 +523,6 @@ def _collision_jax_impl(m: types.Model, d: types.Data):
       m.geom_solref,
       m.geom_type,
       m._impl.has_1d_flex,
-      m._impl.has_2d_flex,
       m._impl.has_3d_flex,
       m._impl.has_ellipsoid_geom,
       m._impl.has_flex_selfcollide,
@@ -551,6 +559,7 @@ def _collision_jax_impl(m: types.Model, d: types.Data):
       m.nmesh,
       m._impl.nmeshdegmax,
       m.nmeshface,
+      m.npair,
       m._impl.npolygonmax,
       m._impl.nxn_geom_pair_filtered,
       m._impl.nxn_pairid,
@@ -562,6 +571,8 @@ def _collision_jax_impl(m: types.Model, d: types.Data):
       m.pair_dim,
       m.pair_friction,
       m.pair_gap,
+      m.pair_geom1,
+      m.pair_geom2,
       m.pair_margin,
       m.pair_solimp,
       m.pair_solref,
@@ -575,6 +586,7 @@ def _collision_jax_impl(m: types.Model, d: types.Data):
       m.opt.disableflags,
       m.opt.enableflags,
       m.opt._impl.graph_conditional,
+      m.opt.integrator,
       m.opt._impl.sdf_initpoints,
       m.opt._impl.sdf_iterations,
       m.opt._impl.warn_overflow,
