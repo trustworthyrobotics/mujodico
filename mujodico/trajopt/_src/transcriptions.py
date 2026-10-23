@@ -148,6 +148,8 @@ def lifted_shooting_transcription(
 def contact_implicit_transcription(
     mjmodel: mujoco.MjModel,
     u_bounds: Bounds | None = None,
+    *,
+    contact_at_next_state: bool = True,
 ):
   """Builds a contact-implicit transcription.
 
@@ -160,10 +162,14 @@ def contact_implicit_transcription(
     mjmodel: MuJoCo model to transcribe.
     u_bounds: optional pair of lower and upper actuator control bounds.
               Defaults to unbounded controls.
+    contact_at_next_state: if True, contact laws use the next state supplied
+      by the optimizer. If False, they use the current state and the returned
+      inequality takes only ``(x, w)``.
 
   Returns:
     dynamics: ``dynamics(x, w)`` returns the next state.
-    local_inequality: constraint ``local_inequality(x, w, xnext) ≥ 0``.
+    inequality: ``local_inequality(x, w, xnext) ≥ 0`` by default, or
+      ``stage_inequality(x, w) ≥ 0`` when contact_at_next_state is False.
     local_complementarity: local complementarity constraints.
     w_bounds: pair of lower and upper bounds for ``w``.
   """
@@ -266,7 +272,12 @@ def contact_implicit_transcription(
   z_ub = np.full(nz, np.inf)
   w_bounds = (np.concatenate([u_lb, z_lb]), np.concatenate([u_ub, z_ub]))
 
-  return dynamics, local_inequality, local_complementarity, w_bounds
+  def stage_inequality(x: jax.Array, w: jax.Array) -> jax.Array:
+    return local_inequality(x, w, x)
+
+  inequality = local_inequality if contact_at_next_state else stage_inequality
+
+  return dynamics, inequality, local_complementarity, w_bounds
 
 
 @dataclass(frozen=True)

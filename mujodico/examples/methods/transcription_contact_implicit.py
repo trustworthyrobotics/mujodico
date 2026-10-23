@@ -6,15 +6,16 @@ from mujodico.examples.tasks import Task
 
 class ContactImplicitTranscription:
 
-  def __init__(self, task: Task):
+  def __init__(self, task: Task, *, contact_at_next_state: bool = True):
     (
         dynamics,
-        local_inequality,
+        inequality,
         local_complementarity,
         w_bounds,
     ) = trajopt.contact_implicit_transcription(
         mjmodel=task.model,
         u_bounds=task.u_bounds,
+        contact_at_next_state=contact_at_next_state,
     )
 
     def stage_cost(x, w, params):
@@ -28,7 +29,10 @@ class ContactImplicitTranscription:
       return util.state_cost(params.Qf, params.x_goal, x, task.quaternion_w_idxs)
 
     self.dynamics = dynamics
-    self.local_inequality = local_inequality
+    if contact_at_next_state:
+      self.local_inequality = inequality
+    else:
+      self.stage_inequality = inequality
     self.local_complementarity = local_complementarity
     self.stage_cost = stage_cost
     self.terminal_cost = terminal_cost

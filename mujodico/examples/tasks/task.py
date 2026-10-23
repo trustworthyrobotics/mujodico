@@ -65,7 +65,7 @@ class Task:
         continue
 
       # Only scalar joints have simple bounds
-      if m.jnt_type[j] in (
+      if int(m.jnt_type[j]) in (
           mujoco.mjtJoint.mjJNT_HINGE,
           mujoco.mjtJoint.mjJNT_SLIDE,
       ):
