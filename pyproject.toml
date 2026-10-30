@@ -50,8 +50,8 @@ mjx-testspeed = "mujodico.mjx.testspeed:main"
 mjx-viewer = "mujodico.mjx.viewer:main"
 
 [project.urls]
-Homepage = "https://github.com/wei-chen-li/mujodico"
-Repository = "https://github.com/wei-chen-li/mujodico"
+Homepage = "https://github.com/trustworthyrobotics/mujodico"
+Repository = "https://github.com/trustworthyrobotics/mujodico"
 
 [tool.isort]
 force_single_line = true

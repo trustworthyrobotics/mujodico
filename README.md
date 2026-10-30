@@ -13,14 +13,14 @@ pip install mujodico
 For local development, install from a checkout:
 
 ```sh
-git clone https://github.com/wei-chen-li/mujodico.git
+git clone https://github.com/trustworthyrobotics/mujodico.git
 cd mujodico
 pip install -e .
 ```
 
 ## Usage
 
-[MuJoDiCo](https://github.com/wei-chen-li/mujodico) is a drop-in replacement for [MuJoCo MJX](https://mujoco.readthedocs.io/en/stable/mjx.html) that provides differentiable contact dynamics. You can simply replace `from mujoco import mjx` with `from mujodico import mjx`. For example:
+[MuJoDiCo](https://github.com/trustworthyrobotics/mujodico) is a drop-in replacement for [MuJoCo MJX](https://mujoco.readthedocs.io/en/stable/mjx.html) that provides differentiable contact dynamics. You can simply replace `from mujoco import mjx` with `from mujodico import mjx`. For example:
 
 ```python
 import jax
