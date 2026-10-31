@@ -80,3 +80,6 @@ norecursedirs = [
 
 [tool.setuptools.packages.find]
 include = ["mujodico*"]
+
+[tool.setuptools.package-data]
+"mujodico.trajopt.ippas" = ["README.md", "NOTICE.md", "licenses/*.txt", "tests/fixtures/*.cpp", "tests/fixtures/*.md"]
