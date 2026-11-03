@@ -56,19 +56,19 @@ class ConicSolverTest(parameterized.TestCase):
   def setUp(self):
     super().setUp()
 
-    _float = jp.float32
+    jax.config.update("jax_enable_x64", True)
 
-    self.P = jp.array([[3, 1, -1], [1, 4, 2], [-1, 2, 5]], dtype=_float)
-    self.q = jp.array([1, 2, -3], dtype=_float)
+    self.P = jp.array([[3., 1., -1.], [1., 4., 2.], [-1., 2., 5.]])
+    self.q = jp.array([1., 2., -3.])
 
-    self.Aeq = jp.array([[1, 1, -1]], dtype=_float)
-    self.beq = jp.array([1], dtype=_float)
+    self.Aeq = jp.array([[1., 1., -1.]])
+    self.beq = jp.array([1.])
 
-    self.Aineq = jp.array([[0, 1, 0], [0, 0, 1]], dtype=_float)
-    self.bineq = jp.array([2, 2], dtype=_float)
+    self.Aineq = jp.array([[0., 1., 0.], [0., 0., 1.]])
+    self.bineq = jp.array([2., 2.])
 
-    self.Asoc = -jp.identity(3, dtype=_float)
-    self.bsoc = jp.array([0, 0, 0], dtype=_float)
+    self.Asoc = -jp.identity(3)
+    self.bsoc = jp.array([0., 0., 0.])
 
     self.solve = jax.jit(conic.solve, static_argnames="cones")
 
