@@ -1,5 +1,6 @@
 import dataclasses
 import functools
+import warnings
 
 import jax
 import jax.numpy as jp
@@ -657,6 +658,16 @@ def _solve_jvp(cones, primals, tangents):
   return (x, y, z, s), (dx, dy, dz, ds)
 
 
+@functools.cache
+def _warn_float32():
+  warnings.warn(
+      'conic_solver.solve is running with float64 disabled. For better '
+      'numerical stability, set jax.config.update("jax_enable_x64", True) '
+      'before creating the problem arrays.',
+      stacklevel=8,
+  )
+
+
 def solve(
     P: jax.Array,
     q: jax.Array,
@@ -680,6 +691,9 @@ def solve(
   Returns x, z, s
   where z is the dual of (A x + s = b).
   """
+
+  if not jax.config.x64_enabled:
+    _warn_float32()
 
   complementarities = (
       jp.array(complementarities)
