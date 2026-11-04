@@ -378,8 +378,8 @@ def _line_search(ctx: Context, dz: jax.Array, ds: jax.Array) -> jax.Array:
   i = 0
   for cone in ctx.cones:
     end = i + cone.dim
-    alpha = jp.minimum(alpha, cone._line_search(ctx.z[i:end], dz[i:end]))
-    alpha = jp.minimum(alpha, cone._line_search(ctx.s[i:end], ds[i:end]))
+    alpha = jp.minimum(alpha, 0.99 * cone._line_search(ctx.z[i:end], dz[i:end]))
+    alpha = jp.minimum(alpha, 0.99 * cone._line_search(ctx.s[i:end], ds[i:end]))
     i = end
 
   return alpha
@@ -593,7 +593,7 @@ def _solve_impl(
     )
 
     ctx, dx, dy, dz, ds = _solve_newton(ctx, -rx, -ry, -rz, bs)
-    alpha = _line_search(ctx, dz, ds) * 0.99
+    alpha = _line_search(ctx, dz, ds)
 
     x = ctx.x + alpha * dx
     y = ctx.y + alpha * dy
