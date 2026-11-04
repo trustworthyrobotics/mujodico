@@ -18,11 +18,11 @@ def _assert_eq(a, b, name):
       a, b, err_msg=err_msg, atol=_TOLERANCE, rtol=_TOLERANCE
   )
 
-
 def _assert_zero(a, name):
   _assert_eq(a, np.zeros(a.size), name)
 
 
+@staticmethod
 def _check_jacobians(P, q, A, b, cones, comps, jac_fun):
   check_jac_fun = (
       jax._src.test_util.check_jvp
@@ -36,17 +36,19 @@ def _check_jacobians(P, q, A, b, cones, comps, jac_fun):
   def f2(comps):
     return conic.solve(P, q, A, b, cones, comps)
 
-  check_jac_fun(f1, partial(jac_fun, f1), (P, q, A, b), eps=1e-3)
+  check_jac_fun(f1, partial(jac_fun, f1), (P, q, A, b), eps=1e-3,
+                atol=_TOLERANCE, rtol=_TOLERANCE)
 
   # only check jacobian with respect to μ when μ ≠ 0
   if comps is not None and jp.all(comps > 0):
-    check_jac_fun(f2, partial(jac_fun, f2), (comps,), eps=1e-3)
+    check_jac_fun(f2, partial(jac_fun, f2), (comps,), eps=1e-3,
+                  atol=_TOLERANCE, rtol=_TOLERANCE)
 
-
+@staticmethod
 def _check_jvp(P, q, A, b, cones, comps=None):
   _check_jacobians(P, q, A, b, cones, comps, jax.jvp)
 
-
+@staticmethod
 def _check_vjp(P, q, A, b, cones, comps=None):
   _check_jacobians(P, q, A, b, cones, comps, jax.vjp)
 
@@ -71,6 +73,9 @@ class ConicSolverTest(parameterized.TestCase):
     self.bsoc = jp.array([0., 0., 0.])
 
     self.solve = jax.jit(conic.solve, static_argnames="cones")
+
+  def _assert_in_soc(self, s, msg):
+    self.assertTrue(s[0] > jp.linalg.norm(s[1:]), msg)
 
   def test_equality_constrained_qp(self):
     P = self.P
@@ -133,6 +138,84 @@ class ConicSolverTest(parameterized.TestCase):
     self.assertTrue(np.all(s[:2] >= 0), "primal feasibility")
     self.assertTrue(np.all(z[:2] >= 0), "dual feasibility")
     _assert_eq((s * z)[:2], jp.array([mu1, mu2]), "complementarity")
+
+    _check_jvp(P, q, A, b, cones, comps)
+    _check_vjp(P, q, A, b, cones, comps)
+
+  @parameterized.parameters(0.0, 0.1)
+  def test_soc_constrained_socp(self, mu):
+    P = self.P
+    q = self.q
+    A = self.Asoc
+    b = self.bsoc
+    soc = conic.SecondOrderCone(3)
+    cones = (soc,)
+    comps = jp.array([mu])
+
+    x, z, s = self.solve(
+        P=P, q=q, A=A, b=b, cones=cones, complementarities=comps
+    )
+
+    _assert_zero(P @ x + q + A.T @ z, "stationarity")
+    _assert_zero(A @ x + s - b, "primal feasibility")
+    self._assert_in_soc(s, "primal feasibility")
+    self._assert_in_soc(z, "dual feasibility")
+    _assert_eq(soc._jordan_product(s, z), mu * soc.jordan_identity, "complementarity")
+
+    _check_jvp(P, q, A, b, cones, comps)
+    _check_vjp(P, q, A, b, cones, comps)
+
+  @parameterized.parameters(0.0, 0.1)
+  def test_soc_equality_constrained_socp(self, mu):
+    P = self.P
+    q = self.q
+    A = jp.vstack((self.Asoc, self.Aeq))
+    b = jp.concatenate((self.bsoc, self.beq))
+    soc = conic.SecondOrderCone(3)
+    cones = (soc, conic.ZeroCone(1))
+    comps = jp.array([mu, 0])
+
+    x, z, s = self.solve(
+        P=P, q=q, A=A, b=b, cones=cones, complementarities=comps
+    )
+
+    _assert_zero(P @ x + q + A.T @ z, "stationarity")
+    _assert_zero(A @ x + s - b, "primal feasibility")
+    _assert_zero(s[3], "primal feasibility")
+    self._assert_in_soc(s[:3], "primal feasibility")
+    self._assert_in_soc(z[:3], "dual feasibility")
+    _assert_eq(soc._jordan_product(s[:3], z[:3]), mu * soc.jordan_identity, "complementarity")
+
+    _check_jvp(P, q, A, b, cones, comps)
+    _check_vjp(P, q, A, b, cones, comps)
+
+  @parameterized.parameters((0.0, 0.0), (0.0, 0.1), (1.0, 0.0), (0.1, 0.1))
+  def test_soc_inequality_equality_constrained_socp(self, mu1, mu2):
+    P = self.P
+    q = self.q
+    A = jp.vstack((self.Asoc, self.Aineq, self.Aeq))
+    b = jp.concatenate((self.bsoc, self.bineq, self.beq))
+    soc = conic.SecondOrderCone(3)
+    cones = (
+        soc,
+        conic.NonNegativeCone(2),
+        conic.ZeroCone(1),
+    )
+    comps = jp.array([mu1, mu2, 0])
+
+    x, z, s = self.solve(
+        P=P, q=q, A=A, b=b, cones=cones, complementarities=comps
+    )
+
+    _assert_zero(P @ x + q + A.T @ z, "stationarity")
+    _assert_zero(A @ x + s - b, "primal feasibility")
+    _assert_zero(s[5], "primal feasibility")
+    self.assertTrue(np.all(s[3:5] >= 0), "primal feasibility")
+    self._assert_in_soc(s[:3], "primal feasibility")
+    self.assertTrue(np.all(z[3:5] >= 0), "dual feasibility")
+    self._assert_in_soc(z[:3], "dual feasibility")
+    _assert_eq((s[3:5] * z[3:5]), mu2 * jp.ones(2), "complementarity")
+    _assert_eq(soc._jordan_product(s[:3], z[:3]), mu1 * soc.jordan_identity, "complementarity")
 
     _check_jvp(P, q, A, b, cones, comps)
     _check_vjp(P, q, A, b, cones, comps)
