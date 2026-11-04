@@ -128,9 +128,6 @@ class SecondOrderCone:
 
   def _line_search(self, s: jax.Array, ds: jax.Array) -> jax.Array:
     """[cvxopt, sec 8.2]"""
-
-    # Map s to the Jordan identity. The eigenvalues of the transformed
-    # direction are rho[0] ± ||rho[1:]||, so its smaller eigenvalue bounds α.
     norm = self._norm(s)
     sn = s / norm
     inner = sn[0] * ds[0] - jp.dot(sn[1:], ds[1:])
@@ -143,20 +140,21 @@ class SecondOrderCone:
       self, s: jax.Array, z: jax.Array
   ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """[cvxopt, sec 4.2]"""
-    assert s.size == self.dim
-    assert z.size == self.dim
+    reflection = jp.ones_like(s).at[1:].set(-1.0)
+    J = jp.diag(reflection)
+    identity = jp.zeros_like(s).at[0].set(1.0)
+
     s_norm, z_norm = self._norm(s), self._norm(z)
     sn, zn = s / s_norm, z / z_norm
-    reflection = jp.ones_like(s).at[1:].set(-1.0)
-    identity = jp.zeros_like(s).at[0].set(1.0)
 
     w = (sn + reflection * zn) / jp.sqrt(2.0 * (1.0 + jp.dot(sn, zn)))
     v = (w + identity) / jp.sqrt(2.0 * (w[0] + 1.0))
+
     beta = jp.sqrt(s_norm / z_norm)
-    J = jp.diag(reflection)
     W = beta * (2.0 * jp.outer(v, v) - J)
     Jv = reflection * v
     Winv = (2.0 * jp.outer(Jv, Jv) - J) / beta
+
     return W, Winv, W @ z
 
   def _update_scaling(
@@ -166,29 +164,41 @@ class SecondOrderCone:
       s_scaled: jax.Array,
       z_scaled: jax.Array,
   ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """[cvxopt, sec 9.2]"""
-    T, Tinv, lmbda = self._compute_scaling(s_scaled, z_scaled)
-    return T @ W, Winv @ Tinv, lmbda
+    """[cvxopt, sec 9.2]."""
+    reflection = jp.ones_like(s_scaled).at[1:].set(-1.0)
+    J = jp.diag(reflection)
+    identity = jp.zeros_like(s_scaled).at[0].set(1.0)
+
+    s_norm, z_norm = self._norm(s_scaled), self._norm(z_scaled)
+    sn, zn = s_scaled / s_norm, z_scaled / z_norm
+    gamma = jp.sqrt((1.0 + jp.dot(sn, zn)) / 2.0)
+    q = (sn + reflection * zn) / (2.0 * gamma)  # q̅
+
+    beta = jp.sqrt(W[0, 0] / Winv[0, 0])  # √wᵀJw
+    W_normalized = W / beta
+    w = W_normalized.T @ q  # (2vvᵀ - J) q̅
+    beta = beta * jp.sqrt(s_norm / z_norm)  # √(w⁺)ᵀJw⁺
+    v = (w + identity) / jp.sqrt(2.0 * (w[0] + 1.0))
+
+    W_new = beta * (2.0 * jp.outer(v, v) - J)
+    Jv = reflection * v
+    Winv_new = (2.0 * jp.outer(Jv, Jv) - J) / beta
+
+    u = sn - reflection * zn
+    d = jp.dot(W_normalized[0, :], u) / (2.0 * (w[0] + 1.0))
+    lmbda = W_normalized.T @ (
+        0.5 * (1.0 - d / gamma) * sn - 0.5 * (1.0 + d / gamma) * reflection * zn
+    )
+    lmbda = jp.sqrt(s_norm * z_norm) * lmbda.at[0].set(gamma)
+    return W_new, Winv_new, lmbda
 
 
 @functools.partial(
     jax.tree_util.register_dataclass,
     data_fields=[
-        'P',
-        'q',
-        'A',
-        'b',
-        'G',
-        'h',
-        'comps',
-        'x',
-        'y',
-        'z',
-        's',
-        'W',
-        'Winv',
-        'lmbda',
-        'lu_kkt',
+        'P', 'q', 'A', 'b', 'G', 'h', 'comps',
+        'x', 'y', 'z', 's',
+        'W', 'Winv', 'lmbda', 'lu_kkt',
     ],
     meta_fields=['cones', 'dim', 'iterations', 'tolerance'],
 )

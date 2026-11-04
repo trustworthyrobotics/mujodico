@@ -74,6 +74,9 @@ class ConicSolverTest(parameterized.TestCase):
 
     self.solve = jax.jit(conic.solve, static_argnames="cones")
 
+  def _assert_in_soc(self, s, msg):
+    self.assertTrue(s[0] > jp.linalg.norm(s[1:]), msg)
+
   def test_equality_constrained_qp(self):
     P = self.P
     q = self.q
@@ -138,9 +141,6 @@ class ConicSolverTest(parameterized.TestCase):
 
     _check_jvp(P, q, A, b, cones, comps)
     _check_vjp(P, q, A, b, cones, comps)
-
-  def _assert_in_soc(self, s, msg):
-    self.assertTrue(s[0] > 0 and s[0]**2 - jp.dot(s[1:], s[1:]) > 0, msg)
 
   @parameterized.parameters(0.0, 0.1)
   def test_soc_constrained_socp(self, mu):
