@@ -1,3 +1,17 @@
+"""
+Author: Wei-Chen Li
+
+Solves the conic program
+  minimize    ½ xᵀ P x + qᵀ x
+  subject to  A x + s = b
+              s ∈ 𝒦
+cones are either zero cone, non-negative cone or second-order cone.
+
+References
+[cvxopt] The CVXOPT linear and quadratic cone program solver. Available at
+         https://www.seas.ucla.edu/~vandenbe/publications/coneprog.pdf
+"""
+
 import dataclasses
 import functools
 import warnings
@@ -32,19 +46,38 @@ class NonNegativeCone:
     return jp.ones(self.dim)
 
   def _jordan_product(self, s: jax.Array, z: jax.Array) -> jax.Array:
-    assert s.size == self.dim
-    assert z.size == self.dim
     return s * z
 
   def _inverse_jordan_product(self, u: jax.Array, v: jax.Array) -> jax.Array:
-    assert u.size == self.dim
-    assert v.size == self.dim
     return v / u
 
+  def _project(self, s: jax.Array, margin: float) -> jax.Array:
+    """[cvxopt, sec 5.3]"""
+    return s + jp.maximum(0.0, margin - jp.min(s))
+
   def _line_search(self, s: jax.Array, ds: jax.Array) -> jax.Array:
-    assert s.size == self.dim
-    assert ds.size == self.dim
+    """[cvxopt, sec 8.1]"""
     return 1.0 / jp.maximum(jp.max(-ds / s), 0.0)
+
+  def _compute_scaling(
+      self, s: jax.Array, z: jax.Array
+  ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """[cvxopt, sec 4.1]"""
+    w = jp.sqrt(s / z)
+    return jp.diag(w), jp.diag(1.0 / w), jp.sqrt(s * z)
+
+  def _update_scaling(
+      self,
+      W: jax.Array,
+      Winv: jax.Array,
+      s_scaled: jax.Array,
+      z_scaled: jax.Array,
+  ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """[cvxopt, sec 9.1]"""
+    s_sqrt = jp.sqrt(s_scaled)
+    z_sqrt = jp.sqrt(z_scaled)
+    w = s_sqrt / z_sqrt * jp.diag(W)
+    return jp.diag(w), jp.diag(1.0 / w), s_sqrt * z_sqrt
 
 
 @dataclasses.dataclass(frozen=True)
@@ -63,32 +96,79 @@ class SecondOrderCone:
   def jordan_identity(self):
     return jp.zeros(self.dim).at[0].set(1.0)
 
+  @staticmethod
+  def _norm(s: jax.Array) -> jax.Array:
+    """Lorentz norm of a vector in the interior of a second-order cone."""
+    tail_norm = jp.linalg.norm(s[1:])
+    determinant = (s[0] - tail_norm) * (s[0] + tail_norm)
+    return jp.sqrt(jp.maximum(determinant, jp.finfo(s.dtype).tiny))
+
   def _jordan_product(self, s: jax.Array, z: jax.Array) -> jax.Array:
-    assert s.size == self.dim
-    assert z.size == self.dim
     return jp.concatenate((
-      jp.sum(s * z, keepdims=True),
-      s[0] * z[1:] + z[0] * s[1:]
+        jp.sum(s * z, keepdims=True),
+        s[0] * z[1:] + z[0] * s[1:]
     ))
 
   def _inverse_jordan_product(self, u: jax.Array, v: jax.Array) -> jax.Array:
-    assert u.size == self.dim
-    assert v.size == self.dim
-
+    """[cvxopt, sec 5.4]"""
     u0, u1 = u[0], u[1:]
     v0, v1 = v[0], v[1:]
 
-    det = u0 * u0 - jp.dot(u1, u1)
+    det_u = self._norm(u) ** 2
 
     r0 = u0 * v0 - jp.dot(u1, v1)
-    r1 = -u1 * v0 + ((det * v1) + (u1 * jp.dot(u1, v1))) / u0
+    r1 = -u1 * v0 + ((det_u * v1) + (u1 * jp.dot(u1, v1))) / u0
 
-    return jp.concatenate((jp.array([r0]), r1)) / det
+    return jp.concatenate((jp.array([r0]), r1)) / det_u
+
+  def _project(self, s: jax.Array, margin: float) -> jax.Array:
+    """[cvxopt, sec 5.3]"""
+    shift = jp.maximum(0.0, margin + jp.linalg.norm(s[1:]) - s[0])
+    return s.at[0].add(shift)
 
   def _line_search(self, s: jax.Array, ds: jax.Array) -> jax.Array:
+    """[cvxopt, sec 8.2]"""
+
+    # Map s to the Jordan identity. The eigenvalues of the transformed
+    # direction are rho[0] ± ||rho[1:]||, so its smaller eigenvalue bounds α.
+    norm = self._norm(s)
+    sn = s / norm
+    inner = sn[0] * ds[0] - jp.dot(sn[1:], ds[1:])
+    rho0 = inner / norm
+    rho1 = (ds[1:] - (inner + ds[0]) / (sn[0] + 1.0) * sn[1:]) / norm
+    bound = 1.0 / jp.maximum(jp.linalg.norm(rho1) - rho0, 0.0)
+    return jp.where(ds[0] >= jp.linalg.norm(ds[1:]), jp.inf, bound)
+
+  def _compute_scaling(
+      self, s: jax.Array, z: jax.Array
+  ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """[cvxopt, sec 4.2]"""
     assert s.size == self.dim
-    assert ds.size == self.dim
-    raise NotImplementedError()
+    assert z.size == self.dim
+    s_norm, z_norm = self._norm(s), self._norm(z)
+    sn, zn = s / s_norm, z / z_norm
+    reflection = jp.ones_like(s).at[1:].set(-1.0)
+    identity = jp.zeros_like(s).at[0].set(1.0)
+
+    w = (sn + reflection * zn) / jp.sqrt(2.0 * (1.0 + jp.dot(sn, zn)))
+    v = (w + identity) / jp.sqrt(2.0 * (w[0] + 1.0))
+    beta = jp.sqrt(s_norm / z_norm)
+    J = jp.diag(reflection)
+    W = beta * (2.0 * jp.outer(v, v) - J)
+    Jv = reflection * v
+    Winv = (2.0 * jp.outer(Jv, Jv) - J) / beta
+    return W, Winv, W @ z
+
+  def _update_scaling(
+      self,
+      W: jax.Array,
+      Winv: jax.Array,
+      s_scaled: jax.Array,
+      z_scaled: jax.Array,
+  ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """[cvxopt, sec 9.2]"""
+    T, Tinv, lmbda = self._compute_scaling(s_scaled, z_scaled)
+    return T @ W, Winv @ Tinv, lmbda
 
 
 @functools.partial(
@@ -108,10 +188,9 @@ class SecondOrderCone:
         'W',
         'Winv',
         'lmbda',
-        'chol_Q',
-        'chol_S',
+        'lu_kkt',
     ],
-    meta_fields=['cones', 'dim', 'iterations', 'tolerance', '_EPS'],
+    meta_fields=['cones', 'dim', 'iterations', 'tolerance'],
 )
 @dataclasses.dataclass(frozen=True)
 class Context:
@@ -133,9 +212,7 @@ class Context:
   dim: int
   iterations: int
   tolerance: float
-  chol_Q: tuple[jax.Array, jax.Array] | None = None
-  chol_S: tuple[jax.Array, jax.Array] | None = None
-  _EPS: float = 1e-8  # numerical noise floor
+  lu_kkt: tuple[jax.Array, jax.Array] | None = None
 
   _ALLOWED_FIELDS = frozenset({
       'x',
@@ -145,8 +222,7 @@ class Context:
       'W',
       'Winv',
       'lmbda',
-      'chol_Q',
-      'chol_S',
+      'lu_kkt',
   })
 
   def replace(self, **kwargs):
@@ -157,7 +233,7 @@ class Context:
 
 
 def _initialize(**kwargs) -> Context:
-  """Initializes the context from problem parameters."""
+  """Initializes the context from problem parameters. [cvxopt, sec 5.3]"""
 
   dim = sum([cone.dim for cone in kwargs['cones']])
   W = jp.eye(dim)
@@ -192,11 +268,14 @@ def _initialize(**kwargs) -> Context:
     s = ctx.h - ctx.G @ ctx.x
     ctx = ctx.replace(s=s)
 
-  if dim:
-    # TODO(wei-chen): Implement for second-order cone
-    z = ctx.z + jp.maximum(0, -jp.min(ctx.z) + 1)
-    s = ctx.s + jp.maximum(0, -jp.min(ctx.s) + 1)
-    ctx = ctx.replace(z=z, s=s)
+  z, s = ctx.z, ctx.s
+  i = 0
+  for cone in ctx.cones:
+    end = i + cone.dim
+    z = z.at[i:end].set(cone._project(z[i:end], margin=1.0))
+    s = s.at[i:end].set(cone._project(s[i:end], margin=1.0))
+    i = end
+  ctx = ctx.replace(z=z, s=s)
 
   ctx = _compute_scaling(ctx)
 
@@ -204,7 +283,7 @@ def _initialize(**kwargs) -> Context:
 
 
 def _compute_scaling(ctx: Context) -> Context:
-  """Compute W so that W z = W⁻ᵀ s = ."""
+  """Compute W so that W z = W⁻ᵀ s = λ. [cvxopt, sec 4]"""
 
   W, Winv, lmbda = ctx.W, ctx.Winv, ctx.lmbda
 
@@ -212,23 +291,14 @@ def _compute_scaling(ctx: Context) -> Context:
   for cone in ctx.cones:
     end = i + cone.dim
 
-    sk = ctx.s[i:end]
-    zk = ctx.z[i:end]
-
-    if isinstance(cone, NonNegativeCone):
-      wk = jp.sqrt(sk / zk)
-      lmbdak = jp.sqrt(sk * zk)
-
-      W = W.at[i:end, i:end].set(jp.diag(wk))
-      Winv = Winv.at[i:end, i:end].set(jp.diag(1.0 / wk))
-      lmbda = lmbda.at[i:end].set(lmbdak)
-
-    elif isinstance(cone, SecondOrderCone):
-      raise NotImplementedError()
+    Wk, Wkinv, lmbdak = cone._compute_scaling(ctx.s[i:end], ctx.z[i:end])
+    W = W.at[i:end, i:end].set(Wk)
+    Winv = Winv.at[i:end, i:end].set(Wkinv)
+    lmbda = lmbda.at[i:end].set(lmbdak)
 
     i = end
 
-  ctx = ctx.replace(W=W, Winv=Winv, lmbda=lmbda, chol_Q=None, chol_S=None)
+  ctx = ctx.replace(W=W, Winv=Winv, lmbda=lmbda, lu_kkt=None)
 
   return ctx
 
@@ -236,7 +306,7 @@ def _compute_scaling(ctx: Context) -> Context:
 def _update_scaling(
     ctx: Context, dz: jax.Array, ds: jax.Array, alpha: jax.Array
 ) -> Context:
-  """Update W and λ so that W z = W⁻ᵀ s = λ."""
+  """Update W and λ so that W (z + α dz) = W⁻ᵀ (s + α ds) = λ. [cvxopt, sec 9]"""
 
   W, Winv, lmbda = ctx.W, ctx.Winv, ctx.lmbda
 
@@ -247,24 +317,17 @@ def _update_scaling(
     Wk = W[i:end, i:end]
     Wkinv = Winv[i:end, i:end]
 
-    if isinstance(cone, NonNegativeCone):
-      sk_scaled = ctx.lmbda[i:end] + alpha * (Wkinv.T @ ds[i:end])
-      zk_scaled = ctx.lmbda[i:end] + alpha * (Wk @ dz[i:end])
-      sk_scaled_sqrt = jp.sqrt(jp.maximum(sk_scaled, ctx._EPS))
-      zk_scaled_sqrt = jp.sqrt(jp.maximum(zk_scaled, ctx._EPS))
-      wk = sk_scaled_sqrt / zk_scaled_sqrt * jp.diag(Wk)
-      lmbdak = sk_scaled_sqrt * zk_scaled_sqrt
+    sk_scaled = ctx.lmbda[i:end] + alpha * (Wkinv.T @ ds[i:end])
+    zk_scaled = ctx.lmbda[i:end] + alpha * (Wk @ dz[i:end])
 
-      W = W.at[i:end, i:end].set(jp.diag(wk))
-      Winv = Winv.at[i:end, i:end].set(jp.diag(1.0 / wk))
-      lmbda = lmbda.at[i:end].set(lmbdak)
-
-    elif isinstance(cone, SecondOrderCone):
-      raise NotImplementedError()
+    Wk, Wkinv, lmbdak = cone._update_scaling(Wk, Wkinv, sk_scaled, zk_scaled)
+    W = W.at[i:end, i:end].set(Wk)
+    Winv = Winv.at[i:end, i:end].set(Wkinv)
+    lmbda = lmbda.at[i:end].set(lmbdak)
 
     i = end
 
-  ctx = ctx.replace(W=W, Winv=Winv, lmbda=lmbda, chol_Q=None, chol_S=None)
+  ctx = ctx.replace(W=W, Winv=Winv, lmbda=lmbda, lu_kkt=None)
 
   return ctx
 
@@ -309,7 +372,7 @@ def _inverse_jordan_product(cones, u: jax.Array, v: jax.Array) -> jax.Array:
 
 
 def _line_search(ctx: Context, dz: jax.Array, ds: jax.Array) -> jax.Array:
-  """Computes α so that z + α Δz ∈ 𝒦 and s + α Δs ∈ 𝒦."""
+  """Computes maximum α so that z + α Δz ∈ 𝒦 and s + α Δs ∈ 𝒦. [cvxopt, sec 8]"""
   alpha = jp.ones(1)
 
   i = 0
@@ -343,7 +406,8 @@ def _optimality_conditions(
 def _residual(
     ctx: Context,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-  return _optimality_conditions(
+  """Returns the KKT residual."""
+  rx, ry, rz, _ = _optimality_conditions(
       ctx.P,
       ctx.q,
       ctx.A,
@@ -357,67 +421,61 @@ def _residual(
       ctx.z,
       ctx.s,
   )
+  # For SOC blocks, λ ∘ λ generally differs from the raw product s ∘ z
+  rs = _jordan_product(ctx.cones, ctx.lmbda, ctx.lmbda) - _mu_e(ctx.cones, ctx.comps)
+  return rx, ry, rz, rs
 
 
 def _solve_kkt(
-    ctx: Context, bx: jax.Array, by: jax.Array, bz: jax.Array
+    ctx: Context, bx: jax.Array, by: jax.Array, bz: jax.Array,
+    iterative_refinements: int = 2,
 ) -> tuple[Context, jax.Array, jax.Array, jax.Array]:
-  """
-  Solves the KKT system:
+  """Solves the KKT system using its augmented scaled form.
+
+  The original equations are:
     P x + Aᵀ y + Gᵀ z = bx
     A x               = by
-    G x        -WᵀW x = bz
+    G x        -WᵀW z = bz
+
+  With u = W z and Gs = W⁻ᵀ G, the linear system is:
+    P  x + Aᵀ x + Gsᵀ u = bx
+    A  x                = by
+    Gs x        -  I  u = W⁻ᵀ bz
+
+  Returns the updated context (caches the LU decomposition) and x, y, z.
   """
+  n, neq, dim = ctx.q.size, ctx.b.size, ctx.dim
+  dtype = bx.dtype
 
-  def _robust_cho_factor(Q, reg=ctx._EPS * 100):
-    d = 1.0 / jp.sqrt(jp.maximum(jp.diag(Q), ctx._EPS))
-    Q = d[:, None] * Q * d[None, :]
-    delta = reg * jp.max(jp.diag(Q)) if Q.size else 0.0
-    Q = Q + delta * jp.eye(Q.shape[0], dtype=Q.dtype)
-    chol, _ = jax.scipy.linalg.cho_factor(Q)
-    return chol, d
+  Gs = ctx.Winv.T @ ctx.G
 
-  def _robust_cho_solve(chol_d, r):
-    chol, d = chol_d
-    d = d.reshape((-1,) + (1,) * (r.ndim - d.ndim))
-    r = d * r
-    y = jax.scipy.linalg.cho_solve((chol, False), r)
-    x = d * y
-    return x
+  kkt = jp.block([
+      [ctx.P, ctx.A.T, Gs.T],
+      [
+          ctx.A,
+          jp.zeros((neq, neq), dtype=dtype),
+          jp.zeros((neq, dim), dtype=dtype),
+      ],
+      [
+          Gs,
+          jp.zeros((dim, neq), dtype=dtype),
+          -jp.eye(dim, dtype=dtype),
+      ],
+  ])
 
-  P = ctx.P
-  A = ctx.A
-  G = ctx.G
-  Winv = ctx.Winv
+  lu_kkt = ctx.lu_kkt
+  if lu_kkt is None:
+    lu_kkt = jax.scipy.linalg.lu_factor(kkt)
+    ctx = ctx.replace(lu_kkt=lu_kkt)
 
-  WTW_inv = Winv @ Winv.T
+  rhs = jp.concatenate((bx, by, ctx.Winv.T @ bz))
+  solution = jax.scipy.linalg.lu_solve(lu_kkt, rhs)
+  for _ in range(iterative_refinements):
+    residual = rhs - kkt @ solution
+    solution += jax.scipy.linalg.lu_solve(lu_kkt, residual)
 
-  chol_Q = ctx.chol_Q
-  if chol_Q is None:
-    Q = P + G.T @ WTW_inv @ G
-    chol_Q = _robust_cho_factor(Q)
-
-  def Q_solve(rhs):
-    return _robust_cho_solve(chol_Q, rhs)
-
-  rhs_x = bx + G.T @ WTW_inv @ bz
-
-  chol_S = ctx.chol_S
-  if chol_S is None:
-    S = A @ Q_solve(A.T)
-    chol_S = _robust_cho_factor(S)
-
-  rhs_y = A @ Q_solve(rhs_x) - by
-  y = _robust_cho_solve(chol_S, rhs_y)
-
-  x = Q_solve(rhs_x - A.T @ y)
-
-  z = WTW_inv @ (G @ x - bz)
-
-  if ctx.chol_Q is None or ctx.chol_S is None:
-    ctx = ctx.replace(chol_Q=chol_Q, chol_S=chol_S)
-
-  return ctx, x, y, z
+  x, y, u = jp.split(solution, (n, n + neq))
+  return ctx, x, y, ctx.Winv @ u
 
 
 def _solve_newton(
@@ -433,46 +491,45 @@ def _solve_newton(
 
   WT_lmbdainv_bs = ctx.W.T @ _inverse_jordan_product(ctx.cones, ctx.lmbda, bs)
   ctx, x, y, z = _solve_kkt(ctx, bx, by, bz - WT_lmbdainv_bs)
-  s = WT_lmbdainv_bs - ctx.W.T @ ctx.W @ z
+  s = bz - ctx.G @ x
   return ctx, x, y, z, s
 
 
 def _corrector_mu_e(
     ctx: Context, ds: jax.Array, dz: jax.Array, alpha: jax.Array
 ) -> jax.Array:
-  result = jp.zeros(ctx.dim)
+  """Computes the σ μ̂ e quantity in [cvxopt, eq. 19].
+  Adapted because the target mu is user specified and not necessarily zero."""
+  result = []
 
   i = 0
   for cone, comp in zip(ctx.cones, ctx.comps):
     end = i + cone.dim
 
+    sk = ctx.s[i:end]
+    zk = ctx.z[i:end]
+    sk_pred = sk + alpha * ds[i:end]
+    zk_pred = zk + alpha * dz[i:end]
+
     if isinstance(cone, NonNegativeCone):
-      mu0 = ctx.s[i:end] * ctx.z[i:end]
-      mu1 = (ctx.s[i:end] + alpha * ds[i:end]) * (
-          ctx.z[i:end] + alpha * dz[i:end]
-      )
+      mu0 = sk * zk
+      mu1 = sk_pred * zk_pred
     else:
-      mu0 = jp.dot(ctx.s[i:end], ctx.z[i:end]) / cone.deg
-      mu1 = (
-          jp.dot(
-              ctx.s[i:end] + alpha * ds[i:end], ctx.z[i:end] + alpha * dz[i:end]
-          )
-          / cone.deg
-      )
+      mu0 = jp.dot(sk, zk) / cone.deg
+      mu1 = jp.dot(sk_pred, zk_pred) / cone.deg
     mu_target = comp
 
-    rho = jp.abs(mu1 - mu_target) / jp.maximum(
-        jp.abs(mu0 - mu_target), ctx._EPS
-    )
-    sigma = jp.clip(rho, 0.0, 1.0) ** 3
+    rho = jp.abs(mu1 - mu_target) / jp.maximum(jp.abs(mu0 - mu_target), jp.finfo(ds.dtype).tiny)
 
-    result = result.at[i:end].set(
-        sigma * (mu1 - mu_target) * cone.jordan_identity
-    )
+    # if mu1 is closer to mu_target than mu0, sigma is close to 0.
+    # if mu0 is closer to mu_target than mu1, sigma is close to 1.
+    sigma = jp.clip(rho**3, 0.1, 1.0)
+
+    result.append((sigma * mu0 + (1 - sigma) * mu_target) * cone.jordan_identity)
 
     i = end
 
-  return result
+  return jp.concatenate(result) if result else jp.zeros(0)
 
 
 def _solve_impl(
@@ -492,7 +549,7 @@ def _solve_impl(
     iterations: int = 100,
     tolerance: float = 1e-8,
 ) -> Context:
-  """See :func:`_solve`"""
+  """Implements the algorithm in [cvxopt, sec 5.1]"""
 
   ctx = _initialize(
       P=P,
@@ -530,7 +587,7 @@ def _solve_impl(
     alpha = _line_search(ctx, dz, ds)
 
     bs = (
-        -rs
+        - _jordan_product(ctx.cones, ctx.lmbda, ctx.lmbda)
         - _jordan_product(ctx.cones, ctx.Winv.T @ ds, ctx.W @ dz)
         + _corrector_mu_e(ctx, ds, dz, alpha)
     )
@@ -609,9 +666,9 @@ def _solve_jvp(cones, primals, tangents):
   """
   Solve the primal as :func:`_solve` and computes tangents via:
     P dx + Aᵀ dy + Gᵀ dz = -(dP x + dAᵀ y + dGᵀ z + dq)
-    A dx                 = -db
-    G dx            + ds = -dh
-     λ ∘ (W dz + W⁻ᵀ ds) = 0
+    A dx                 = db - dA x
+    G dx            + ds = dh - dG x
+    λ ∘ (W dz + W⁻ᵀ ds) = dμ e
   """
 
   (
