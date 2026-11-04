@@ -15,6 +15,9 @@ from mujodico.trajopt._src.fatrop_ref import FatropReferenceJAX
 class IppasLiftedMultipleShooting:
 
   def __init__(self, task: Task, *, gauss_newton: bool = True):
+    # TODO(wei-chen): Remove this smoothing change after IPPAS is stable.
+    object.__setattr__(task, "contact_smoothing", task.contact_smoothing * 10)
+
     self.transcription = methods.LiftedMultipleShootingTranscription(task)
     self.hessian_mode = 'cost' if gauss_newton else 'exact_lagrangian'
     self.solver = self._make_solver()
