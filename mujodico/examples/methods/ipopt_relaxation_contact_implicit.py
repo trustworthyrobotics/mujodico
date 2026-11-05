@@ -51,7 +51,7 @@ class IpoptRelaxationContactImplicit:
         N=trans.N,
         nx=trans.nx,
         nu=trans.nw,
-        stage_cost=lambda x, w, params: trans.stage_cost(x, w, params[0]),
+        local_cost=lambda x, w, xnext, params: trans.stage_cost(x, w, params[0]),
         terminal_cost=lambda x, params: trans.terminal_cost(x, params[0]),
         initial_equality_constraint=lambda x, params: x - params[0].x_0,
         local_equality_constraint=local_equality_constraint,

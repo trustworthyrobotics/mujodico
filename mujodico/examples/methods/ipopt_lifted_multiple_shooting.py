@@ -15,7 +15,7 @@ class IpoptLiftedMultipleShooting:
         N=trans.N,
         nx=trans.nx,
         nu=trans.nw,
-        stage_cost=trans.stage_cost,
+        local_cost=lambda x, w, xnext, params: trans.stage_cost(x, w, params),
         terminal_cost=trans.terminal_cost,
         initial_equality_constraint=lambda x, params: x - params.x_0,
         local_equality_constraint=lambda x, w, xnext, params: (
