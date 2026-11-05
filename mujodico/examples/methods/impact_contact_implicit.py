@@ -50,7 +50,7 @@ def _make_stage(trans, task):
   class ContactImplicitStage(StageProblem):
     state_dim = property(lambda self: trans.nx)
     control_dim = property(lambda self: trans.nw)
-    comp_dim = property(lambda self: trans.local_complementarity.size)
+    comp_dim = property(lambda self: trans.stage_complementarity.size)
     ineq_dim = property(
         lambda self: (
             x_lb_idx.size + x_ub_idx.size + w_lb_idx.size + w_ub_idx.size
@@ -111,7 +111,7 @@ class ImpactContactImplicit:
       ) from e
 
     self.transcription = methods.ContactImplicitTranscription(
-        task, contact_at_next_state=False
+        task, independent_next_state=False
     )
     self.config = AulaConfig()
     self._solver_type = MultipleShootingSolver

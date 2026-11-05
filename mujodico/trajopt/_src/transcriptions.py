@@ -148,8 +148,6 @@ def lifted_shooting_transcription(
 def contact_implicit_transcription(
     mjmodel: mujoco.MjModel,
     u_bounds: Bounds | None = None,
-    *,
-    contact_at_next_state: bool = True,
 ):
   """Builds a contact-implicit transcription.
 
@@ -162,14 +160,10 @@ def contact_implicit_transcription(
     mjmodel: MuJoCo model to transcribe.
     u_bounds: optional pair of lower and upper actuator control bounds.
               Defaults to unbounded controls.
-    contact_at_next_state: if True, contact laws use the next state supplied
-      by the optimizer. If False, they use the current state and the returned
-      inequality takes only ``(x, w)``.
 
   Returns:
     dynamics: ``dynamics(x, w)`` returns the next state.
-    inequality: ``local_inequality(x, w, xnext) ≥ 0`` by default, or
-      ``stage_inequality(x, w) ≥ 0`` when contact_at_next_state is False.
+    local_inequality: constraint ``local_inequality(x, w, xnext) ≥ 0``.
     local_complementarity: local complementarity constraints.
     w_bounds: pair of lower and upper bounds for ``w``.
   """
@@ -199,7 +193,7 @@ def contact_implicit_transcription(
     z_indexes.append(nz)
     nz += z_dim(contact)
 
-  def efc_info(x: jax.Array) -> tuple[jax.Array, jax.Array]:
+  def efc_J_phi(x: jax.Array) -> tuple[jax.Array, jax.Array]:
     nq, nv = model.nq, model.nv
     d = data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:])
     d = mjx.fwd_position(model, d)
@@ -228,34 +222,34 @@ def contact_implicit_transcription(
   def local_inequality(x: jax.Array, w: jax.Array, x_next: jax.Array) -> jax.Array:
     _, z = unpack_control(w)
     v_next = x_next[model.nq:model.nq+model.nv]
-    efc_J, efc_pos = efc_info(x)
-    efc_J_next, efc_pos_next = efc_info(x_next)
+    efc_J, efc_phi = efc_J_phi(x)
+    _, efc_phi_next = efc_J_phi(x_next)
 
     constraints = []
     for z_index, contact in zip(z_indexes, contacts):
       if contact.type == _Contact.Type.FRICTIONLESS:
         # 0 ≤ λₙ ⊥ ϕ(q⁺) ≥ 0
-        constraints.append(efc_pos_next[contact.efc_index][None])
+        constraints.append(efc_phi_next[contact.efc_index][None])
 
       elif contact.type == _Contact.Type.PYRAMIDAL:
         # 0 ≤ λ ⊥ ϕ(q) + δt J(q) v⁺ ≥ 0
         dt = model.opt.timestep
         efc_indexs = jp.arange(contact.efc_index, contact.efc_index + z_dim(contact))
-        constraints.append(efc_pos[efc_indexs] + dt * efc_J[efc_indexs] @ v_next)
+        constraints.append(efc_phi[efc_indexs] + dt * efc_J[efc_indexs] @ v_next)
 
       elif contact.type == _Contact.Type.ELLIPTIC:
         # 0 ≤ λₙ ⊥ ϕ(q⁺) ≥ 0
-        # 0 ≤ λₜ₁ ⊥ Jₜ(q⁺) v⁺ + ν 1 ≥ 0
-        # 0 ≤ λₜ₂ ⊥ -Jₜ(q⁺) v⁺ + ν 1 ≥ 0
+        # 0 ≤ λₜ₁ ⊥ Jₜ(q) v⁺ + ν / μ ≥ 0
+        # 0 ≤ λₜ₂ ⊥ -Jₜ(q) v⁺ + ν / μ ≥ 0
         # 0 ≤ ν ⊥ λₙ - [λₜ₁ᵀ/μ  λₜ₂ᵀ/μ] 1 ≥ 0
-        vt_next = efc_J_next[contact.efc_index + 1 : contact.efc_index + contact.dim] @ v_next
+        vt_next = efc_J[contact.efc_index + 1 : contact.efc_index + contact.dim] @ v_next
         z_k = z[z_index : z_index + z_dim(contact)]
         lambdan = z_k[0]
         lambdat = z_k[1:-1]
         nu = z_k[-1]
         friction = jp.tile(contact.friction, 2)
-        constraints.append(efc_pos_next[contact.efc_index][None])
-        constraints.append(jp.concatenate([vt_next, -vt_next]) + nu)
+        constraints.append(efc_phi_next[contact.efc_index][None])
+        constraints.append(jp.concatenate([vt_next, -vt_next]) + nu / friction)
         constraints.append((lambdan - jp.sum(lambdat / friction))[None])
 
     return jp.concatenate(constraints) if constraints else jp.zeros((0,))
@@ -272,12 +266,7 @@ def contact_implicit_transcription(
   z_ub = np.full(nz, np.inf)
   w_bounds = (np.concatenate([u_lb, z_lb]), np.concatenate([u_ub, z_ub]))
 
-  def stage_inequality(x: jax.Array, w: jax.Array) -> jax.Array:
-    return local_inequality(x, w, x)
-
-  inequality = local_inequality if contact_at_next_state else stage_inequality
-
-  return dynamics, inequality, local_complementarity, w_bounds
+  return dynamics, local_inequality, local_complementarity, w_bounds
 
 
 @dataclass(frozen=True)
@@ -352,7 +341,7 @@ def _step_given_efc_force(
     m: mjx.Model, x: jax.Array, u: jax.Array, efc_force: jax.Array
   ) -> jax.Array:
   """Computes the mapping (x, u, λ) ↦ x⁺ assuming that the constraint force λ is known.
-  The mapping satisfies:
+  For implicit Euler integration, The mapping satisfies:
     M(q) (v⁺ - v) / δt + c(q⁺, v⁺) = τ(q⁺, v⁺, u) + J(q)ᵀ λ
     q⁺ = q ⊕ δt v⁺
   """
@@ -378,7 +367,8 @@ def _step_given_efc_force(
   d = d.tree_replace({
       'qfrc_constraint': d._impl.efc_J.T @ efc_force,
       '_impl.efc_force': efc_force,
-      'qacc': None,
+      'qacc': None,  # Setting (qacc = None) forces integration from
+                     # qfrc_constraint, see mjx.euler and mjx.implicit.
   })
 
   if m.opt.integrator == mjx.IntegratorType.EULER:
