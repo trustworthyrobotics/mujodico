@@ -64,6 +64,12 @@ class IpoptLiftedMultipleShooting:
         ws_init,
         max_iter=iterations,
         print_level=5 if verbose else 0,
+        # max_soc=0,
+        # max_resto_iter=3000000,
+        # soft_resto_pderror_reduction_factor=0.0,
+        # watchdog_shortened_iter_trigger=0,
+        # min_refinement_steps=0,
+        # max_refinement_steps=0,
     )
 
     total_time = info['total_time']
