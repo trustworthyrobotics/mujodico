@@ -9,7 +9,7 @@ import numpy as np
 _X = jax.Array
 _U = jax.Array
 Params = object
-StageCost = Callable[[_X, _U, Params], jax.Array]
+LocalCost = Callable[[_X, _U, _X, Params], jax.Array]
 TerminalCost = Callable[[_X, Params], jax.Array]
 InitialEqualityConstraint = Callable[[_X, Params], jax.Array]
 LocalEqualityConstraint = Callable[[_X, _U, _X, Params], jax.Array]

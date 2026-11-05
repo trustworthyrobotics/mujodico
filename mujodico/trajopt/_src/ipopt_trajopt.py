@@ -8,10 +8,10 @@ from mujodico.trajopt._src.types import (
   Bounds,
   Callable,
   InitialEqualityConstraint,
+  LocalCost,
   LocalEqualityConstraint,
   LocalInequalityConstraint,
   Params,
-  StageCost,
   TerminalCost,
   TerminalEqualityConstraint,
   TerminalInequalityConstraint,
@@ -21,7 +21,7 @@ from mujodico.trajopt._src.types import (
 class IPOptTrajOpt:
   """Solves the following stagewise multiple-shooting NLP with IPOPT.
 
-    minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ stage_cost(xₖ, uₖ, params) + terminal_cost(x_N, params)
+    minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ local_cost(xₖ, uₖ, xₖ₊₁, params) + terminal_cost(x_N, params)
     subject to    initial_equality_constraint(x₀, params) = 0
                   local_equality_constraint(xₖ, uₖ, xₖ₊₁, params) = 0    for k=0,...,N-1
                   local_inequality_constraint(xₖ, uₖ, xₖ₊₁, params) ≥ 0  for k=0,...,N-1
@@ -37,7 +37,7 @@ class IPOptTrajOpt:
       nx: int,
       nu: int,
       *,
-      stage_cost: StageCost,
+      local_cost: LocalCost,
       terminal_cost: TerminalCost,
       initial_equality_constraint: InitialEqualityConstraint | None = None,
       local_equality_constraint: LocalEqualityConstraint | None = None,
@@ -54,7 +54,7 @@ class IPOptTrajOpt:
         N=N,
         nx=nx,
         nu=nu,
-        stage_cost=stage_cost,
+        local_cost=local_cost,
         terminal_cost=terminal_cost,
         initial_equality_constraint=initial_equality_constraint,
         local_equality_constraint=local_equality_constraint,

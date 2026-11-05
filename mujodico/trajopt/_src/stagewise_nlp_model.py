@@ -11,10 +11,10 @@ from mujodico.trajopt._src.types import (
   Bounds,
   Callable,
   InitialEqualityConstraint,
+  LocalCost,
   LocalEqualityConstraint,
   LocalInequalityConstraint,
   Params,
-  StageCost,
   TerminalCost,
   TerminalEqualityConstraint,
   TerminalInequalityConstraint,
@@ -24,7 +24,7 @@ from mujodico.trajopt._src.types import (
 class StagewiseNLPModel(AbstractNLPModel):
   """Represents the stagewise multiple-shooting nonlinear program.
 
-    minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ stage_cost(xₖ, uₖ, params) + terminal_cost(x_N, params)
+    minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ local_cost(xₖ, uₖ, xₖ₊₁, params) + terminal_cost(x_N, params)
     subject to    initial_equality_constraint(x₀, params) = 0
                   local_equality_constraint(xₖ, uₖ, xₖ₊₁, params) = 0    for k=0,...,N-1
                   local_inequality_constraint(xₖ, uₖ, xₖ₊₁, params) ≥ 0  for k=0,...,N-1
@@ -40,7 +40,7 @@ class StagewiseNLPModel(AbstractNLPModel):
       nx: int,
       nu: int,
       *,
-      stage_cost: StageCost,
+      local_cost: LocalCost,
       terminal_cost: TerminalCost,
       initial_equality_constraint: InitialEqualityConstraint | None = None,
       local_equality_constraint: LocalEqualityConstraint | None = None,
@@ -56,7 +56,7 @@ class StagewiseNLPModel(AbstractNLPModel):
     self.N = N
     self.nx = nx
     self.nu = nu
-    self.stage_cost = stage_cost
+    self.local_cost = local_cost
     self.terminal_cost = terminal_cost
     self.x_bounds = (
       x_bounds if x_bounds is not None
@@ -274,10 +274,10 @@ class StagewiseNLPModel(AbstractNLPModel):
 
     def objective(vars: jax.Array, params: Params) -> jax.Array:
       xs, us = self._unpack(vars)
-      stage_costs = jax.vmap(self.stage_cost, in_axes=(0, 0, None))(
-          xs[:-1], us, params
+      local_costs = jax.vmap(self.local_cost, in_axes=(0, 0, 0, None))(
+          xs[:-1], us, xs[1:], params
       )
-      return jp.sum(stage_costs) + self.terminal_cost(xs[-1], params)
+      return jp.sum(local_costs) + self.terminal_cost(xs[-1], params)
 
     def constraints(vars: jax.Array, params: Params) -> jax.Array:
       xs, us = self._unpack(vars)
@@ -337,7 +337,7 @@ class StagewiseNLPModel(AbstractNLPModel):
       x = var[:nx]
       u = var[nx:nx + nu]
       xnext = var[nx + nu:]
-      value = obj_factor * self.stage_cost(x, u, params)
+      value = obj_factor * self.local_cost(x, u, xnext, params)
       if not self._gauss_newton :
         if initial_lam.size:
           value += jp.vdot(initial_lam, self.initial_equality_constraint(x, params))
