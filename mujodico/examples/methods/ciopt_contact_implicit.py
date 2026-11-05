@@ -86,7 +86,7 @@ class _CioptContactImplicit(ABC):
     pass
 
 
-class CioptContactImplicit(_CioptContactImplicit):
+class CioptImpactContactImplicit(_CioptContactImplicit):
   def __init__(self, task: Task):
     super().__init__(
         task=task,
