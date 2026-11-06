@@ -149,9 +149,6 @@ class FingersSphere2d(Task):
   def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
     super().update_visualization(server, traj, k)
 
-    if '/grid' not in server.scene._handle_from_node_name:
-      server.scene.add_grid('/grid')
-
     fig = plotly.subplots.make_subplots(
         rows=3, cols=1,
         shared_xaxes=True,
@@ -160,10 +157,7 @@ class FingersSphere2d(Task):
     for object_dof in (0, 1, 2):
       self._plot_object_dof(fig, k, traj['xs'], object_dof)
 
-    if not hasattr(server, 'plotly'):
-      server.plotly = server.gui.add_plotly(fig)
-    else:
-      server.plotly.figure = fig
+    server.task_visualizer.set_plot('trajectory', fig)
 
 
 if __name__ == '__main__':

@@ -1,17 +1,9 @@
 import dataclasses
 import mujoco
+from mujodico.examples.tasks.task_visualizer import TaskVisualizer
 from mujodico.mjx import ContactApproxType
 import numpy as np
-
-try:
-  import mjviser
-  import viser
-except ImportError as e:
-  raise ImportError(
-      "Optional visualization dependencies are not installed. "
-      "Install them with:\n\n"
-      "    pip install mjviser plotly"
-  ) from e
+import viser
 
 
 @dataclasses.dataclass(frozen=True)
@@ -158,17 +150,8 @@ Task: {self.__class__.__name__}
 
   def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
     model = self.model
-    data = mujoco.MjData(model)
-
-    if not hasattr(server, 'mj_scene'):
-      mj_scene = mjviser.ViserMujocoScene(server, model, num_envs=1)
-      mj_scene.camera_tracking_enabled = False
-      server.mj_scene = mj_scene
-
-    data.qpos = traj['xs'][k, :model.nq]
-    mujoco.mj_kinematics(model, data)
-    server.mj_scene.update_from_mjdata(data)
-
-    if not hasattr(server, 'info_panel'):
-      server.info_panel = server.gui.add_markdown('')
-    server.info_panel.content = str(traj.get('info', ''))
+    visualizer = getattr(server, 'task_visualizer', None)
+    if visualizer is None:
+      server.task_visualizer = visualizer = TaskVisualizer(server, model)
+    visualizer.update_scene(traj['xs'][k, :model.nq])
+    visualizer.set_text(str(traj.get('info', '')))

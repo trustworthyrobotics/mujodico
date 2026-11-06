@@ -95,9 +95,6 @@ class PushCircularKnob(Task):
   def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
     super().update_visualization(server, traj, k)
 
-    if '/grid' not in server.scene._handle_from_node_name:
-      server.scene.add_grid('/grid')
-
     xs = traj['xs']
     ts = np.arange(xs.shape[0]) * self.model.opt.timestep
     t_range = [min(ts), max(ts)]
@@ -107,73 +104,67 @@ class PushCircularKnob(Task):
     y_pad = max(y_max - y_min, 1e-5) * 0.05
     y_range = np.rad2deg([y_min - y_pad, y_max + y_pad])
 
-    fig1 = go.Figure()
+    fig = go.Figure()
     plotly_util.add_line(
-        fig=fig1,
+        fig=fig,
         x=ts[:k+1],
         y=np.rad2deg(xs[:k+1, 2]),
         name='Angle',
         color='blue',
     )
     plotly_util.add_line(
-        fig=fig1,
+        fig=fig,
         x=t_range,
         y=np.rad2deg([self.x_goal[2]] * 2),
         name='Angle goal',
         color='black',
         linestyle='dash',
     )
-    fig1.update_layout(
+    fig.update_layout(
         xaxis_title='Time (sec)',
         yaxis_title='Angle (deg)',
         xaxis={'range': t_range},
         yaxis={'range': y_range, 'dtick': 45},
     )
-    if not hasattr(server, 'plotly'):
-      server.plotly = server.gui.add_plotly(fig1)
-    else:
-      server.plotly.figure = fig1
+    server.task_visualizer.set_plot('trajectory', fig)
 
-    fig2 = go.Figure()
+    fig = go.Figure()
     plotly_util.add_line(
-        fig=fig2,
+        fig=fig,
         x=xs[:k+1, 0],
         y=xs[:k+1, 1],
         name='Pusher',
         color='red',
     )
     plotly_util.add_circle(
-        fig=fig2,
+        fig=fig,
         x=xs[k, 0],
         y=xs[k, 1],
         r=0.02,
         color='red',
     )
     plotly_util.add_circle(
-        fig=fig2,
+        fig=fig,
         x=0.0, y=0.0,
         r=0.08,
         name='Knob',
         color='blue',
     )
     plotly_util.add_rectangle(
-        fig=fig2,
+        fig=fig,
         x=0.04 * np.cos(xs[k, 2]),
         y=0.04 * np.sin(xs[k, 2]),
         theta=xs[k, 2],
         w=0.08, h=0.003,
         color='black'
     )
-    fig2.update_layout(
+    fig.update_layout(
         xaxis_title='x',
         yaxis_title='y',
         xaxis={'range': [-0.5, 0.5]},
         yaxis={'range': [-0.5, 0.5], 'scaleanchor': 'x', 'scaleratio': 1},
     )
-    if not hasattr(server, 'plotly2'):
-      server.plotly2 = server.gui.add_plotly(fig2)
-    else:
-      server.plotly2.figure = fig2
+    server.task_visualizer.set_plot('visualization', fig)
 
 
 if __name__ == '__main__':

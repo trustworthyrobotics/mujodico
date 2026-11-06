@@ -88,9 +88,6 @@ class PushBox2d(Task):
   def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
     super().update_visualization(server, traj, k)
 
-    if '/grid' not in server.scene._handle_from_node_name:
-      server.scene.add_grid('/grid')
-
     xs = traj['xs']
 
     fig = go.Figure()
@@ -139,10 +136,7 @@ class PushBox2d(Task):
         xaxis={'range': [-1, 1]},
         yaxis={'range': [-1, 1], 'scaleanchor': 'x', 'scaleratio': 1},
     )
-    if not hasattr(server, 'plotly'):
-      server.plotly = server.gui.add_plotly(fig)
-    else:
-      server.plotly.figure = fig
+    server.task_visualizer.set_plot('visualization', fig)
 
 
 if __name__ == '__main__':

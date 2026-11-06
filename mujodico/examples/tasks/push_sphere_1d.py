@@ -70,9 +70,6 @@ class PushSphere1d(Task):
   def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
     super().update_visualization(server, traj, k)
 
-    if '/grid' not in server.scene._handle_from_node_name:
-      server.scene.add_grid('/grid')
-
     xs = traj['xs']
     ts = np.arange(xs.shape[0]) * self.model.opt.timestep
     t_range = [min(ts), max(ts)]
@@ -111,10 +108,7 @@ class PushSphere1d(Task):
         xaxis={'range': t_range},
         yaxis={'range': y_range},
     )
-    if not hasattr(server, 'plotly'):
-      server.plotly = server.gui.add_plotly(fig)
-    else:
-      server.plotly.figure = fig
+    server.task_visualizer.set_plot('visualization', fig)
 
 
 if __name__ == '__main__':

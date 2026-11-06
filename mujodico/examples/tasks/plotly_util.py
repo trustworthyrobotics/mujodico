@@ -1,13 +1,5 @@
 import numpy as np
-
-try:
-  import plotly.graph_objects as go
-except ImportError as e:
-  raise ImportError(
-      "Optional visualization dependencies are not installed. "
-      "Install them with:\n\n"
-      "    pip install plotly"
-  ) from e
+import plotly.graph_objects as go
 
 
 def add_line(
