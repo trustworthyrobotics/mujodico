@@ -336,6 +336,8 @@ def _put_model_jax(
   """Puts mujoco.MjModel onto a device, resulting in mjx.Model."""
   if m.nflex:
     raise NotImplementedError('Flex not implemented for JAX backend.')
+  if m.nplastic:
+    raise NotImplementedError('Plasticity not implemented for JAX backend.')
 
   # contact sensor
   is_contact_sensor = m.sensor_type == types.SensorType.CONTACT
@@ -400,6 +402,7 @@ def _put_model_jax(
       (m.actuator_trntype, types.TrnType, mujoco.mjtTrn),
       (m.eq_type, types.EqType, mujoco.mjtEq),
       (m.sensor_type, types.SensorType, mujoco.mjtSensor),
+      (m.tendon_type, types.TendonType, mujoco.mjtTendon),
       (m.wrap_type, types.WrapType, mujoco.mjtWrap),
   ):
     missing = set(enum_field) - set(enum_type)
@@ -629,6 +632,7 @@ def _make_data_public_fields(m: types.Model) -> Dict[str, Any]:
       'act': (m.na, float_),
       'history': (m.nhistory, float_),
       'plugin_state': (m.npluginstate, float_),
+      'plastic': (m.nplastic, float_),
       'qacc_warmstart': (m.nv, float_),
       'ctrl': (m.nu, float_),
       'qfrc_applied': (m.nv, float_),
@@ -1709,6 +1713,7 @@ _STATE_MAP = {
     mujoco.mjtState.mjSTATE_MOCAP_QUAT: 'mocap_quat',
     mujoco.mjtState.mjSTATE_USERDATA: 'userdata',
     mujoco.mjtState.mjSTATE_PLUGIN: 'plugin_state',
+    mujoco.mjtState.mjSTATE_PLASTIC: 'plastic',
 }
 
 
@@ -1732,6 +1737,7 @@ def _state_elem_size(m: types.Model, state_enum: mujoco.mjtState) -> int:
       'mocap_quat',
       'userdata',
       'plugin_state',
+      'plastic',
   ):
     val = getattr(
         m,
@@ -1748,6 +1754,7 @@ def _state_elem_size(m: types.Model, state_enum: mujoco.mjtState) -> int:
             'mocap_quat': 'nmocap',
             'userdata': 'nuserdata',
             'plugin_state': 'npluginstate',
+            'plastic': 'nplastic',
         }[name],
     )
     if name == 'mocap_pos':
