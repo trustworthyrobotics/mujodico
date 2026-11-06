@@ -14,6 +14,7 @@ class Visualizer:
     self._playbacks = []
     self._selected = 0
     self._recording = None
+    self._visualized_task = None
     self._version = 0
     self._thread = None
 
@@ -66,19 +67,12 @@ class Visualizer:
     self.add(task, traj)
 
   def _prepare_visualization(self, server, task):
-    previous_task = getattr(server, 'playback_task', None)
-    if previous_task is task:
+    if self._visualized_task is task:
       return
-    if previous_task is not None:
-      server.scene.reset()
-      if hasattr(server, 'mj_scene'):
-        del server.mj_scene
-      for name in ('info_panel', 'plotly', 'plotly2'):
-        handle = getattr(server, name, None)
-        if handle is not None:
-          handle.remove()
-          delattr(server, name)
-    server.playback_task = task
+    visualizer = getattr(server, 'task_visualizer', None)
+    if visualizer is not None:
+      del server.task_visualizer
+    self._visualized_task = task
 
   def _capture_frames(
       self, server, client, task, traj, *, video=True, serializer=None
