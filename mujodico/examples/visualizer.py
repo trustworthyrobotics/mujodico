@@ -36,7 +36,7 @@ class Visualizer:
       self._version += 1
       self._condition.notify_all()
 
-  def _download_playback(self, client, index):
+  def _download_pickle(self, client, index):
     with self._condition:
       task, traj = self._playbacks[index]
     client.send_file_download(
@@ -47,7 +47,7 @@ class Visualizer:
         save_immediately=True,
     )
 
-  def _load_playback(self, content):
+  def _load_pickle(self, content):
     from mujodico.examples.tasks.task import Task
 
     saved = pickle.loads(content)
@@ -124,7 +124,7 @@ class Visualizer:
         raise RuntimeError('Install ffmpeg to download playback as a video.')
 
     if playback_data:
-      self._download_playback(client, index)
+      self._download_pickle(client, index)
     if not video and not viser_recording:
       return
 
@@ -194,53 +194,49 @@ class Visualizer:
     import viser
 
     server = viser.ViserServer()
-    playback = server.gui.add_number(
-        'Playback',
-        initial_value=0,
-        min=0,
-        max=0,
-        step=1,
-        disabled=True,
-        hint='Zero-based index of the saved task and trajectory to play.',
-    )
-    record_video = server.gui.add_button(
-        'Download playback video',
-        disabled=True,
-        hint='Record the selected playback and download it as an MP4.',
-    )
-    record_viser = server.gui.add_button(
-        'Download viser recording',
-        disabled=True,
-        hint='Record the selected playback and download it as a .viser file.',
-    )
-    download_playback = server.gui.add_button(
-        'Download task and trajectory',
-        disabled=True,
-        hint=(
-            'Save the selected task and trajectory as a .pkl file for playback.'
-        ),
-    )
-    record_all = server.gui.add_button(
-        'Download all',
-        disabled=True,
-        hint='Download the selected playback as MP4, .viser, and .pkl files.',
-    )
-    upload_playback = server.gui.add_upload_button(
-        'Upload task and trajectory',
-        mime_type='.pkl,.pickle',
-        hint=(
-            'Load a saved .pkl file for playback. Only upload trusted pickle'
-            ' files.'
-        ),
-    )
-    record_buttons = (record_video, record_viser, download_playback, record_all)
+    with server.gui.add_folder('Playback controls', expand_by_default=True):
+      playback = server.gui.add_number(
+          'Playback',
+          initial_value=0,
+          min=0,
+          max=0,
+          step=1,
+          disabled=True,
+          hint='Zero-based index of the saved task and trajectory to play.',
+      )
+      record_video = server.gui.add_button(
+          'Download video',
+          disabled=True,
+          hint='Record the selected playback and download it as an MP4.',
+      )
+      record_viser = server.gui.add_button(
+          'Download viser',
+          disabled=True,
+          hint='Record the selected playback and download it as a .viser file.',
+      )
+      download_pickle = server.gui.add_button(
+          'Download pickle',
+          disabled=True,
+          hint='Save the selected task and trajectory as a .pkl file for playback.',
+      )
+      download_all = server.gui.add_button(
+          'Download all',
+          disabled=True,
+          hint='Download the selected playback as MP4, .viser, and .pkl files.',
+      )
+      upload_playback = server.gui.add_upload_button(
+          'Upload pickle',
+          mime_type='.pkl,.pickle',
+          hint='Load a saved .pkl file for playback.',
+      )
+    record_buttons = (record_video, record_viser, download_pickle, download_all)
 
     @upload_playback.on_upload
     def _upload_playback(event):
       if event.client is None:
         return
       try:
-        self._load_playback(event.target.value.content)
+        self._load_pickle(event.target.value.content)
       except Exception as error:
         event.client.add_notification(
             title='Upload failed', body=str(error), color='red'
@@ -292,11 +288,11 @@ class Visualizer:
     def _request_viser_recording(event):
       _request_recording(event, viser_recording=True)
 
-    @download_playback.on_click
+    @download_pickle.on_click
     def _request_playback_download(event):
       _request_recording(event, playback_data=True)
 
-    @record_all.on_click
+    @download_all.on_click
     def _request_all_recordings(event):
       _request_recording(
           event, video=True, viser_recording=True, playback_data=True
@@ -350,10 +346,10 @@ class Visualizer:
             playback.disabled = False
             for button in record_buttons:
               button.disabled = False
-            record_video.label = 'Download playback video'
-            record_viser.label = 'Download viser recording'
-            download_playback.label = 'Download task and trajectory'
-            record_all.label = 'Download all'
+            record_video.label = 'Download video'
+            record_viser.label = 'Download viser'
+            download_pickle.label = 'Download pickle'
+            download_all.label = 'Download all'
             version = -1
         continue
 
