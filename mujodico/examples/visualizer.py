@@ -1,11 +1,9 @@
-import io
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
-import zipfile
 
 
 class Visualizer:
@@ -36,101 +34,108 @@ class Visualizer:
       self._version += 1
       self._condition.notify_all()
 
-  def _capture_frames(self, server, client, task, traj):
-    import imageio.v3 as iio
+  def _capture_frames(
+      self, server, client, task, traj, *, video=True, serializer=None
+  ):
+    if video:
+      import imageio.v3 as iio
 
-    camera = client.camera
-    height, width = camera.image_height, camera.image_width
-    if height <= 0 or width <= 0:
-      raise ValueError('The browser viewport is not ready for recording.')
+      camera = client.camera
+      height, width = camera.image_height, camera.image_width
+      if height <= 0 or width <= 0:
+        raise ValueError('The browser viewport is not ready for recording.')
 
-    view = dict(
-        height=height,
-        width=width,
-        wxyz=tuple(camera.wxyz),
-        position=tuple(camera.position),
-        fov=camera.fov,
-        transport_format='jpeg',
-    )
+      view = dict(
+          height=height,
+          width=width,
+          wxyz=tuple(camera.wxyz),
+          position=tuple(camera.position),
+          fov=camera.fov,
+          transport_format='jpeg',
+      )
     for frame in range(task.horizon + 1):
       with server.atomic():
         task.update_visualization(server, traj, frame)
-      server.flush()
-      image = client.get_render(**view)
-      yield iio.imwrite('<bytes>', image, extension='.jpg')
+      if serializer is not None:
+        serializer.insert_sleep(task.model.opt.timestep)
+      if video:
+        server.flush()
+        image = client.get_render(**view)
+        yield iio.imwrite('<bytes>', image, extension='.jpg')
+      else:
+        yield None
 
-  def _record_playback(self, server, client, index, *, video=False):
+  def _record_playback(
+      self, server, client, index, *, video=False, viser_recording=False
+  ):
     with self._condition:
       task, traj = self._playbacks[index]
-
-    frames = self._capture_frames(server, client, task, traj)
 
     if video:
       ffmpeg = shutil.which('ffmpeg')
       if ffmpeg is None:
         raise RuntimeError('Install ffmpeg to download playback as a video.')
 
-      filename = f'playback_{index}.mp4'
-      with tempfile.TemporaryDirectory(prefix='mujodico-playback-') as directory:
-        path = Path(directory)
-        for frame, image in enumerate(frames):
-          (path / f'frame_{frame:06d}.jpg').write_bytes(image)
-        result = subprocess.run(
-            [
-                ffmpeg,
-                '-nostdin',
-                '-hide_banner',
-                '-loglevel',
-                'error',
-                '-framerate',
-                f'{1 / task.model.opt.timestep:.12g}',
-                '-start_number',
-                '0',
-                '-i',
-                'frame_%06d.jpg',
-                '-vf',
-                'pad=ceil(iw/2)*2:ceil(ih/2)*2',
-                '-c:v',
-                'libx264',
-                '-pix_fmt',
-                'yuv420p',
-                '-movflags',
-                '+faststart',
-                filename,
-            ],
-            cwd=directory,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-          raise RuntimeError(f'ffmpeg failed: {result.stderr.strip()}')
-        client.send_file_download(
-            filename=filename, content=(path / filename).read_bytes()
-        )
-      return
-
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, 'w') as archive:
-      for frame, image in enumerate(frames):
-        archive.writestr(
-            f'frame_{frame:06d}.jpg',
-            image,
-        )
-
-    client.send_file_download(
-        filename=f'playback_{index}.zip', content=buffer.getvalue()
+    serializer = server.get_scene_serializer() if viser_recording else None
+    frames = self._capture_frames(
+        server, client, task, traj, video=video, serializer=serializer
     )
-    client.add_notification(
-        title=f'Convert playback_{index}.zip to MP4',
-        body=(
-            f'ffmpeg -framerate {1 / task.model.opt.timestep:.12g} '
-            '-start_number 0 -i frame_%06d.jpg '
-            '-vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" '
-            '-c:v libx264 -pix_fmt yuv420p '
-            f'../playback_{index}.mp4'
-        ),
-        auto_close_seconds=None,
-    )
+    try:
+      if video:
+        filename = f'playback_{index}.mp4'
+        with tempfile.TemporaryDirectory(
+            prefix='mujodico-playback-'
+        ) as directory:
+          path = Path(directory)
+          for frame, image in enumerate(frames):
+            (path / f'frame_{frame:06d}.jpg').write_bytes(image)
+          result = subprocess.run(
+              [
+                  ffmpeg,
+                  '-nostdin',
+                  '-hide_banner',
+                  '-loglevel',
+                  'error',
+                  '-framerate',
+                  f'{1 / task.model.opt.timestep:.12g}',
+                  '-start_number',
+                  '0',
+                  '-i',
+                  'frame_%06d.jpg',
+                  '-vf',
+                  'pad=ceil(iw/2)*2:ceil(ih/2)*2',
+                  '-c:v',
+                  'libx264',
+                  '-pix_fmt',
+                  'yuv420p',
+                  '-movflags',
+                  '+faststart',
+                  filename,
+              ],
+              cwd=directory,
+              capture_output=True,
+              text=True,
+          )
+          if result.returncode != 0:
+            raise RuntimeError(f'ffmpeg failed: {result.stderr.strip()}')
+          client.send_file_download(
+              filename=filename,
+              content=(path / filename).read_bytes(),
+              save_immediately=True,
+          )
+      else:
+        for _ in frames:
+          pass
+    finally:
+      if serializer is not None:
+        content = serializer.serialize()
+
+    if serializer is not None:
+      client.send_file_download(
+          filename=f'playback_{index}.viser',
+          content=content,
+          save_immediately=True,
+      )
 
   def _visualization_loop(self):
     import viser
@@ -150,11 +155,17 @@ class Visualizer:
         disabled=True,
         hint='Record the selected playback and download it as an MP4.',
     )
-    record_frames = server.gui.add_button(
-        'Download playback frames',
+    record_viser = server.gui.add_button(
+        'Download viser recording',
         disabled=True,
-        hint='Record every frame of the selected playback as a ZIP of JPEGs.',
+        hint='Record the selected playback and download it as a .viser file.',
     )
+    record_all = server.gui.add_button(
+        'Download all',
+        disabled=True,
+        hint='Record the selected playback as both an MP4 and a .viser file.',
+    )
+    record_buttons = (record_video, record_viser, record_all)
 
     @playback.on_update
     def _select_playback(event):
@@ -171,24 +182,30 @@ class Visualizer:
           self._version += 1
           self._condition.notify_all()
 
-    @record_frames.on_click
-    def _request_recording(event, *, video=False):
+    def _request_recording(event, *, video=False, viser_recording=False):
       if event.client is None:
         return
       with self._condition:
         if not self._playbacks or self._recording is not None:
           return
-        self._recording = (event.client, self._selected, video)
+        self._recording = (event.client, self._selected, video, viser_recording)
         playback.disabled = True
-        record_frames.disabled = True
-        record_video.disabled = True
-        button = record_video if video else record_frames
-        button.label = 'Recording...'
+        for button in record_buttons:
+          button.disabled = True
+        event.target.label = 'Recording...'
         self._condition.notify_all()
 
     @record_video.on_click
     def _request_video_recording(event):
       _request_recording(event, video=True)
+
+    @record_viser.on_click
+    def _request_viser_recording(event):
+      _request_recording(event, viser_recording=True)
+
+    @record_all.on_click
+    def _request_all_recordings(event):
+      _request_recording(event, video=True, viser_recording=True)
 
     version = -1
     frame = 0
@@ -203,8 +220,8 @@ class Visualizer:
           playback.max = len(self._playbacks) - 1
           playback.value = self._selected
           playback.disabled = False
-          record_frames.disabled = False
-          record_video.disabled = False
+          for button in record_buttons:
+            button.disabled = False
           version = self._version
           frame = 0
         elif recording is None and frame > task.horizon:
@@ -217,9 +234,15 @@ class Visualizer:
           frame = 0
 
       if recording is not None:
-        client, index, video = recording
+        client, index, video, viser_recording = recording
         try:
-          self._record_playback(server, client, index, video=video)
+          self._record_playback(
+              server,
+              client,
+              index,
+              video=video,
+              viser_recording=viser_recording,
+          )
         except Exception as error:
           client.add_notification(
               title='Recording failed', body=str(error), color='red'
@@ -229,10 +252,11 @@ class Visualizer:
             self._recording = None
             playback.max = len(self._playbacks) - 1
             playback.disabled = False
-            record_frames.disabled = False
-            record_video.disabled = False
-            record_frames.label = 'Download playback frames'
+            for button in record_buttons:
+              button.disabled = False
             record_video.label = 'Download playback video'
+            record_viser.label = 'Download viser recording'
+            record_all.label = 'Download all'
             version = -1
         continue
 
