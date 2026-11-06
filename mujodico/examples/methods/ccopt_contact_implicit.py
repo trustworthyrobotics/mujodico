@@ -15,13 +15,13 @@ class _CcoptContactImplicit:
         N=trans.N,
         nx=trans.nx,
         nu=trans.nw,
-        local_cost=lambda x, w, xnext, params: trans.stage_cost(x, w, params),
+        local_cost=lambda x, w, xnext, k, params: trans.stage_cost(x, w, params),
         terminal_cost=trans.terminal_cost,
         initial_equality_constraint=lambda x, params: x - params.x_0,
-        local_equality_constraint=lambda x, w, x_next, params: (
+        local_equality_constraint=lambda x, w, x_next, k, params: (
             x_next - trans.dynamics(x, w)
         ),
-        local_inequality_constraint=lambda x, w, x_next, params: (
+        local_inequality_constraint=lambda x, w, x_next, k, params: (
             trans.local_inequality(x, w, x_next)
         ),
         local_complementarity_constraint=trans.local_complementarity,

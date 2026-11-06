@@ -24,14 +24,14 @@ from mujodico.trajopt._src.types import (
 class StagewiseNLPModel(AbstractNLPModel):
   """Represents the stagewise multiple-shooting nonlinear program.
 
-    minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ local_cost(xₖ, uₖ, xₖ₊₁, params) + terminal_cost(x_N, params)
+    minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ local_cost(xₖ, uₖ, xₖ₊₁, k, params) + terminal_cost(x_N, params)
     subject to    initial_equality_constraint(x₀, params) = 0
-                  local_equality_constraint(xₖ, uₖ, xₖ₊₁, params) = 0    for k=0,...,N-1
-                  local_inequality_constraint(xₖ, uₖ, xₖ₊₁, params) ≥ 0  for k=0,...,N-1
+                  local_equality_constraint(xₖ, uₖ, xₖ₊₁, k, params) = 0    for k=0,...,N-1
+                  local_inequality_constraint(xₖ, uₖ, xₖ₊₁, k, params) ≥ 0  for k=0,...,N-1
                   terminal_equality_constraint(x_N, params) = 0
                   terminal_inequality_constraint(x_N, params) ≥ 0
-                  x_lb ≤ xₖ ≤ x_ub                                      for k=0,...,N
-                  u_lb ≤ uₖ ≤ u_ub                                      for k=0,...,N-1
+                  x_lb ≤ xₖ ≤ x_ub                                         for k=0,...,N
+                  u_lb ≤ uₖ ≤ u_ub                                         for k=0,...,N-1
   """
 
   def __init__(
@@ -77,9 +77,13 @@ class StagewiseNLPModel(AbstractNLPModel):
       return jp.zeros((0,))
 
     def empty_local_constraint(
-        x: jax.Array, u: jax.Array, xnext: jax.Array, params: Params
+        x: jax.Array,
+        u: jax.Array,
+        xnext: jax.Array,
+        k: jax.Array,
+        params: Params,
     ) -> jax.Array:
-      del x, u, xnext, params
+      del x, u, xnext, k, params
       return jp.zeros((0,))
 
     self.initial_equality_constraint = (
@@ -247,14 +251,15 @@ class StagewiseNLPModel(AbstractNLPModel):
 
   def _compile(self, params_trace: Params) -> None:
     N, nx, nu = self.N, self.nx, self.nu
+    ks = jp.arange(N)
     vars_trace = self._pack(jp.zeros((N + 1, nx)), jp.zeros((N, nu)))
 
     initial_trace = self.initial_equality_constraint(jp.zeros(nx), params_trace)
     local_eq_trace = self.local_equality_constraint(
-        jp.zeros(nx), jp.zeros(nu), jp.zeros(nx), params_trace
+        jp.zeros(nx), jp.zeros(nu), jp.zeros(nx), jp.array(0), params_trace
     )
     local_ineq_trace = self.local_inequality_constraint(
-        jp.zeros(nx), jp.zeros(nu), jp.zeros(nx), params_trace
+        jp.zeros(nx), jp.zeros(nu), jp.zeros(nx), jp.array(0), params_trace
     )
     terminal_eq_trace = self.terminal_equality_constraint(jp.zeros(nx), params_trace)
     terminal_ineq_trace = self.terminal_inequality_constraint(jp.zeros(nx), params_trace)
@@ -274,8 +279,8 @@ class StagewiseNLPModel(AbstractNLPModel):
 
     def objective(vars: jax.Array, params: Params) -> jax.Array:
       xs, us = self._unpack(vars)
-      local_costs = jax.vmap(self.local_cost, in_axes=(0, 0, 0, None))(
-          xs[:-1], us, xs[1:], params
+      local_costs = jax.vmap(self.local_cost, in_axes=(0, 0, 0, 0, None))(
+          xs[:-1], us, xs[1:], ks, params
       )
       return jp.sum(local_costs) + self.terminal_cost(xs[-1], params)
 
@@ -283,11 +288,11 @@ class StagewiseNLPModel(AbstractNLPModel):
       xs, us = self._unpack(vars)
       initial_eq = self.initial_equality_constraint(xs[0], params)
       local_eq = jax.vmap(
-          self.local_equality_constraint, in_axes=(0, 0, 0, None)
-      )(xs[:-1], us, xs[1:], params)
+          self.local_equality_constraint, in_axes=(0, 0, 0, 0, None)
+      )(xs[:-1], us, xs[1:], ks, params)
       local_ineq = jax.vmap(
-          self.local_inequality_constraint, in_axes=(0, 0, 0, None)
-      )(xs[:-1], us, xs[1:], params)
+          self.local_inequality_constraint, in_axes=(0, 0, 0, 0, None)
+      )(xs[:-1], us, xs[1:], ks, params)
       terminal_eq = self.terminal_equality_constraint(xs[-1], params)
       terminal_ineq = self.terminal_inequality_constraint(xs[-1], params)
       return jp.concatenate([
@@ -303,7 +308,9 @@ class StagewiseNLPModel(AbstractNLPModel):
       xs, us = self._unpack(vars)
       initial_jac = jax.jacfwd(self.initial_equality_constraint)(xs[0], params)
 
-      def local_jac(x: jax.Array, u: jax.Array, xnext: jax.Array) -> jax.Array:
+      def local_jac(
+          x: jax.Array, u: jax.Array, xnext: jax.Array, k: jax.Array
+      ) -> jax.Array:
         local = jp.concatenate([x, u, xnext])
 
         def local_constraints(var: jax.Array) -> jax.Array:
@@ -311,13 +318,13 @@ class StagewiseNLPModel(AbstractNLPModel):
           u = var[nx:nx + nu]
           xnext = var[nx + nu:]
           return jp.concatenate([
-              self.local_equality_constraint(x, u, xnext, params),
-              self.local_inequality_constraint(x, u, xnext, params),
+              self.local_equality_constraint(x, u, xnext, k, params),
+              self.local_inequality_constraint(x, u, xnext, k, params),
           ])
 
         return jax.jacfwd(local_constraints)(local).ravel()
 
-      local_jacs = jax.vmap(local_jac)(xs[:-1], us, xs[1:])
+      local_jacs = jax.vmap(local_jac)(xs[:-1], us, xs[1:], ks)
       terminal_jac = jax.jacfwd(lambda x: jp.concatenate([
           self.terminal_equality_constraint(x, params),
           self.terminal_inequality_constraint(x, params),
@@ -332,19 +339,24 @@ class StagewiseNLPModel(AbstractNLPModel):
         eq_lam: jax.Array,
         ineq_lam: jax.Array,
         obj_factor: jax.Array,
+        k: jax.Array,
         params: Params,
     ) -> jax.Array:
       x = var[:nx]
       u = var[nx:nx + nu]
       xnext = var[nx + nu:]
-      value = obj_factor * self.local_cost(x, u, xnext, params)
+      value = obj_factor * self.local_cost(x, u, xnext, k, params)
       if not self._gauss_newton :
         if initial_lam.size:
           value += jp.vdot(initial_lam, self.initial_equality_constraint(x, params))
         if eq_lam.size:
-          value += jp.vdot(eq_lam, self.local_equality_constraint(x, u, xnext, params))
+          value += jp.vdot(
+              eq_lam, self.local_equality_constraint(x, u, xnext, k, params)
+          )
         if ineq_lam.size:
-          value += jp.vdot(ineq_lam, self.local_inequality_constraint(x, u, xnext, params))
+          value += jp.vdot(
+              ineq_lam, self.local_inequality_constraint(x, u, xnext, k, params)
+          )
       return value
 
     def terminal_lagrangian(
@@ -384,17 +396,18 @@ class StagewiseNLPModel(AbstractNLPModel):
           x: jax.Array,
           u: jax.Array,
           xnext: jax.Array,
+          k: jax.Array,
           init_lam: jax.Array,
           eq_lam: jax.Array,
           ineq_lam: jax.Array,
       ) -> jax.Array:
         local = jp.concatenate([x, u, xnext])
         return jax.hessian(local_lagrangian)(
-            local, init_lam, eq_lam, ineq_lam, obj_factor, params
+            local, init_lam, eq_lam, ineq_lam, obj_factor, k, params
         )
 
       local_hessians = jax.vmap(local_hessian)(
-          xs[:-1], us, xs[1:], initial_lams, local_eq_lam, local_ineq_lam
+          xs[:-1], us, xs[1:], ks, initial_lams, local_eq_lam, local_ineq_lam
       )
       local_hessians = local_hessians.at[1:, :nx, :nx].add(
           local_hessians[:-1, nx + nu:, nx + nu:]
