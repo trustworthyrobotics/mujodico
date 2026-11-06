@@ -29,6 +29,7 @@ class TaskVisualizer:
     with self._folder:
       self._info_panel = server.gui.add_markdown('')
     self._plots: dict[str, viser.GuiPlotlyHandle] = {}
+
     self._cleaned_up = False
 
   def __del__(self):
@@ -46,9 +47,10 @@ class TaskVisualizer:
     self._info_panel.content = text
 
   def set_plot(self, name: str, figure: go.Figure) -> None:
+    figure.update_layout(margin=dict(l=0, r=0, t=0, b=0))
     if name not in self._plots:
       with self._folder:
-        self._plots[name] = self._server.gui.add_plotly(figure)
+        self._plots[name] = self._server.gui.add_plotly(figure, aspect=3/4)
     else:
       self._plots[name].figure = figure
 
