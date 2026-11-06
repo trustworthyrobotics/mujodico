@@ -15,16 +15,16 @@ class IpoptLiftedMultipleShooting:
         N=trans.N,
         nx=trans.nx,
         nu=trans.nw,
-        local_cost=lambda x, w, xnext, params: trans.stage_cost(x, w, params),
+        local_cost=lambda x, w, xnext, k, params: trans.stage_cost(x, w, params),
         terminal_cost=trans.terminal_cost,
         initial_equality_constraint=lambda x, params: x - params.x_0,
-        local_equality_constraint=lambda x, w, xnext, params: (
+        local_equality_constraint=lambda x, w, xnext, k, params: (
             jp.concatenate([
                 xnext - trans.dynamics(x, w),
                 trans.stage_equality(x, w),
             ])
         ),
-        local_inequality_constraint=lambda x, w, xnext, params: (
+        local_inequality_constraint=lambda x, w, xnext, k, params: (
             trans.stage_inequality(x, w)
         ),
         x_bounds=trans.x_bounds,

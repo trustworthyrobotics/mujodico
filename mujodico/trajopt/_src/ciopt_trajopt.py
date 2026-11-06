@@ -22,15 +22,15 @@ from mujodico.trajopt._src.types import (
 class CIOptTrajOpt(CCOptTrajOpt):
   """Solves the following stagewise MPCC with CIOpt
 
-    minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ local_cost(xₖ, uₖ, xₖ₊₁, params) + terminal_cost(x_N, params)
+    minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ local_cost(xₖ, uₖ, xₖ₊₁, k, params) + terminal_cost(x_N, params)
     subject to    initial_equality_constraint(x₀, params) = 0
-                  local_equality_constraint(xₖ, uₖ, xₖ₊₁, params) = 0    for k=0,...,N-1
-                  local_inequality_constraint(xₖ, uₖ, xₖ₊₁, params) ≥ 0  for k=0,...,N-1
+                  local_equality_constraint(xₖ, uₖ, xₖ₊₁, k, params) = 0    for k=0,...,N-1
+                  local_inequality_constraint(xₖ, uₖ, xₖ₊₁, k, params) ≥ 0  for k=0,...,N-1
                   terminal_equality_constraint(x_N, params) = 0
                   terminal_inequality_constraint(x_N, params) ≥ 0
-                  x_lb ≤ xₖ ≤ x_ub                                      for k=0,...,N
-                  u_lb ≤ uₖ ≤ u_ub                                      for k=0,...,N-1
-                  local complementarity constraints                    for k=0,...,N
+                  x_lb ≤ xₖ ≤ x_ub                                         for k=0,...,N
+                  u_lb ≤ uₖ ≤ u_ub                                         for k=0,...,N-1
+                  local complementarity constraints                       for k=0,...,N
   """
 
   class Method(Enum):

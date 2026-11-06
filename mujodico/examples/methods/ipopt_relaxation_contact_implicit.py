@@ -24,7 +24,7 @@ class IpoptRelaxationContactImplicit:
         for pair in trans.local_complementarity.pairs
     ])
 
-    def local_equality_constraint(x, w, xnext, params):
+    def local_equality_constraint(x, w, xnext, k, params):
       ineq = trans.local_inequality(x, w, xnext)
       local_variables = jp.concatenate((x, w, xnext, ineq))
       complementarity_terms = local_variables[complementarity_indices]
@@ -36,7 +36,7 @@ class IpoptRelaxationContactImplicit:
           complementarity - smoothing,
       ))
 
-    def local_inequality_constraint(x, w, xnext, params):
+    def local_inequality_constraint(x, w, xnext, k, params):
       return trans.local_inequality(x, w, xnext)
 
     def update_params(stats, params):
@@ -51,7 +51,7 @@ class IpoptRelaxationContactImplicit:
         N=trans.N,
         nx=trans.nx,
         nu=trans.nw,
-        local_cost=lambda x, w, xnext, params: trans.stage_cost(x, w, params[0]),
+        local_cost=lambda x, w, xnext, k, params: trans.stage_cost(x, w, params[0]),
         terminal_cost=lambda x, params: trans.terminal_cost(x, params[0]),
         initial_equality_constraint=lambda x, params: x - params[0].x_0,
         local_equality_constraint=local_equality_constraint,

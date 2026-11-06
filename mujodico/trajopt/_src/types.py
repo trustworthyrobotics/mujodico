@@ -8,12 +8,13 @@ import numpy as np
 
 _X = jax.Array
 _U = jax.Array
+_Index = jax.Array
 Params = object
-LocalCost = Callable[[_X, _U, _X, Params], jax.Array]
+LocalCost = Callable[[_X, _U, _X, _Index, Params], jax.Array]
 TerminalCost = Callable[[_X, Params], jax.Array]
 InitialEqualityConstraint = Callable[[_X, Params], jax.Array]
-LocalEqualityConstraint = Callable[[_X, _U, _X, Params], jax.Array]
-LocalInequalityConstraint = Callable[[_X, _U, _X, Params], jax.Array]
+LocalEqualityConstraint = Callable[[_X, _U, _X, _Index, Params], jax.Array]
+LocalInequalityConstraint = Callable[[_X, _U, _X, _Index, Params], jax.Array]
 TerminalEqualityConstraint = Callable[[_X, Params], jax.Array]
 TerminalInequalityConstraint = Callable[[_X, Params], jax.Array]
 Bounds = tuple[np.ndarray, np.ndarray]
