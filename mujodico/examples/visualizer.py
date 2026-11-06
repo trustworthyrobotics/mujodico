@@ -1,4 +1,5 @@
 from pathlib import Path
+import pickle
 import shutil
 import subprocess
 import tempfile
@@ -34,6 +35,51 @@ class Visualizer:
       self._version += 1
       self._condition.notify_all()
 
+  def _download_playback(self, client, index):
+    with self._condition:
+      task, traj = self._playbacks[index]
+    client.send_file_download(
+        filename=f'playback_{index}.pkl',
+        content=pickle.dumps(
+            {'task': task, 'traj': traj}, protocol=pickle.HIGHEST_PROTOCOL
+        ),
+        save_immediately=True,
+    )
+
+  def _load_playback(self, content):
+    from mujodico.examples.tasks.task import Task
+
+    saved = pickle.loads(content)
+    if not isinstance(saved, dict) or not {'task', 'traj'} <= saved.keys():
+      raise ValueError('The file must contain a task and trajectory.')
+    task, traj = saved['task'], saved['traj']
+    if not isinstance(task, Task) or not isinstance(traj, dict):
+      raise ValueError(
+          'The file must contain a Task and a trajectory dictionary.'
+      )
+    if task.horizon < 0 or task.model.opt.timestep <= 0:
+      raise ValueError('The task must have a valid horizon and timestep.')
+    if getattr(traj.get('xs'), 'shape', None) != (task.horizon + 1, task.nx):
+      raise ValueError(
+          'The trajectory states must match the task horizon and state size.'
+      )
+    self.add(task, traj)
+
+  def _prepare_visualization(self, server, task):
+    previous_task = getattr(server, 'playback_task', None)
+    if previous_task is task:
+      return
+    if previous_task is not None:
+      server.scene.reset()
+      if hasattr(server, 'mj_scene'):
+        del server.mj_scene
+      for name in ('info_panel', 'plotly', 'plotly2'):
+        handle = getattr(server, name, None)
+        if handle is not None:
+          handle.remove()
+          delattr(server, name)
+    server.playback_task = task
+
   def _capture_frames(
       self, server, client, task, traj, *, video=True, serializer=None
   ):
@@ -66,7 +112,14 @@ class Visualizer:
         yield None
 
   def _record_playback(
-      self, server, client, index, *, video=False, viser_recording=False
+      self,
+      server,
+      client,
+      index,
+      *,
+      video=False,
+      viser_recording=False,
+      playback_data=False,
   ):
     with self._condition:
       task, traj = self._playbacks[index]
@@ -76,6 +129,12 @@ class Visualizer:
       if ffmpeg is None:
         raise RuntimeError('Install ffmpeg to download playback as a video.')
 
+    if playback_data:
+      self._download_playback(client, index)
+    if not video and not viser_recording:
+      return
+
+    self._prepare_visualization(server, task)
     serializer = server.get_scene_serializer() if viser_recording else None
     frames = self._capture_frames(
         server, client, task, traj, video=video, serializer=serializer
@@ -160,12 +219,38 @@ class Visualizer:
         disabled=True,
         hint='Record the selected playback and download it as a .viser file.',
     )
+    download_playback = server.gui.add_button(
+        'Download task and trajectory',
+        disabled=True,
+        hint=(
+            'Save the selected task and trajectory as a .pkl file for playback.'
+        ),
+    )
     record_all = server.gui.add_button(
         'Download all',
         disabled=True,
-        hint='Record the selected playback as both an MP4 and a .viser file.',
+        hint='Download the selected playback as MP4, .viser, and .pkl files.',
     )
-    record_buttons = (record_video, record_viser, record_all)
+    upload_playback = server.gui.add_upload_button(
+        'Upload task and trajectory',
+        mime_type='.pkl,.pickle',
+        hint=(
+            'Load a saved .pkl file for playback. Only upload trusted pickle'
+            ' files.'
+        ),
+    )
+    record_buttons = (record_video, record_viser, download_playback, record_all)
+
+    @upload_playback.on_upload
+    def _upload_playback(event):
+      if event.client is None:
+        return
+      try:
+        self._load_playback(event.target.value.content)
+      except Exception as error:
+        event.client.add_notification(
+            title='Upload failed', body=str(error), color='red'
+        )
 
     @playback.on_update
     def _select_playback(event):
@@ -182,17 +267,27 @@ class Visualizer:
           self._version += 1
           self._condition.notify_all()
 
-    def _request_recording(event, *, video=False, viser_recording=False):
+    def _request_recording(
+        event, *, video=False, viser_recording=False, playback_data=False
+    ):
       if event.client is None:
         return
       with self._condition:
         if not self._playbacks or self._recording is not None:
           return
-        self._recording = (event.client, self._selected, video, viser_recording)
+        self._recording = (
+            event.client,
+            self._selected,
+            video,
+            viser_recording,
+            playback_data,
+        )
         playback.disabled = True
         for button in record_buttons:
           button.disabled = True
-        event.target.label = 'Recording...'
+        event.target.label = (
+            'Recording...' if video or viser_recording else 'Downloading...'
+        )
         self._condition.notify_all()
 
     @record_video.on_click
@@ -203,9 +298,15 @@ class Visualizer:
     def _request_viser_recording(event):
       _request_recording(event, viser_recording=True)
 
+    @download_playback.on_click
+    def _request_playback_download(event):
+      _request_recording(event, playback_data=True)
+
     @record_all.on_click
     def _request_all_recordings(event):
-      _request_recording(event, video=True, viser_recording=True)
+      _request_recording(
+          event, video=True, viser_recording=True, playback_data=True
+      )
 
     version = -1
     frame = 0
@@ -234,7 +335,7 @@ class Visualizer:
           frame = 0
 
       if recording is not None:
-        client, index, video, viser_recording = recording
+        client, index, video, viser_recording, playback_data = recording
         try:
           self._record_playback(
               server,
@@ -242,10 +343,11 @@ class Visualizer:
               index,
               video=video,
               viser_recording=viser_recording,
+              playback_data=playback_data,
           )
         except Exception as error:
           client.add_notification(
-              title='Recording failed', body=str(error), color='red'
+              title='Download failed', body=str(error), color='red'
           )
         finally:
           with self._condition:
@@ -256,11 +358,13 @@ class Visualizer:
               button.disabled = False
             record_video.label = 'Download playback video'
             record_viser.label = 'Download viser recording'
+            download_playback.label = 'Download task and trajectory'
             record_all.label = 'Download all'
             version = -1
         continue
 
       tic = time.perf_counter()
+      self._prepare_visualization(server, task)
       task.update_visualization(server, traj, frame)
       remaining = task.model.opt.timestep - (time.perf_counter() - tic)
       if remaining > 0:
