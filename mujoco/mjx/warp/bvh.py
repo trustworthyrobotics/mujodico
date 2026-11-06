@@ -65,6 +65,7 @@ def _refit_bvh_shim(
     geom_type: wp.array[int],
     nflex: int,
     nflexelem: int,
+    opt__deterministic: int,
     # Data
     flexvert_xpos: wp.array2d[wp.vec3],
     geom_xmat: wp.array2d[wp.mat33],
@@ -95,6 +96,7 @@ def _refit_bvh_shim(
   _m.geom_type = geom_type
   _m.nflex = nflex
   _m.nflexelem = nflexelem
+  _m.opt.deterministic = opt__deterministic
   _d.flexvert_xpos = flexvert_xpos
   _d.geom_xmat = geom_xmat
   _d.geom_xpos = geom_xpos
@@ -140,6 +142,7 @@ def _refit_bvh_jax_impl(
       m.geom_type,
       m.nflex,
       m._impl.nflexelem,
+      m.opt._impl.deterministic,
       d._impl.flexvert_xpos,
       d.geom_xmat,
       d.geom_xpos,

@@ -23,6 +23,7 @@ import mujoco.mjx.third_party.mujoco_warp as mjwarp
 from mujoco.mjx.third_party.mujoco_warp._src import types as mjwp_types
 import warp as wp
 
+
 _m = mjwarp.Model(
     **{f.name: None for f in dataclasses.fields(mjwarp.Model) if f.init}
 )
@@ -288,6 +289,7 @@ def kinematics_vmap(
   return d, is_batched[1]
 
 
+
 @ffi.format_args_for_warp
 def _tendon_shim(
     # Model
@@ -300,6 +302,7 @@ def _tendon_shim(
     geom_size: wp.array2d[wp.vec3],
     jnt_dofadr: wp.array[int],
     jnt_qposadr: wp.array[int],
+    max_ten_J_rownnz: int,
     ntendon: int,
     nwrap: int,
     site_bodyid: wp.array[int],
@@ -311,6 +314,7 @@ def _tendon_shim(
     tendon_jnt_adr: wp.array[int],
     tendon_num: wp.array[int],
     tendon_site_pair_adr: wp.array[int],
+    tendon_type: wp.array[int],
     wrap_geom_adr: wp.array[int],
     wrap_jnt_adr: wp.array[int],
     wrap_objid: wp.array[int],
@@ -318,6 +322,7 @@ def _tendon_shim(
     wrap_pulley_scale: wp.array[float],
     wrap_site_pair_adr: wp.array[int],
     wrap_type: wp.array[int],
+    opt__deterministic: int,
     # Data
     cdof: wp.array2d[wp.spatial_vector],
     geom_xmat: wp.array2d[wp.mat33],
@@ -344,8 +349,10 @@ def _tendon_shim(
   _m.geom_size = geom_size
   _m.jnt_dofadr = jnt_dofadr
   _m.jnt_qposadr = jnt_qposadr
+  _m.max_ten_J_rownnz = max_ten_J_rownnz
   _m.ntendon = ntendon
   _m.nwrap = nwrap
+  _m.opt.deterministic = opt__deterministic
   _m.site_bodyid = site_bodyid
   _m.ten_J_colind = ten_J_colind
   _m.ten_J_rowadr = ten_J_rowadr
@@ -355,6 +362,7 @@ def _tendon_shim(
   _m.tendon_jnt_adr = tendon_jnt_adr
   _m.tendon_num = tendon_num
   _m.tendon_site_pair_adr = tendon_site_pair_adr
+  _m.tendon_type = tendon_type
   _m.wrap_geom_adr = wrap_geom_adr
   _m.wrap_jnt_adr = wrap_jnt_adr
   _m.wrap_objid = wrap_objid
@@ -436,6 +444,7 @@ def _tendon_jax_impl(m: types.Model, d: types.Data):
       m.geom_size,
       m.jnt_dofadr,
       m.jnt_qposadr,
+      m._impl.max_ten_J_rownnz,
       m.ntendon,
       m.nwrap,
       m.site_bodyid,
@@ -447,6 +456,7 @@ def _tendon_jax_impl(m: types.Model, d: types.Data):
       m._impl.tendon_jnt_adr,
       m.tendon_num,
       m._impl.tendon_site_pair_adr,
+      m.tendon_type,
       m._impl.wrap_geom_adr,
       m._impl.wrap_jnt_adr,
       m.wrap_objid,
@@ -454,6 +464,7 @@ def _tendon_jax_impl(m: types.Model, d: types.Data):
       m._impl.wrap_pulley_scale,
       m._impl.wrap_site_pair_adr,
       m.wrap_type,
+      m.opt._impl.deterministic,
       d.cdof,
       d.geom_xmat,
       d.geom_xpos,
@@ -491,16 +502,16 @@ def tendon_vmap(unused_axis_size, is_batched, m: types.Model, d: types.Data):
   return d, is_batched[1]
 
 
+
 @ffi.format_args_for_warp
 def _com_pos_shim(
     # Model
     nworld: int,
     body_inertia: wp.array2d[wp.vec3],
     body_mass: wp.array2d[float],
-    body_parentid: wp.array[int],
     body_rootid: wp.array[int],
     body_subtreemass: wp.array2d[float],
-    body_tree: tuple[wp.array[int], ...],
+    body_subtreenum: wp.array[int],
     jnt_bodyid: wp.array[int],
     jnt_dofadr: wp.array[int],
     jnt_type: wp.array[int],
@@ -522,10 +533,9 @@ def _com_pos_shim(
   _d.contact = _c
   _m.body_inertia = body_inertia
   _m.body_mass = body_mass
-  _m.body_parentid = body_parentid
   _m.body_rootid = body_rootid
   _m.body_subtreemass = body_subtreemass
-  _m.body_tree = body_tree
+  _m.body_subtreenum = body_subtreenum
   _m.jnt_bodyid = jnt_bodyid
   _m.jnt_dofadr = jnt_dofadr
   _m.jnt_type = jnt_type
@@ -576,10 +586,9 @@ def _com_pos_jax_impl(m: types.Model, d: types.Data):
       d.qpos.shape[0],
       m.body_inertia,
       m.body_mass,
-      m.body_parentid,
       m.body_rootid,
       m.body_subtreemass,
-      m._impl.body_tree,
+      m._impl.body_subtreenum,
       m.jnt_bodyid,
       m.jnt_dofadr,
       m.jnt_type,
