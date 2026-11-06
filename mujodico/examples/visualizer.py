@@ -1,5 +1,8 @@
+import contextlib
+import logging
 from pathlib import Path
 import pickle
+import re
 import shutil
 import subprocess
 import tempfile
@@ -74,8 +77,63 @@ class Visualizer:
       del server.task_visualizer
     self._visualized_task = task
 
+  @contextlib.contextmanager
+  def _plot_renderer(self, directory):
+    try:
+      import kaleido
+      logging.getLogger('kaleido').setLevel(logging.WARNING)
+      logging.getLogger('choreographer').setLevel(logging.WARNING)
+    except ImportError as error:
+      raise ImportError(
+          'Plot recording requires Kaleido 1.1 or newer. Install it with pip'
+          ' install "kaleido>=1.1" and install Chrome with plotly_get_chrome.'
+      ) from error
+    if not hasattr(kaleido, 'start_sync_server'):
+      raise ImportError('Upgrade Kaleido with pip install "kaleido>=1.1".')
+
+    import plotly.graph_objects as go
+
+    # Probe before starting the persistent server: a browser startup failure
+    # in Kaleido's background server can otherwise leave a sync call waiting.
+    options = dict(
+        page_generator=kaleido.PageGenerator(mathjax=False), timeout=30
+    )
+    try:
+      kaleido.calc_fig_sync(
+          go.Figure(),
+          opts=dict(format='png', width=64, height=64),
+          kopts=options,
+      )
+    except Exception as error:
+      raise RuntimeError(
+          'Could not start Plotly image export. Install Kaleido 1.1 or newer '
+          'and Chrome/Chromium (run plotly_get_chrome). '
+          f'Details: {error}'
+      ) from error
+    try:
+      kaleido.start_sync_server(**options)
+      yield
+    finally:
+      kaleido.stop_sync_server()
+
+  def _skip_plot_recording(self, client, error):
+    client.add_notification(
+        title='Plot recording unavailable',
+        body=f'Plots will not be recorded. {error}',
+        color='red',
+    )
+
   def _capture_frames(
-      self, server, client, task, traj, *, video=True, serializer=None
+      self,
+      server,
+      client,
+      task,
+      traj,
+      directory,
+      *,
+      video=False,
+      plots=False,
+      serializer=None,
   ):
     if video:
       import imageio.v3 as iio
@@ -93,17 +151,72 @@ class Visualizer:
           fov=camera.fov,
           transport_format='jpeg',
       )
+      scene_directory = directory / 'scene'
+      scene_directory.mkdir()
+    plot_directories = {}
     for frame in range(task.horizon + 1):
       with server.atomic():
         task.update_visualization(server, traj, frame)
       if serializer is not None:
         serializer.insert_sleep(task.model.opt.timestep)
+      if plots:
+        task_visualizer = getattr(server, 'task_visualizer', None)
+        if task_visualizer is None:
+          raise RuntimeError('The selected task has no Plotly plots to record.')
+        try:
+          plot_frames = task_visualizer.get_plot_frames()
+        except ImportError as error:
+          self._skip_plot_recording(client, error)
+          plots = False
+          plot_directories.clear()
+          if not video and serializer is None:
+            return {}
+        else:
+          if not plot_frames:
+            raise RuntimeError(
+                'The selected task has no Plotly plots to record.'
+            )
+          for ordinal, (name, image) in enumerate(plot_frames.items()):
+            path = directory / 'plots' / f'plot_{ordinal}'
+            path.mkdir(parents=True, exist_ok=True)
+            (path / f'frame_{frame:06d}.png').write_bytes(image)
+            plot_directories[name] = path
       if video:
         server.flush()
         image = client.get_render(**view)
-        yield iio.imwrite('<bytes>', image, extension='.jpg')
-      else:
-        yield None
+        iio.imwrite(scene_directory / f'frame_{frame:06d}.jpg', image)
+    return plot_directories
+
+  def _encode_video(self, ffmpeg, directory, output, timestep, *, extension):
+    result = subprocess.run(
+        [
+            ffmpeg,
+            '-nostdin',
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-framerate',
+            f'{1 / timestep:.12g}',
+            '-start_number',
+            '0',
+            '-i',
+            f'frame_%06d.{extension}',
+            '-vf',
+            'pad=ceil(iw/2)*2:ceil(ih/2)*2',
+            '-c:v',
+            'libx264',
+            '-pix_fmt',
+            'yuv420p',
+            '-movflags',
+            '+faststart',
+            str(output),
+        ],
+        cwd=directory,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+      raise RuntimeError(f'ffmpeg failed: {result.stderr.strip()}')
 
   def _record_playback(
       self,
@@ -112,83 +225,100 @@ class Visualizer:
       index,
       *,
       video=False,
+      plots=False,
       viser_recording=False,
-      playback_data=False,
   ):
+    if not (video or plots or viser_recording):
+      raise ValueError('Select at least one recording type.')
     with self._condition:
       task, traj = self._playbacks[index]
 
-    if video:
+    if video or plots:
       ffmpeg = shutil.which('ffmpeg')
       if ffmpeg is None:
-        raise RuntimeError('Install ffmpeg to download playback as a video.')
+        error = RuntimeError('Install ffmpeg to download playback as a video.')
+        if video:
+          client.add_notification(
+              title='Video recording unavailable',
+              body=f'3D scene and plots will not be recorded. {error}',
+              color='red',
+          )
+        else:
+          self._skip_plot_recording(client, error)
+        video = False
+        plots = False
 
-    if playback_data:
-      self._download_pickle(client, index)
-    if not video and not viser_recording:
-      return
+    with tempfile.TemporaryDirectory(prefix='mujodico-playback-') as directory:
+      path = Path(directory)
+      with contextlib.ExitStack() as resources:
+        if plots:
+          try:
+            resources.enter_context(self._plot_renderer(path))
+          except Exception as error:
+            self._skip_plot_recording(client, error)
+            plots = False
+        if not (video or plots or viser_recording):
+          return
+        self._prepare_visualization(server, task)
+        serializer = server.get_scene_serializer() if viser_recording else None
+        try:
+          plot_directories = self._capture_frames(
+              server,
+              client,
+              task,
+              traj,
+              path,
+              video=video,
+              plots=plots,
+              serializer=serializer,
+          )
+        finally:
+          if serializer is not None:
+            content = serializer.serialize()
 
-    self._prepare_visualization(server, task)
-    serializer = server.get_scene_serializer() if viser_recording else None
-    frames = self._capture_frames(
-        server, client, task, traj, video=video, serializer=serializer
-    )
-    try:
+      outputs = []
       if video:
-        filename = f'playback_{index}.mp4'
-        with tempfile.TemporaryDirectory(
-            prefix='mujodico-playback-'
-        ) as directory:
-          path = Path(directory)
-          for frame, image in enumerate(frames):
-            (path / f'frame_{frame:06d}.jpg').write_bytes(image)
-          result = subprocess.run(
-              [
-                  ffmpeg,
-                  '-nostdin',
-                  '-hide_banner',
-                  '-loglevel',
-                  'error',
-                  '-framerate',
-                  f'{1 / task.model.opt.timestep:.12g}',
-                  '-start_number',
-                  '0',
-                  '-i',
-                  'frame_%06d.jpg',
-                  '-vf',
-                  'pad=ceil(iw/2)*2:ceil(ih/2)*2',
-                  '-c:v',
-                  'libx264',
-                  '-pix_fmt',
-                  'yuv420p',
-                  '-movflags',
-                  '+faststart',
-                  filename,
-              ],
-              cwd=directory,
-              capture_output=True,
-              text=True,
-          )
-          if result.returncode != 0:
-            raise RuntimeError(f'ffmpeg failed: {result.stderr.strip()}')
-          client.send_file_download(
-              filename=filename,
-              content=(path / filename).read_bytes(),
-              save_immediately=True,
-          )
-      else:
-        for _ in frames:
-          pass
-    finally:
-      if serializer is not None:
-        content = serializer.serialize()
+        output = path / f'playback_{index}.mp4'
+        self._encode_video(
+            ffmpeg,
+            path / 'scene',
+            output,
+            task.model.opt.timestep,
+            extension='jpg',
+        )
+        outputs.append(output)
+      used_names = set()
+      for name, frames_directory in plot_directories.items():
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]+', '_', name).strip('_') or 'plot'
+        stem = f'playback_{index}_{safe_name}'
+        filename = f'{stem}.mp4'
+        suffix = 2
+        while filename in used_names:
+          filename = f'{stem}_{suffix}.mp4'
+          suffix += 1
+        used_names.add(filename)
+        output = path / filename
+        self._encode_video(
+            ffmpeg,
+            frames_directory,
+            output,
+            task.model.opt.timestep,
+            extension='png',
+        )
+        outputs.append(output)
+      for output in outputs:
+        client.send_file_download(
+            filename=output.name,
+            content=output.read_bytes(),
+            save_immediately=True,
+        )
 
-    if serializer is not None:
-      client.send_file_download(
-          filename=f'playback_{index}.viser',
-          content=content,
-          save_immediately=True,
-      )
+      if serializer is not None:
+        client.send_file_download(
+            filename=f'playback_{index}.viser',
+            content=content,
+            save_immediately=True,
+        )
 
   def _visualization_loop(self):
     import viser
@@ -204,32 +334,44 @@ class Visualizer:
           disabled=True,
           hint='Zero-based index of the saved task and trajectory to play.',
       )
-      record_video = server.gui.add_button(
-          'Download video',
-          disabled=True,
-          hint='Record the selected playback and download it as an MP4.',
-      )
-      record_viser = server.gui.add_button(
-          'Download viser',
-          disabled=True,
-          hint='Record the selected playback and download it as a .viser file.',
-      )
-      download_pickle = server.gui.add_button(
-          'Download pickle',
-          disabled=True,
-          hint='Save the selected task and trajectory as a .pkl file for playback.',
-      )
-      download_all = server.gui.add_button(
-          'Download all',
-          disabled=True,
-          hint='Download the selected playback as MP4, .viser, and .pkl files.',
-      )
-      upload_playback = server.gui.add_upload_button(
-          'Upload pickle',
-          mime_type='.pkl,.pickle',
-          hint='Load a saved .pkl file for playback.',
-      )
-    record_buttons = (record_video, record_viser, download_pickle, download_all)
+      with server.gui.add_folder('Record', expand_by_default=True):
+        record_scene = server.gui.add_checkbox(
+            '3D scene',
+            initial_value=True,
+            hint='Download the MuJoCo camera view as an MP4.',
+        )
+        record_plots = server.gui.add_checkbox(
+            'plot',
+            initial_value=True,
+            hint='Download a separate MP4 for each Plotly plot.',
+        )
+        record_viser = server.gui.add_checkbox(
+            'viser',
+            initial_value=False,
+            hint='Record the selected playback and download it as a .viser file.',
+        )
+        download_recording = server.gui.add_button(
+            'Download recording',
+            disabled=True,
+            hint='Download the selected recording formats in one playback pass.',
+        )
+      with server.gui.add_folder('Pickle', expand_by_default=True):
+        download_pickle = server.gui.add_button(
+            'Download pickle',
+            disabled=True,
+            hint='Save the selected task and trajectory as a .pkl file for playback.',
+        )
+        upload_playback = server.gui.add_upload_button(
+            'Upload pickle',
+            mime_type='.pkl,.pickle',
+            hint='Load a saved .pkl file for playback.',
+        )
+    record_controls = (
+        record_scene,
+        record_plots,
+        record_viser,
+        download_recording,
+    )
 
     @upload_playback.on_upload
     def _upload_playback(event):
@@ -257,46 +399,50 @@ class Visualizer:
           self._version += 1
           self._condition.notify_all()
 
-    def _request_recording(
-        event, *, video=False, viser_recording=False, playback_data=False
-    ):
+    @download_recording.on_click
+    def _request_recording(event):
       if event.client is None:
         return
       with self._condition:
         if not self._playbacks or self._recording is not None:
           return
+        video = record_scene.value
+        plots = record_plots.value
+        viser_recording = record_viser.value
+        if not (video or plots or viser_recording):
+          event.client.add_notification(
+              title='No recording selected',
+              body='Select at least one recording type.',
+              color='yellow',
+          )
+          return
         self._recording = (
             event.client,
             self._selected,
             video,
+            plots,
             viser_recording,
-            playback_data,
         )
         playback.disabled = True
-        for button in record_buttons:
-          button.disabled = True
-        event.target.label = (
-            'Recording...' if video or viser_recording else 'Downloading...'
-        )
+        for control in record_controls:
+          control.disabled = True
+        download_recording.label = 'Recording...'
         self._condition.notify_all()
-
-    @record_video.on_click
-    def _request_video_recording(event):
-      _request_recording(event, video=True)
-
-    @record_viser.on_click
-    def _request_viser_recording(event):
-      _request_recording(event, viser_recording=True)
 
     @download_pickle.on_click
     def _request_playback_download(event):
-      _request_recording(event, playback_data=True)
-
-    @download_all.on_click
-    def _request_all_recordings(event):
-      _request_recording(
-          event, video=True, viser_recording=True, playback_data=True
-      )
+      if event.client is None:
+        return
+      with self._condition:
+        if not self._playbacks:
+          return
+        index = self._selected
+      try:
+        self._download_pickle(event.client, index)
+      except Exception as error:
+        event.client.add_notification(
+            title='Download failed', body=str(error), color='red'
+        )
 
     version = -1
     frame = 0
@@ -311,8 +457,9 @@ class Visualizer:
           playback.max = len(self._playbacks) - 1
           playback.value = self._selected
           playback.disabled = False
-          for button in record_buttons:
-            button.disabled = False
+          download_pickle.disabled = False
+          for control in record_controls:
+            control.disabled = False
           version = self._version
           frame = 0
         elif recording is None and frame > task.horizon:
@@ -325,15 +472,15 @@ class Visualizer:
           frame = 0
 
       if recording is not None:
-        client, index, video, viser_recording, playback_data = recording
+        client, index, video, plots, viser_recording = recording
         try:
           self._record_playback(
               server,
               client,
               index,
               video=video,
+              plots=plots,
               viser_recording=viser_recording,
-              playback_data=playback_data,
           )
         except Exception as error:
           client.add_notification(
@@ -344,12 +491,9 @@ class Visualizer:
             self._recording = None
             playback.max = len(self._playbacks) - 1
             playback.disabled = False
-            for button in record_buttons:
-              button.disabled = False
-            record_video.label = 'Download video'
-            record_viser.label = 'Download viser'
-            download_pickle.label = 'Download pickle'
-            download_all.label = 'Download all'
+            for control in record_controls:
+              control.disabled = False
+            download_recording.label = 'Download recording'
             version = -1
         continue
 

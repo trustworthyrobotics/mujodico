@@ -54,6 +54,23 @@ class TaskVisualizer:
     else:
       self._plots[name].figure = figure
 
+  def get_plot_frames(self) -> dict[str, bytes]:
+    frames = {}
+    for name, handle in self._plots.items():
+      figure, aspect = handle.figure, handle.aspect
+      width, height = figure.layout.width, figure.layout.height
+      if width is None:
+        width = round(height / aspect) if height is not None else 400
+      if height is None:
+        height = round(width * aspect)
+      frames[name] = figure.to_image(
+          format='png',
+          width=width,
+          height=height,
+          scale=3,
+      )
+    return frames
+
   def cleanup(self) -> None:
     if self._cleaned_up:
       return
