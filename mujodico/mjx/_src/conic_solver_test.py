@@ -57,8 +57,7 @@ class ConicSolverTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
-
-    jax.config.update("jax_enable_x64", True)
+    self.enterContext(jax.enable_x64())
 
     self.P = jp.array([[3., 1., -1.], [1., 4., 2.], [-1., 2., 5.]])
     self.q = jp.array([1., 2., -3.])
