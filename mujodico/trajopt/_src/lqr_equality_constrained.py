@@ -226,12 +226,11 @@ def _build_matrix_cache(prob):
     P1, A1, C1 = earlier
     P2, A2, C2 = later
     eye = jp.eye(nx, dtype=P1.dtype)
-    lu_F = jax.scipy.linalg.lu_factor(eye + P2 @ C1)
-    lu_G = jax.scipy.linalg.lu_factor(eye + C1 @ P2)
+    lu_P2C1 = jax.scipy.linalg.lu_factor(eye + P2 @ C1)
 
-    Pcomp = P1 + A1.T @ jax.scipy.linalg.lu_solve(lu_F, P2 @ A1)
-    Acomp = A2 @ jax.scipy.linalg.lu_solve(lu_G, A1)
-    Ccomp = C2 + A2 @ jax.scipy.linalg.lu_solve(lu_G, C1 @ A2.T)
+    Pcomp = P1 + A1.T @ jax.scipy.linalg.lu_solve(lu_P2C1, P2 @ A1)
+    Acomp = A2 @ jax.scipy.linalg.lu_solve(lu_P2C1, A1, trans=1)
+    Ccomp = C2 + A2 @ jax.scipy.linalg.lu_solve(lu_P2C1, C1 @ A2.T, trans=1)
     return Pcomp, Acomp, Ccomp
 
   V, _, _ = jax.lax.associative_scan(
