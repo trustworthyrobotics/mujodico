@@ -1,6 +1,3 @@
-from dataclasses import replace
-import importlib
-
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
@@ -179,7 +176,7 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
     prob2 = lqr.EqualityConstrainedLQR.create(**data2)
     solution2 = jax.jit(lqr.solve)(prob2)
 
-    prob3 = prob.replace_rhs(q=prob2.q, r=prob2.r, c=prob2.c, e=prob2.e, x0=prob2.x0)
+    prob3 = solution.replace_rhs(q=prob2.q, r=prob2.r, c=prob2.c, e=prob2.e, x0=prob2.x0)
     solution3 = jax.jit(lqr.solve)(prob3)
     self._assert_kkt(solution3, tol=tol)
     self._assert_against_ipopt(solution3, tol=tol)
