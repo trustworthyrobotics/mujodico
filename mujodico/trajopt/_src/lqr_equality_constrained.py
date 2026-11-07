@@ -8,54 +8,93 @@ Solve the following equality-constrained linear quadratic optimal control proble
               Hˣₖ xₖ + Hᵘₖ uₖ = −hₖ         for k = 0,…,T−1
 
 Introduce multipliers λ₀ for the initial-state constraint, λₖ₊₁ for dynamics,
-and νₖ for stage equalities. The Lagrangian is
+and βₖ for stage equalities. The Lagrangian is
 
   L = ∑ₖ₌₀ᵀ⁻¹ [
         ½ xₖᵀQₖxₖ + xₖᵀNₖuₖ + ½ uₖᵀRₖuₖ + qₖᵀxₖ + rₖᵀuₖ
         + λₖ₊₁ᵀ (Aₖ xₖ + Bₖ uₖ + cₖ − xₖ₊₁)
-        + νₖᵀ (Hˣₖ xₖ + Hᵘₖ uₖ + hₖ)
+        + βₖᵀ (Hˣₖ xₖ + Hᵘₖ uₖ + hₖ)
       ]
       + ½ xₜᵀQₜxₜ + qₜᵀxₜ − λ₀ᵀ (x₀ − x̂₀)
 
 The KKT conditions are
 
   Qₜ xₜ − λₜ = -qₜ
-  Qₖ xₖ + Nₖ uₖ + Aₖᵀ λₖ₊₁ + (Hˣₖ)ᵀ νₖ − λₖ = -qₖ    for k = 0,…,T−1
-  Nₖᵀ xₖ + Rₖ uₖ + Bₖᵀ λₖ₊₁ + (Hᵘₖ)ᵀ νₖ = -rₖ        for k = 0,…,T−1
+  Qₖ xₖ + Nₖ uₖ + Aₖᵀ λₖ₊₁ + (Hˣₖ)ᵀ βₖ − λₖ = -qₖ    for k = 0,…,T−1
+  Nₖᵀ xₖ + Rₖ uₖ + Bₖᵀ λₖ₊₁ + (Hᵘₖ)ᵀ βₖ = -rₖ        for k = 0,…,T−1
   Aₖxₖ + Bₖuₖ − xₖ₊₁ = -cₖ                         for k = 0,…,T−1
   Hˣₖ xₖ + Hᵘₖ uₖ = -hₖ                            for k = 0,…,T−1
   x₀ = x̂₀
 """
 
-import functools
 from dataclasses import dataclass, replace
 
 import jax
 import jax.numpy as jp
 
 
-@functools.partial(
-    jax.tree_util.register_dataclass,
-    data_fields=[
-        'Q',
-        'N',
-        'R',
-        'q',
-        'r',
-        'A',
-        'B',
-        'c',
-        'Hx',
-        'Hu',
-        'h',
-        'x0',
-        'x',
-        'u',
-        'lmbda',
-        'nu',
-    ],
-    meta_fields=[],
-)
+def _matvec(matrix, vector):
+  return jax.vmap(jp.matmul)(matrix, vector)
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class _AffineScanCache:
+  """
+  The affine scan starting from x₋₁ = 0, and recursion
+    xₖ = Dₖ xₖ₋₁ + dₖ    k=0,...,N,
+  can be reduced by one level to
+    x₂ⱼ₊₁ = (D₂ⱼ₊₁ D₂ⱼ) x₂ⱼ₋₁ + (D₂ⱼ₊₁ d₂ⱼ + d₂ⱼ₊₁)  j=0,...,⌊N/2⌋.
+
+  `reduction` stores D₂ⱼ₊₁ for constructing the reduced RHS.
+  `expansion` stores D₂ⱼ, used to reconstruct x₂ⱼ = D₂ⱼ x₂ⱼ₋₁ + d₂ⱼ.
+  """
+
+  reduction: jax.Array
+  expansion: jax.Array
+  child: '_AffineScanCache | None'
+
+
+def _build_affine_scan(matrices):
+  n = matrices.shape[0]
+  if n < 2:
+    return None
+  reduction = matrices[1::2]
+  pairs = reduction @ matrices[: 2*(n//2) : 2]  # D₂ⱼ₊₁ D₂ⱼ
+  return _AffineScanCache(
+      reduction=reduction,
+      expansion=matrices[::2],
+      child=_build_affine_scan(pairs),
+  )
+
+
+def _apply_affine_scan(cache, rhs):
+  if cache is None:
+    return rhs
+  n = rhs.shape[0]
+  pairs = _matvec(cache.reduction, rhs[: 2*(n//2) : 2]) + rhs[1::2]  # D₂ⱼ₊₁ d₂ⱼ + d₂ⱼ₊₁
+  odd = _apply_affine_scan(cache.child, pairs)
+  odd_padded = jp.concatenate([jp.zeros_like(rhs[:1]), odd])  # prepend x₋₁ = 0
+  even = _matvec(cache.expansion, odd_padded[:cache.expansion.shape[0]]) + rhs[::2]
+  return jp.empty_like(rhs).at[1::2].set(odd).at[::2].set(even)
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class _MatrixCache:
+  backward_lu: tuple[jax.Array, jax.Array]
+  Minv_K: jax.Array
+  Minv_L: jax.Array
+  C: jax.Array
+  V: jax.Array
+  forward_lu: tuple[jax.Array, jax.Array]
+  D: jax.Array
+  DT_Vnext: jax.Array
+  backward_scan: _AffineScanCache | None
+  forward_scan: _AffineScanCache | None
+
+
+@jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class EqualityConstrainedLQR:
   Q: jax.Array
@@ -73,7 +112,8 @@ class EqualityConstrainedLQR:
   x: jax.Array | None = None
   u: jax.Array | None = None
   lmbda: jax.Array | None = None
-  nu: jax.Array | None = None
+  beta: jax.Array | None = None
+  _cache: _MatrixCache | None = None
 
   @staticmethod
   def create(
@@ -120,13 +160,32 @@ class EqualityConstrainedLQR:
         x0=x0,
     )
 
+  def replace_rhs(
+      self,
+      *,
+      q=None,
+      r=None,
+      c=None,
+      h=None,
+      x0=None,
+  ) -> 'EqualityConstrainedLQR':
+    updates = {}
+    for name, value in dict(q=q, r=r, c=c, h=h, x0=x0).items():
+      if value is None:
+        continue
+      value = jp.asarray(value)
+      original = getattr(self, name)
+      assert value.shape == original.shape
+      assert value.dtype == original.dtype
+      updates[name] = value
+    return replace(self, **updates, x=None, u=None, lmbda=None, beta=None)
 
-def solve(prob: EqualityConstrainedLQR) -> EqualityConstrainedLQR:
-  assert isinstance(prob, EqualityConstrainedLQR)
-  _, nx, nu = prob.N.shape
+
+def _build_matrix_cache(prob):
+  nx = prob.Q.shape[1]
   nc = prob.h.shape[1]
 
-  def boundary_map(Qk, Nk, Rk, qk, rk, Ak, Bk, ck, Hxk, Huk, hk):
+  def boundary_map(Qk, Nk, Rk, Ak, Bk, Hxk, Huk):
     Mk = jp.block([
         [Rk, Huk.T],
         [Huk, jp.zeros((nc, nc), dtype=Rk.dtype)],
@@ -139,100 +198,124 @@ def solve(prob: EqualityConstrainedLQR) -> EqualityConstrainedLQR:
         Bk.T,
         jp.zeros((nc, nx), dtype=Bk.dtype),
     ])
-    ek = jp.concatenate([
-        rk,
-        hk,
-    ])
-
     lu_Mk = jax.scipy.linalg.lu_factor(Mk)
     Mkinv_Kk = jax.scipy.linalg.lu_solve(lu_Mk, Kk)
-    Mkinv_ek = jax.scipy.linalg.lu_solve(lu_Mk, ek)
     Mkinv_Lk = jax.scipy.linalg.lu_solve(lu_Mk, Lk)
 
+    # Pₖ = Qₖ - [Nₖ (Hˣₖ)ᵀ] Mₖ⁻¹ [Nₖ (Hˣₖ)ᵀ]ᵀ
     Pk = Qk - Kk.T @ Mkinv_Kk
-    pk = qk - Kk.T @ Mkinv_ek
+    # A̅ₖ = Aₖ - [Bₖ 0] Mₖ⁻¹ [Nₖ (Hˣₖ)ᵀ]ᵀ
     Abark = Ak - Lk.T @ Mkinv_Kk
-    bk = ck - Lk.T @ Mkinv_ek
+    # Cₖ = [Bₖ 0] Mₖ⁻¹ [Bₖ 0]ᵀ
     Ck = Lk.T @ Mkinv_Lk
 
-    return (Pk, pk, Abark, bk, Ck), (Mkinv_Kk, Mkinv_ek, Mkinv_Lk)
+    return (Pk, Abark, Ck), (lu_Mk, Mkinv_Kk, Mkinv_Lk)
 
-  (P, p, Abar, b, C), (Minv_K, Minv_e, Minv_L) = jax.vmap(boundary_map)(
+  (P, Abar, C), (backward_lu, Minv_K, Minv_L) = jax.vmap(boundary_map)(
       Qk=prob.Q[:-1],
       Nk=prob.N,
       Rk=prob.R,
-      qk=prob.q[:-1],
-      rk=prob.r,
       Ak=prob.A,
       Bk=prob.B,
-      ck=prob.c,
       Hxk=prob.Hx,
       Huk=prob.Hu,
-      hk=prob.h,
   )
-  P = jp.concatenate((P, prob.Q[-1:]))
-  p = jp.concatenate((p, prob.q[-1:]))
-  Abar = jp.concatenate((Abar, jp.zeros((1, nx, nx), dtype=Abar.dtype)))
-  b = jp.concatenate((b, jp.zeros((1, nx), dtype=b.dtype)))
-  C = jp.concatenate((C, jp.zeros((1, nx, nx), dtype=C.dtype)))
 
   def compose_boundary(later, earlier):
     # reverse=True supplies the later interval first. Compose in time order.
-    P1, p1, A1, b1, C1 = earlier
-    P2, p2, A2, b2, C2 = later
+    P1, A1, C1 = earlier
+    P2, A2, C2 = later
     eye = jp.eye(nx, dtype=P1.dtype)
     lu_F = jax.scipy.linalg.lu_factor(eye + P2 @ C1)
     lu_G = jax.scipy.linalg.lu_factor(eye + C1 @ P2)
 
     Pcomp = P1 + A1.T @ jax.scipy.linalg.lu_solve(lu_F, P2 @ A1)
-    pcomp = p1 + A1.T @ jax.scipy.linalg.lu_solve(lu_F, p2 + P2 @ b1)
     Acomp = A2 @ jax.scipy.linalg.lu_solve(lu_G, A1)
-    bcomp = b2 + A2 @ jax.scipy.linalg.lu_solve(lu_G, b1 - C1 @ p2)
     Ccomp = C2 + A2 @ jax.scipy.linalg.lu_solve(lu_G, C1 @ A2.T)
-    return Pcomp, pcomp, Acomp, bcomp, Ccomp
+    return Pcomp, Acomp, Ccomp
 
-  V, v, _, _, _ = jax.lax.associative_scan(
+  V, _, _ = jax.lax.associative_scan(
       jax.vmap(compose_boundary),
-      (P, p, Abar, b, C),
+      (
+          jp.concatenate((P, prob.Q[-1:])),
+          jp.concatenate((Abar, jp.zeros((1, nx, nx), dtype=Abar.dtype))),
+          jp.concatenate((C, jp.zeros((1, nx, nx), dtype=C.dtype))),
+      ),
       reverse=True,
   )
 
-  def forward_map(Abark, bk, Ck, Vnextk, vnextk):
-    affine = jax.scipy.linalg.solve(
-        jp.eye(nx, dtype=Ck.dtype) + Ck @ Vnextk,
-        jp.column_stack((Abark, bk - Ck @ vnextk))
-    )
-    return affine[:, :nx], affine[:, nx]
+  forward_lu = jax.vmap(jax.scipy.linalg.lu_factor)(
+      jp.eye(nx, dtype=C.dtype) + C @ V[1:],
+  )
+  # Dₖ = (I + Cₖ Vₖ₊₁)⁻¹ A̅ₖ
+  D = jax.vmap(jax.scipy.linalg.lu_solve)(forward_lu, Abar)
+  # Dₖᵀ = A̅ₖᵀ (I + Vₖ₊₁ Cₖ)⁻¹
+  DT = D.swapaxes(-1, -2)
+  zero = jp.zeros((1, nx, nx), dtype=D.dtype)
 
-  D, d = jax.vmap(forward_map)(
-      Abark=Abar[:-1],
-      bk=b[:-1],
-      Ck=C[:-1],
-      Vnextk=V[1:],
-      vnextk=v[1:],
+  return _MatrixCache(
+      backward_lu=backward_lu,
+      Minv_K=Minv_K,
+      Minv_L=Minv_L,
+      C=C,
+      V=V,
+      forward_lu=forward_lu,
+      D=D,
+      DT_Vnext=DT @ V[1:],
+      # Constant endpoint maps encode v[T] = q[T] and x[0] = x0.
+      backward_scan=_build_affine_scan(jp.concatenate((DT, zero))[::-1]),
+      forward_scan=_build_affine_scan(jp.concatenate((zero, D))),
   )
 
-  def compose_affine(earlier, later):
-    D1, d1 = earlier
-    D2, d2 = later
-    return D2 @ D1, D2 @ d1 + d2
 
-  D, d = jax.lax.associative_scan(
-    jax.vmap(compose_affine),
-    (D, d)
+def _solve_rhs(prob: EqualityConstrainedLQR) -> EqualityConstrainedLQR:
+  assert isinstance(prob, EqualityConstrainedLQR)
+  assert prob._cache is not None
+  cache = prob._cache
+
+  nu = prob.R.shape[1]
+
+  # eₖ = [rₖᵀ hₖᵀ]ᵀ
+  e = jp.concatenate((prob.r, prob.h), axis=-1)
+  Minv_e = jax.vmap(jax.scipy.linalg.lu_solve)(cache.backward_lu, e)
+  # pₖ = qₖ - [Nₖ (Hˣₖ)ᵀ] Mₖ⁻¹ eₖ
+  p = (
+      prob.q[:-1]
+      - _matvec(prob.N, Minv_e[:, :nu])
+      - _matvec(prob.Hx.swapaxes(-1, -2), Minv_e[:, nu:])
   )
+  # bₖ = cₖ - [Bₖ 0] Mₖ⁻¹ eₖ
+  b = prob.c - _matvec(prob.B, Minv_e[:, :nu])
+  # vₖ = Dₖᵀ vₖ₊₁ + pₖ + Dₖᵀ Vₖ₊₁ bₖ
+  offsets = jp.concatenate((p + _matvec(cache.DT_Vnext, b), prob.q[-1:]))
+  v = _apply_affine_scan(cache.backward_scan, offsets[::-1])[::-1]
 
-  matvec = jax.vmap(jp.matmul)
-  x = jp.concatenate((prob.x0[None], D @ prob.x0 + d))
-  lmbda = matvec(V, x) + v
-  u_nu = -(matvec(Minv_K, x[:-1]) + matvec(Minv_L, lmbda[1:]) + Minv_e)
-  u = u_nu[:, :nu]
-  nu = u_nu[:, nu:]
+  # dₖ = (I + Cₖ Vₖ₊₁)⁻¹ (bₖ - Cₖ vₖ₊₁)
+  d = jax.vmap(jax.scipy.linalg.lu_solve)(
+      cache.forward_lu,
+      b - _matvec(cache.C, v[1:]),
+  )
+  # xₖ₊₁ = Dₖ xₖ + dₖ
+  x = _apply_affine_scan(cache.forward_scan, jp.concatenate((prob.x0[None], d)))
+
+  # λₖ = Vₖ xₖ + vₖ
+  lmbda = _matvec(cache.V, x) + v
+  # [uₖᵀ βₖᵀ] = −Mₖ⁻¹ (Kₖ xₖ + Lₖ λₖ₊₁ + eₖ)
+  u_beta = -(_matvec(cache.Minv_K, x[:-1]) + _matvec(cache.Minv_L, lmbda[1:]) + Minv_e)
+  u = u_beta[:, :nu]
+  beta = u_beta[:, nu:]
 
   return replace(
       prob,
       x=x,
       u=u,
       lmbda=lmbda,
-      nu=nu,
+      beta=beta,
   )
+
+def solve(prob: EqualityConstrainedLQR) -> EqualityConstrainedLQR:
+  assert isinstance(prob, EqualityConstrainedLQR)
+  if prob._cache is None:
+    return _solve_rhs(replace(prob, _cache=_build_matrix_cache(prob)))
+  else:
+    return _solve_rhs(prob)

@@ -12,14 +12,14 @@ from mujodico.trajopt._src.ipopt_trajopt import IPOptTrajOpt
 
 
 _CASES = (
-    ('with_stage_equalities', 2,      50, 5, 3, 2, 'psd'),
-    ('no_stage_equalities', 3,        50, 5, 3, 0, 'psd'),
-    ('singular_control_cost', 4,      50, 5, 3, 1, 'singular_r'),
-    ('fully_constrained_controls', 5, 50, 5, 2, 2, 'singular_r'),
+    ('with_stage_equalities', 2,      67, 5, 3, 2, 'psd'),
+    ('no_stage_equalities', 3,        68, 5, 3, 0, 'psd'),
+    ('singular_control_cost', 4,      69, 5, 3, 1, 'singular_r'),
+    ('fully_constrained_controls', 5, 70, 5, 2, 2, 'singular_r'),
 )
 
 
-def _random_problem(seed, T, nx, nu, nc, curvature):
+def _random_problem_data(seed, T, nx, nu, nc, curvature):
   rng = np.random.default_rng(seed)
 
   # Hu has orthonormal rows.
@@ -60,7 +60,7 @@ def _random_problem(seed, T, nx, nu, nc, curvature):
       h=rng.normal(scale=0.1, size=(T, nc)),
       x0=rng.normal(size=nx),
   )
-  return lqr.EqualityConstrainedLQR.create(**jax.tree.map(jp.asarray, data))
+  return jax.tree.map(jp.asarray, data)
 
 
 class EqualityConstrainedLQRTest(parameterized.TestCase):
@@ -73,11 +73,12 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
     p = jax.tree.map(np.asarray, solution)
     T, nx, nu = p.N.shape
     nc = p.h.shape[-1]
+
     for value, shape in (
         (p.x, (T + 1, nx)),
         (p.u, (T, nu)),
         (p.lmbda, (T + 1, nx)),
-        (p.nu, (T, nc)),
+        (p.beta, (T, nc)),
     ):
       self.assertEqual(value.shape, shape)
       self.assertTrue(np.all(np.isfinite(value)))
@@ -92,7 +93,7 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
             mv(p.Q[:-1], p.x[:-1])
             + mv(p.N, p.u)
             + mtv(p.A, p.lmbda[1:])
-            + mtv(p.Hx, p.nu)
+            + mtv(p.Hx, p.beta)
             + p.q[:-1]
             - p.lmbda[:-1]
         ),
@@ -100,7 +101,7 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
             mtv(p.N, p.x[:-1])
             + mv(p.R, p.u)
             + mtv(p.B, p.lmbda[1:])
-            + mtv(p.Hu, p.nu)
+            + mtv(p.Hu, p.beta)
             + p.r
         ),
         'terminal': p.Q[-1] @ p.x[-1] + p.q[-1] - p.lmbda[-1],
@@ -151,22 +152,43 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
 
     local_dual = info['mult_g'][nx:].reshape(T, nx + nc)
     lmbda = np.concatenate((info['mult_g'][:nx][None], local_dual[:, :nx]))
-    nu = local_dual[:, nx:]
+    beta = local_dual[:, nx:]
 
     for actual, expected in (
         (solution.x, x),
         (solution.u, u),
         (solution.lmbda, lmbda),
-        (solution.nu, nu),
+        (solution.beta, beta),
     ):
       np.testing.assert_allclose(actual, expected, rtol=tol, atol=tol)
 
   @parameterized.named_parameters(*_CASES)
-  def test_solve(self, *args):
-    problem = _random_problem(*args)
-    solution = jax.jit(lqr.solve)(problem)
-    self._assert_kkt(solution, tol=1e-8)
-    self._assert_against_ipopt(solution, tol=1e-8)
+  def test_solve(self, seed, *args):
+    tol = 1e-8
+
+    data = _random_problem_data(seed, *args)
+    prob = lqr.EqualityConstrainedLQR.create(**data)
+    solution = jax.jit(lqr.solve)(prob)
+    self._assert_kkt(solution, tol=tol)
+    self._assert_against_ipopt(solution, tol=tol)
+
+    data2 = _random_problem_data(seed + 1, *args)
+    for name, value in data.items():
+      if name not in ('q', 'r', 'c', 'h', 'x0'):
+        data2[name] = value
+    prob2 = lqr.EqualityConstrainedLQR.create(**data2)
+    solution2 = jax.jit(lqr.solve)(prob2)
+
+    prob3 = prob.replace_rhs(q=prob2.q, r=prob2.r, c=prob2.c, h=prob2.h, x0=prob2.x0)
+    solution3 = jax.jit(lqr.solve)(prob3)
+    self._assert_kkt(solution3, tol=tol)
+    self._assert_against_ipopt(solution3, tol=tol)
+    for field in ('x', 'u', 'lmbda', 'beta'):
+      np.testing.assert_allclose(
+          getattr(solution2, field),
+          getattr(solution3, field),
+          rtol=tol, atol=tol,
+      )
 
 
 if __name__ == '__main__':
