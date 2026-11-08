@@ -1,5 +1,12 @@
 # MuJoDiCo (Multi-Joint dynamics with Differentiable Contact)
 
+[![PyPI Python Version][pypi-versions-badge]][pypi]
+[![PyPI version][pypi-badge]][pypi]
+
+[pypi-versions-badge]: https://img.shields.io/pypi/pyversions/mujodico
+[pypi-badge]: https://badge.fury.io/py/mujodico.svg
+[pypi]: https://pypi.org/project/mujodico/
+
 This package extends MuJoCo with differentiable contact dynamics and provides trajectory optimization algorithms for contact-rich dynamical systems. Gradients are computed using the implicit function theorem rather than differentiating through the solver rollout.
 
 ## Installation
