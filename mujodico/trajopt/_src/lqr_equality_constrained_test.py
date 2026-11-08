@@ -1,6 +1,3 @@
-from dataclasses import replace
-import importlib
-
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
@@ -22,9 +19,9 @@ _CASES = (
 def _random_problem_data(seed, T, nx, nu, nc, curvature):
   rng = np.random.default_rng(seed)
 
-  # Hu has orthonormal rows.
+  # Eu has orthonormal rows.
   basis, _ = np.linalg.qr(rng.normal(size=(T, nu, nu)))
-  Hu = basis[:, :, :nc].swapaxes(-1, -2)
+  Eu = basis[:, :, :nc].swapaxes(-1, -2)
 
   if curvature == 'pd':
     factor = rng.normal(scale=0.2, size=(T, nx + nu, nx + nu))
@@ -32,7 +29,7 @@ def _random_problem_data(seed, T, nx, nu, nc, curvature):
   else:
     # A joint Gram matrix guarantees PSD even with nonzero cross costs.
     # In the singular-R case, R vanishes exactly on the constrained controls
-    # and is strictly positive on ker(Hu), so the saddle block is invertible.
+    # and is strictly positive on ker(Eu), so the saddle block is invertible.
     nfree = nu - nc if curvature == 'singular_r' else nu
     control_basis = basis[:, :, nu - nfree:]
     G = rng.uniform(0.7, 1.3, size=(T, nfree, 1)) * control_basis.swapaxes(-1, -2)
@@ -55,9 +52,9 @@ def _random_problem_data(seed, T, nx, nu, nc, curvature):
       A=0.65 * np.eye(nx) + rng.normal(scale=0.05, size=(T, nx, nx)),
       B=rng.normal(scale=0.2, size=(T, nx, nu)),
       c=rng.normal(scale=0.1, size=(T, nx)),
-      Hx=rng.normal(scale=0.1, size=(T, nc, nx)),
-      Hu=Hu,
-      h=rng.normal(scale=0.1, size=(T, nc)),
+      Ex=rng.normal(scale=0.1, size=(T, nc, nx)),
+      Eu=Eu,
+      e=rng.normal(scale=0.1, size=(T, nc)),
       x0=rng.normal(size=nx),
   )
   return jax.tree.map(jp.asarray, data)
@@ -72,7 +69,7 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
   def _assert_kkt(self, solution, tol):
     p = jax.tree.map(np.asarray, solution)
     T, nx, nu = p.N.shape
-    nc = p.h.shape[-1]
+    nc = p.e.shape[-1]
 
     for value, shape in (
         (p.x, (T + 1, nx)),
@@ -88,12 +85,12 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
     residuals = {
         'initial': p.x[0] - p.x0,
         'dynamics': mv(p.A, p.x[:-1]) + mv(p.B, p.u) + p.c - p.x[1:],
-        'equalities': mv(p.Hx, p.x[:-1]) + mv(p.Hu, p.u) + p.h,
+        'equalities': mv(p.Ex, p.x[:-1]) + mv(p.Eu, p.u) + p.e,
         'state_stationarity': (
             mv(p.Q[:-1], p.x[:-1])
             + mv(p.N, p.u)
             + mtv(p.A, p.lmbda[1:])
-            + mtv(p.Hx, p.beta)
+            + mtv(p.Ex, p.beta)
             + p.q[:-1]
             - p.lmbda[:-1]
         ),
@@ -101,7 +98,7 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
             mtv(p.N, p.x[:-1])
             + mv(p.R, p.u)
             + mtv(p.B, p.lmbda[1:])
-            + mtv(p.Hu, p.beta)
+            + mtv(p.Eu, p.beta)
             + p.r
         ),
         'terminal': p.Q[-1] @ p.x[-1] + p.q[-1] - p.lmbda[-1],
@@ -112,7 +109,7 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
 
   def _assert_against_ipopt(self, solution, tol):
     T, nx, nu = solution.N.shape
-    nc = solution.h.shape[1]
+    nc = solution.e.shape[1]
 
     params = solution
     solver = IPOptTrajOpt(
@@ -134,7 +131,7 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
         ),
         local_equality_constraint=lambda x, u, xnext, k, p: jp.concatenate((
             p.A[k] @ x + p.B[k] @ u + p.c[k] - xnext,
-            p.Hx[k] @ x + p.Hu[k] @ u + p.h[k],
+            p.Ex[k] @ x + p.Eu[k] @ u + p.e[k],
         )),
         gauss_newton=False,
         params_trace=params,
@@ -174,12 +171,12 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
 
     data2 = _random_problem_data(seed + 1, *args)
     for name, value in data.items():
-      if name not in ('q', 'r', 'c', 'h', 'x0'):
+      if name not in ('q', 'r', 'c', 'e', 'x0'):
         data2[name] = value
     prob2 = lqr.EqualityConstrainedLQR.create(**data2)
     solution2 = jax.jit(lqr.solve)(prob2)
 
-    prob3 = prob.replace_rhs(q=prob2.q, r=prob2.r, c=prob2.c, h=prob2.h, x0=prob2.x0)
+    prob3 = solution.replace_rhs(q=prob2.q, r=prob2.r, c=prob2.c, e=prob2.e, x0=prob2.x0)
     solution3 = jax.jit(lqr.solve)(prob3)
     self._assert_kkt(solution3, tol=tol)
     self._assert_against_ipopt(solution3, tol=tol)

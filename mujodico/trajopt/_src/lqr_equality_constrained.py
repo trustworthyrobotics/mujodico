@@ -5,7 +5,7 @@ Solve the following equality-constrained linear quadratic optimal control proble
               + ½ xₜᵀQₜxₜ + qₜᵀxₜ           (t=T denotes terminal)
   subject to  x₀ = x̂₀
               xₖ₊₁ = Aₖ xₖ + Bₖ uₖ + cₖ     for k = 0,…,T−1
-              Hˣₖ xₖ + Hᵘₖ uₖ = −hₖ         for k = 0,…,T−1
+              Eˣₖ xₖ + Eᵘₖ uₖ = −eₖ         for k = 0,…,T−1
 
 Introduce multipliers λ₀ for the initial-state constraint, λₖ₊₁ for dynamics,
 and βₖ for stage equalities. The Lagrangian is
@@ -13,17 +13,17 @@ and βₖ for stage equalities. The Lagrangian is
   L = ∑ₖ₌₀ᵀ⁻¹ [
         ½ xₖᵀQₖxₖ + xₖᵀNₖuₖ + ½ uₖᵀRₖuₖ + qₖᵀxₖ + rₖᵀuₖ
         + λₖ₊₁ᵀ (Aₖ xₖ + Bₖ uₖ + cₖ − xₖ₊₁)
-        + βₖᵀ (Hˣₖ xₖ + Hᵘₖ uₖ + hₖ)
+        + βₖᵀ (Eˣₖ xₖ + Eᵘₖ uₖ + eₖ)
       ]
       + ½ xₜᵀQₜxₜ + qₜᵀxₜ − λ₀ᵀ (x₀ − x̂₀)
 
 The KKT conditions are
 
   Qₜ xₜ − λₜ = -qₜ
-  Qₖ xₖ + Nₖ uₖ + Aₖᵀ λₖ₊₁ + (Hˣₖ)ᵀ βₖ − λₖ = -qₖ    for k = 0,…,T−1
-  Nₖᵀ xₖ + Rₖ uₖ + Bₖᵀ λₖ₊₁ + (Hᵘₖ)ᵀ βₖ = -rₖ        for k = 0,…,T−1
+  Qₖ xₖ + Nₖ uₖ + Aₖᵀ λₖ₊₁ + (Eˣₖ)ᵀ βₖ − λₖ = -qₖ    for k = 0,…,T−1
+  Nₖᵀ xₖ + Rₖ uₖ + Bₖᵀ λₖ₊₁ + (Eᵘₖ)ᵀ βₖ = -rₖ        for k = 0,…,T−1
   Aₖxₖ + Bₖuₖ − xₖ₊₁ = -cₖ                         for k = 0,…,T−1
-  Hˣₖ xₖ + Hᵘₖ uₖ = -hₖ                            for k = 0,…,T−1
+  Eˣₖ xₖ + Eᵘₖ uₖ = -eₖ                            for k = 0,…,T−1
   x₀ = x̂₀
 """
 
@@ -105,9 +105,9 @@ class EqualityConstrainedLQR:
   A: jax.Array
   B: jax.Array
   c: jax.Array
-  Hx: jax.Array
-  Hu: jax.Array
-  h: jax.Array
+  Ex: jax.Array
+  Eu: jax.Array
+  e: jax.Array
   x0: jax.Array
   x: jax.Array | None = None
   u: jax.Array | None = None
@@ -125,9 +125,9 @@ class EqualityConstrainedLQR:
       A: jax.Array,
       B: jax.Array,
       c: jax.Array,
-      Hx: jax.Array,
-      Hu: jax.Array,
-      h: jax.Array,
+      Ex: jax.Array,
+      Eu: jax.Array,
+      e: jax.Array,
       x0: jax.Array,
   ) -> 'EqualityConstrainedLQR':
     T, nx, nu = N.shape
@@ -139,10 +139,10 @@ class EqualityConstrainedLQR:
     assert A.shape == (T, nx, nx)
     assert B.shape == (T, nx, nu)
     assert c.shape == (T, nx)
-    nc = h.shape[1]
-    assert Hx.shape == (T, nc, nx)
-    assert Hu.shape == (T, nc, nu)
-    assert h.shape == (T, nc)
+    nc = e.shape[1]
+    assert Ex.shape == (T, nc, nx)
+    assert Eu.shape == (T, nc, nu)
+    assert e.shape == (T, nc)
     assert x0.shape == (nx,)
 
     return EqualityConstrainedLQR(
@@ -154,9 +154,9 @@ class EqualityConstrainedLQR:
         A=A,
         B=B,
         c=c,
-        Hx=Hx,
-        Hu=Hu,
-        h=h,
+        Ex=Ex,
+        Eu=Eu,
+        e=e,
         x0=x0,
     )
 
@@ -166,11 +166,11 @@ class EqualityConstrainedLQR:
       q=None,
       r=None,
       c=None,
-      h=None,
+      e=None,
       x0=None,
   ) -> 'EqualityConstrainedLQR':
     updates = {}
-    for name, value in dict(q=q, r=r, c=c, h=h, x0=x0).items():
+    for name, value in dict(q=q, r=r, c=c, e=e, x0=x0).items():
       if value is None:
         continue
       value = jp.asarray(value)
@@ -181,18 +181,20 @@ class EqualityConstrainedLQR:
     return replace(self, **updates, x=None, u=None, lmbda=None, beta=None)
 
 
-def _build_matrix_cache(prob):
-  nx = prob.Q.shape[1]
-  nc = prob.h.shape[1]
+def _build_matrix_cache(prob: EqualityConstrainedLQR) -> _MatrixCache:
+  assert isinstance(prob, EqualityConstrainedLQR)
 
-  def boundary_map(Qk, Nk, Rk, Ak, Bk, Hxk, Huk):
+  nx = prob.Q.shape[1]
+  nc = prob.e.shape[1]
+
+  def boundary_map(Qk, Nk, Rk, Ak, Bk, Exk, Euk):
     Mk = jp.block([
-        [Rk, Huk.T],
-        [Huk, jp.zeros((nc, nc), dtype=Rk.dtype)],
+        [Rk, Euk.T],
+        [Euk, jp.zeros((nc, nc), dtype=Rk.dtype)],
     ])
     Kk = jp.vstack([
         Nk.T,
-        Hxk,
+        Exk,
     ])
     Lk = jp.vstack([
         Bk.T,
@@ -202,9 +204,9 @@ def _build_matrix_cache(prob):
     Mkinv_Kk = jax.scipy.linalg.lu_solve(lu_Mk, Kk)
     Mkinv_Lk = jax.scipy.linalg.lu_solve(lu_Mk, Lk)
 
-    # Pₖ = Qₖ - [Nₖ (Hˣₖ)ᵀ] Mₖ⁻¹ [Nₖ (Hˣₖ)ᵀ]ᵀ
+    # Pₖ = Qₖ - [Nₖ (Eˣₖ)ᵀ] Mₖ⁻¹ [Nₖ (Eˣₖ)ᵀ]ᵀ
     Pk = Qk - Kk.T @ Mkinv_Kk
-    # A̅ₖ = Aₖ - [Bₖ 0] Mₖ⁻¹ [Nₖ (Hˣₖ)ᵀ]ᵀ
+    # A̅ₖ = Aₖ - [Bₖ 0] Mₖ⁻¹ [Nₖ (Eˣₖ)ᵀ]ᵀ
     Abark = Ak - Lk.T @ Mkinv_Kk
     # Cₖ = [Bₖ 0] Mₖ⁻¹ [Bₖ 0]ᵀ
     Ck = Lk.T @ Mkinv_Lk
@@ -217,8 +219,8 @@ def _build_matrix_cache(prob):
       Rk=prob.R,
       Ak=prob.A,
       Bk=prob.B,
-      Hxk=prob.Hx,
-      Huk=prob.Hu,
+      Exk=prob.Ex,
+      Euk=prob.Eu,
   )
 
   def compose_boundary(later, earlier):
@@ -226,12 +228,11 @@ def _build_matrix_cache(prob):
     P1, A1, C1 = earlier
     P2, A2, C2 = later
     eye = jp.eye(nx, dtype=P1.dtype)
-    lu_F = jax.scipy.linalg.lu_factor(eye + P2 @ C1)
-    lu_G = jax.scipy.linalg.lu_factor(eye + C1 @ P2)
+    lu_P2C1 = jax.scipy.linalg.lu_factor(eye + P2 @ C1)
 
-    Pcomp = P1 + A1.T @ jax.scipy.linalg.lu_solve(lu_F, P2 @ A1)
-    Acomp = A2 @ jax.scipy.linalg.lu_solve(lu_G, A1)
-    Ccomp = C2 + A2 @ jax.scipy.linalg.lu_solve(lu_G, C1 @ A2.T)
+    Pcomp = P1 + A1.T @ jax.scipy.linalg.lu_solve(lu_P2C1, P2 @ A1)
+    Acomp = A2 @ jax.scipy.linalg.lu_solve(lu_P2C1, A1, trans=1)
+    Ccomp = C2 + A2 @ jax.scipy.linalg.lu_solve(lu_P2C1, C1 @ A2.T, trans=1)
     return Pcomp, Acomp, Ccomp
 
   V, _, _ = jax.lax.associative_scan(
@@ -275,17 +276,17 @@ def _solve_rhs(prob: EqualityConstrainedLQR) -> EqualityConstrainedLQR:
 
   nu = prob.R.shape[1]
 
-  # eₖ = [rₖᵀ hₖᵀ]ᵀ
-  e = jp.concatenate((prob.r, prob.h), axis=-1)
-  Minv_e = jax.vmap(jax.scipy.linalg.lu_solve)(cache.backward_lu, e)
-  # pₖ = qₖ - [Nₖ (Hˣₖ)ᵀ] Mₖ⁻¹ eₖ
+  # fₖ = [rₖᵀ eₖᵀ]ᵀ
+  f = jp.concatenate((prob.r, prob.e), axis=-1)
+  Minv_f = jax.vmap(jax.scipy.linalg.lu_solve)(cache.backward_lu, f)
+  # pₖ = qₖ - [Nₖ (Eˣₖ)ᵀ] Mₖ⁻¹ fₖ
   p = (
       prob.q[:-1]
-      - _matvec(prob.N, Minv_e[:, :nu])
-      - _matvec(prob.Hx.swapaxes(-1, -2), Minv_e[:, nu:])
+      - _matvec(prob.N, Minv_f[:, :nu])
+      - _matvec(prob.Ex.swapaxes(-1, -2), Minv_f[:, nu:])
   )
-  # bₖ = cₖ - [Bₖ 0] Mₖ⁻¹ eₖ
-  b = prob.c - _matvec(prob.B, Minv_e[:, :nu])
+  # bₖ = cₖ - [Bₖ 0] Mₖ⁻¹ fₖ
+  b = prob.c - _matvec(prob.B, Minv_f[:, :nu])
   # vₖ = Dₖᵀ vₖ₊₁ + pₖ + Dₖᵀ Vₖ₊₁ bₖ
   offsets = jp.concatenate((p + _matvec(cache.DT_Vnext, b), prob.q[-1:]))
   v = _apply_affine_scan(cache.backward_scan, offsets[::-1])[::-1]
@@ -300,8 +301,8 @@ def _solve_rhs(prob: EqualityConstrainedLQR) -> EqualityConstrainedLQR:
 
   # λₖ = Vₖ xₖ + vₖ
   lmbda = _matvec(cache.V, x) + v
-  # [uₖᵀ βₖᵀ] = −Mₖ⁻¹ (Kₖ xₖ + Lₖ λₖ₊₁ + eₖ)
-  u_beta = -(_matvec(cache.Minv_K, x[:-1]) + _matvec(cache.Minv_L, lmbda[1:]) + Minv_e)
+  # [uₖᵀ βₖᵀ] = −Mₖ⁻¹ (Kₖ xₖ + Lₖ λₖ₊₁ + fₖ)
+  u_beta = -(_matvec(cache.Minv_K, x[:-1]) + _matvec(cache.Minv_L, lmbda[1:]) + Minv_f)
   u = u_beta[:, :nu]
   beta = u_beta[:, nu:]
 
