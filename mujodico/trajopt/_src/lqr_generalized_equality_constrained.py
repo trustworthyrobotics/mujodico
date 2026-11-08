@@ -1,55 +1,55 @@
 """
 Solve the following generalized equality-constrained linear quadratic problem.
-Let zₖ = [xₖᵀ uₖᵀ xₖ₊₁ᵀ]ᵀ collect the current state, control, and next state.
+Let wₖ = [xₖᵀ uₖᵀ xₖ₊₁ᵀ]ᵀ collect the current state, control, and next state.
 
-  minimizeₓ,ᵤ ∑ₖ₌₀ᵀ⁻¹ [½ zₖᵀHₖzₖ + gₖᵀzₖ]
+  minimizeₓ,ᵤ ∑ₖ₌₀ᵀ⁻¹ [½ wₖᵀHₖwₖ + gₖᵀwₖ]
               + ½ xₜᵀQₜxₜ + qₜᵀxₜ           (t=T denotes terminal)
   subject to  x₀ = x̂₀
               xₖ₊₁ = Aₖ xₖ + Bₖ uₖ + cₖ     for k = 0,…,T−1
-              Eₖ zₖ = −eₖ                  for k = 0,…,T−1
+              Eₖ wₖ = −eₖ                  for k = 0,…,T−1
 
 Introduce multipliers λ₀ for the initial-state constraint, λₖ₊₁ for dynamics,
 and βₖ for stage equalities. The Lagrangian is
 
   L = ∑ₖ₌₀ᵀ⁻¹ [
-        ½ zₖᵀHₖzₖ + gₖᵀzₖ
+        ½ wₖᵀHₖwₖ + gₖᵀwₖ
         + λₖ₊₁ᵀ (Aₖxₖ + Bₖuₖ + cₖ − xₖ₊₁)
-        + βₖᵀ (Eₖzₖ + eₖ)
+        + βₖᵀ (Eₖwₖ + eₖ)
       ]
       + ½ xₜᵀQₜxₜ + qₜᵀxₜ − λ₀ᵀ (x₀ − x̂₀).
 
-Define the stage cost and equality gradient, split into the blocks of zₖ:
+Define the stage cost and equality gradient, split into the blocks of wₖ:
 
-  sₖ = Hₖzₖ + gₖ + Eₖᵀβₖ = [(sˣₖ)ᵀ (sᵘₖ)ᵀ (s⁺ₖ)ᵀ]ᵀ.
+  σₖ = Hₖwₖ + gₖ + Eₖᵀβₖ = [(σˣₖ)ᵀ (σᵘₖ)ᵀ (σ⁺ₖ)ᵀ]ᵀ.
 
-Here sˣₖ, sᵘₖ, and s⁺ₖ are the derivatives with respect to xₖ, uₖ, and xₖ₊₁.
-Set s⁺₋₁ = 0. The KKT conditions are
+Here σˣₖ, σᵘₖ, and σ⁺ₖ are the derivatives with respect to xₖ, uₖ, and xₖ₊₁.
+Set σ⁺₋₁ = 0. The KKT conditions are
 
-  Qₜxₜ + qₜ + s⁺ₜ₋₁ − λₜ = 0                (t=T denotes terminal)
-  sˣₖ + s⁺ₖ₋₁ + Aₖᵀλₖ₊₁ − λₖ = 0           for k = 0,…,T−1
-  sᵘₖ + Bₖᵀλₖ₊₁ = 0                       for k = 0,…,T−1
+  Qₜxₜ + qₜ + σ⁺ₜ₋₁ − λₜ = 0                (t=T denotes terminal)
+  σˣₖ + σ⁺ₖ₋₁ + Aₖᵀλₖ₊₁ − λₖ = 0           for k = 0,…,T−1
+  σᵘₖ + Bₖᵀλₖ₊₁ = 0                       for k = 0,…,T−1
   Aₖxₖ + Bₖuₖ − xₖ₊₁ = −cₖ                 for k = 0,…,T−1
-  Eₖzₖ = −eₖ                              for k = 0,…,T−1
+  Eₖwₖ = −eₖ                              for k = 0,…,T−1
   x₀ = x̂₀
 
-Substitute zₖ = Sₖ [xₖᵀ uₖᵀ]ᵀ + aₖ, where
+Substitute wₖ = Ψₖ [xₖᵀ uₖᵀ]ᵀ + ψₖ, where
 
-  Sₖ = [ I   0 ],    aₖ = [ 0  ]
+  Ψₖ = [ I   0 ],    ψₖ = [ 0  ]
       [ 0   I ]          [ 0  ]
       [ Aₖ  Bₖ ]          [ cₖ ]
 
 The reduced stage coefficients are
 
-  H̄ₖ = SₖᵀHₖSₖ,    ḡₖ = Sₖᵀ(Hₖaₖ + gₖ)
-  Ēₖ = EₖSₖ,       ēₖ = eₖ + Eₖaₖ.
+  H̄ₖ = ΨₖᵀHₖΨₖ,    ḡₖ = Ψₖᵀ(Hₖψₖ + gₖ)
+  Ēₖ = EₖΨₖ,       ēₖ = eₖ + Eₖψₖ.
 
 The reduced problem is solved by lqr_equality_constrained without changing
 its parallel algorithm or its nonsingularity assumptions.
 
 Recover the original dynamics multipliers from the reduced multipliers λ̄ₖ:
 
-  δₖ = (Hₖzₖ + gₖ)⁺ + (E⁺ₖ)ᵀβₖ = s⁺ₖ
-  λₖ₊₁ = λ̄ₖ₊₁ + δₖ                        for k = 0,…,T−1
+  σ⁺ₖ = (Hₖwₖ + gₖ)⁺ + (E⁺ₖ)ᵀβₖ
+  λₖ₊₁ = λ̄ₖ₊₁ + σ⁺ₖ                       for k = 0,…,T−1
   λ₀ = λ̄₀.
 
 Here ⁺ selects the xₖ₊₁ block of a vector or the corresponding matrix columns.
@@ -72,7 +72,7 @@ def _matvec(matrix, vector):
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class _ReductionCache:
-  S: jax.Array
+  Psi: jax.Array
   reduced: lqr.EqualityConstrainedLQR
 
 
@@ -163,7 +163,7 @@ def solve(
   T, nx, nu = prob.B.shape
 
   if prob._cache is None:
-    S = jp.concatenate(
+    Psi = jp.concatenate(
         (
             jp.broadcast_to(
                 jp.eye(nx + nu, dtype=prob.H.dtype), (T, nx + nu, nx + nu)
@@ -173,13 +173,13 @@ def solve(
         axis=1,
     )
   else:
-    S = prob._cache.S
+    Psi = prob._cache.Psi
 
-  a = jp.concatenate(
+  psi = jp.concatenate(
       (jp.zeros((T, nx + nu), dtype=prob.c.dtype), prob.c), axis=-1
   )
-  gbar = _matvec(S.swapaxes(-1, -2), _matvec(prob.H, a) + prob.g)
-  ebar = prob.e + _matvec(prob.E, a)
+  gbar = _matvec(Psi.swapaxes(-1, -2), _matvec(prob.H, psi) + prob.g)
+  ebar = prob.e + _matvec(prob.E, psi)
   rhs = dict(
       q=jp.concatenate((gbar[:, :nx], prob.qf[None])),
       r=gbar[:, nx:],
@@ -189,8 +189,8 @@ def solve(
   )
 
   if prob._cache is None:
-    Hbar = S.swapaxes(-1, -2) @ prob.H @ S
-    Ebar = prob.E @ S
+    Hbar = Psi.swapaxes(-1, -2) @ prob.H @ Psi
+    Ebar = prob.E @ Psi
     reduced = lqr.EqualityConstrainedLQR.create(
         Q=jp.concatenate((Hbar[:, :nx, :nx], prob.Qf[None])),
         N=Hbar[:, :nx, nx:],
@@ -206,13 +206,13 @@ def solve(
 
   reduced = lqr.solve(reduced)
 
-  z = jp.concatenate((reduced.x[:-1], reduced.u, reduced.x[1:]), axis=-1)
-  delta = (
-      _matvec(prob.H[:, nx+nu:, :], z)
+  w = jp.concatenate((reduced.x[:-1], reduced.u, reduced.x[1:]), axis=-1)
+  sigma_xnext = (
+      _matvec(prob.H[:, nx+nu:, :], w)
       + prob.g[:, nx+nu:]
       + _matvec(prob.E[:, :, nx+nu:].swapaxes(-1, -2), reduced.beta)
   )
-  lmbda = jp.concatenate((reduced.lmbda[:1], reduced.lmbda[1:] + delta))
+  lmbda = jp.concatenate((reduced.lmbda[:1], reduced.lmbda[1:] + sigma_xnext))
 
   return replace(
       prob,
@@ -220,5 +220,5 @@ def solve(
       u=reduced.u,
       lmbda=lmbda,
       beta=reduced.beta,
-      _cache=_ReductionCache(S=S, reduced=reduced),
+      _cache=_ReductionCache(Psi=Psi, reduced=reduced),
   )
