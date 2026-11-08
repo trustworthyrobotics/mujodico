@@ -181,7 +181,9 @@ class EqualityConstrainedLQR:
     return replace(self, **updates, x=None, u=None, lmbda=None, beta=None)
 
 
-def _build_matrix_cache(prob):
+def _build_matrix_cache(prob: EqualityConstrainedLQR) -> _MatrixCache:
+  assert isinstance(prob, EqualityConstrainedLQR)
+
   nx = prob.Q.shape[1]
   nc = prob.e.shape[1]
 
