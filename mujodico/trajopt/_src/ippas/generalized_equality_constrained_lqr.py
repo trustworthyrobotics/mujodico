@@ -16,7 +16,7 @@ and βₖ for stage equalities. The Lagrangian is
         + λₖ₊₁ᵀ (Aₖxₖ + Bₖuₖ + cₖ − xₖ₊₁)
         + βₖᵀ (Eₖwₖ + eₖ)
       ]
-      + ½ xₜᵀQₜxₜ + qₜᵀxₜ − λ₀ᵀ (x₀ − x̂₀).
+      + ½ xₜᵀQₜxₜ + qₜᵀxₜ + λ₀ᵀ (x̂₀ - x₀).
 
 Define the stage cost and equality gradient, split into the blocks of wₖ:
 
@@ -62,7 +62,7 @@ from dataclasses import replace
 import jax
 import jax.numpy as jp
 
-from mujodico.trajopt._src import lqr_equality_constrained as lqr
+from mujodico.trajopt._src.ippas import equality_constrained_lqr as lqr
 
 
 def _matvec(matrix, vector):
@@ -180,13 +180,13 @@ def solve(
   )
   gbar = _matvec(Psi.swapaxes(-1, -2), _matvec(prob.H, psi) + prob.g)
   ebar = prob.e + _matvec(prob.E, psi)
-  rhs = dict(
-      q=jp.concatenate((gbar[:, :nx], prob.qf[None])),
-      r=gbar[:, nx:],
-      c=prob.c,
-      e=ebar,
-      x0=prob.x0,
-  )
+  rhs = {
+      'q': jp.concatenate((gbar[:, :nx], prob.qf[None])),
+      'r': gbar[:, nx:],
+      'c': prob.c,
+      'e': ebar,
+      'x0': prob.x0,
+  }
 
   if prob._cache is None:
     Hbar = Psi.swapaxes(-1, -2) @ prob.H @ Psi

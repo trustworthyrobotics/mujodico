@@ -15,11 +15,11 @@ and βₖ for stage equalities. The Lagrangian is
         + λₖ₊₁ᵀ (Aₖ xₖ + Bₖ uₖ + cₖ − xₖ₊₁)
         + βₖᵀ (Eˣₖ xₖ + Eᵘₖ uₖ + eₖ)
       ]
-      + ½ xₜᵀQₜxₜ + qₜᵀxₜ − λ₀ᵀ (x₀ − x̂₀)
+      + ½ xₜᵀQₜxₜ + qₜᵀxₜ + λ₀ᵀ (x̂₀ - x₀)
 
 The KKT conditions are
 
-  Qₜ xₜ − λₜ = -qₜ
+  Qₜ xₜ − λₜ = -qₜ                                 (t=T denotes terminal)
   Qₖ xₖ + Nₖ uₖ + Aₖᵀ λₖ₊₁ + (Eˣₖ)ᵀ βₖ − λₖ = -qₖ    for k = 0,…,T−1
   Nₖᵀ xₖ + Rₖ uₖ + Bₖᵀ λₖ₊₁ + (Eᵘₖ)ᵀ βₖ = -rₖ        for k = 0,…,T−1
   Aₖxₖ + Bₖuₖ − xₖ₊₁ = -cₖ                         for k = 0,…,T−1
@@ -73,9 +73,9 @@ def _apply_affine_scan(cache, rhs):
     return rhs
   n = rhs.shape[0]
   pairs = _matvec(cache.reduction, rhs[: 2*(n//2) : 2]) + rhs[1::2]  # D₂ⱼ₊₁ d₂ⱼ + d₂ⱼ₊₁
-  odd = _apply_affine_scan(cache.child, pairs)
+  odd = _apply_affine_scan(cache.child, pairs)  # x₂ⱼ₊₁ = (D₂ⱼ₊₁ D₂ⱼ) x₂ⱼ₋₁ + (D₂ⱼ₊₁ d₂ⱼ + d₂ⱼ₊₁)
   odd_padded = jp.concatenate([jp.zeros_like(rhs[:1]), odd])  # prepend x₋₁ = 0
-  even = _matvec(cache.expansion, odd_padded[:cache.expansion.shape[0]]) + rhs[::2]
+  even = _matvec(cache.expansion, odd_padded[:cache.expansion.shape[0]]) + rhs[::2]  # x₂ⱼ = D₂ⱼ x₂ⱼ₋₁ + d₂ⱼ
   return jp.empty_like(rhs).at[1::2].set(odd).at[::2].set(even)
 
 
@@ -288,8 +288,10 @@ def _solve_rhs(prob: EqualityConstrainedLQR) -> EqualityConstrainedLQR:
   # bₖ = cₖ - [Bₖ 0] Mₖ⁻¹ fₖ
   b = prob.c - _matvec(prob.B, Minv_f[:, :nu])
   # vₖ = Dₖᵀ vₖ₊₁ + pₖ + Dₖᵀ Vₖ₊₁ bₖ
-  offsets = jp.concatenate((p + _matvec(cache.DT_Vnext, b), prob.q[-1:]))
-  v = _apply_affine_scan(cache.backward_scan, offsets[::-1])[::-1]
+  v = _apply_affine_scan(
+      cache.backward_scan,
+      jp.concatenate((p + _matvec(cache.DT_Vnext, b), prob.q[-1:]))[::-1],
+  )[::-1]
 
   # dₖ = (I + Cₖ Vₖ₊₁)⁻¹ (bₖ - Cₖ vₖ₊₁)
   d = jax.vmap(jax.scipy.linalg.lu_solve)(
@@ -297,7 +299,10 @@ def _solve_rhs(prob: EqualityConstrainedLQR) -> EqualityConstrainedLQR:
       b - _matvec(cache.C, v[1:]),
   )
   # xₖ₊₁ = Dₖ xₖ + dₖ
-  x = _apply_affine_scan(cache.forward_scan, jp.concatenate((prob.x0[None], d)))
+  x = _apply_affine_scan(
+      cache.forward_scan,
+      jp.concatenate((prob.x0[None], d)),
+  )
 
   # λₖ = Vₖ xₖ + vₖ
   lmbda = _matvec(cache.V, x) + v

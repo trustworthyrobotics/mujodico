@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jp
 import numpy as np
 
-from mujodico.trajopt._src import lqr_equality_constrained as lqr
+from mujodico.trajopt._src.ippas import equality_constrained_lqr as lqr
 from mujodico.trajopt._src.ipopt_trajopt import IpoptTrajOpt
 
 
