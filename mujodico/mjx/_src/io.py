@@ -997,6 +997,11 @@ def _put_contact(
   fields['dim'] = dim
   fields['efc_address'] = efc_address
 
+  # elevate integer precision under x64
+  int_ = jp.zeros(1, int).dtype
+  for name in ('geom1', 'geom2', 'geom'):
+    fields[name] = fields[name].astype(int_)
+
   return types.Contact(**fields), contact_map
 
 
