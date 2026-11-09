@@ -41,14 +41,13 @@ class IpoptRelaxationContactImplicit:
       return trans.local_inequality(x, w, xnext)
 
     def update_params(stats, params):
-      if stats['x'] is not None:
-        xs, ws = self.solver._nlp._unpack(stats['x'])
-        self._history.append({
-            'iter': stats['iter'],
-            'xs': xs.copy(),
-            'us': ws[:, :task.nu].copy(),
-            'cfs': ws[:, task.nu:].copy(),
-        })
+      xs, ws = self.solver._nlp._unpack(stats['x'])
+      self._history.append({
+          'iter': stats['iter'],
+          'xs': xs,
+          'us': ws[:, :task.nu],
+          'cfs': ws[:, task.nu:],
+      })
       # TODO(wei-chen): Find better homotopy update.
       smoothing = params[1]
       iter = stats['iter']

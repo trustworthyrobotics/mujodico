@@ -14,14 +14,13 @@ class IpoptLiftedMultipleShooting:
     self._history = []
 
     def update_params(stats, params):
-      if stats['x'] is not None:
-        xs, ws = self.solver._nlp._unpack(stats['x'])
-        self._history.append({
-            'iter': stats['iter'],
-            'xs': xs.copy(),
-            'us': ws[:, :task.nu].copy(),
-            'cfs': ws[:, task.nu:].copy(),
-        })
+      xs, ws = self.solver._nlp._unpack(stats['x'])
+      self._history.append({
+          'iter': stats['iter'],
+          'xs': xs,
+          'us': ws[:, :task.nu],
+          'cfs': ws[:, task.nu:],
+      })
       return params
 
     self.solver = trajopt.IPOptTrajOpt(

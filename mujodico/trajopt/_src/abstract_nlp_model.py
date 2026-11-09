@@ -280,7 +280,7 @@ class _CyIpoptCallbacks:
   ):
     current = self._problem.get_current_iterate(scaled=False)
     self._nlp.intermediate({
-        'x': None if current is None else np.array(current['x']).copy(),
+        'x': np.asarray(current['x']).copy(),
         'alg_mod': alg_mod,
         'iter': iter,
         'objective': objective,
@@ -304,6 +304,13 @@ def _to_cyipopt(nlp: AbstractNLPModel):
         'Optional solver dependency not installed. Install it with:\n\n'
         '    pip install cyipopt'
     ) from e
+
+  if cyipopt.IPOPT_VERSION < (3, 14, 0):
+    version = '.'.join(str(part) for part in cyipopt.IPOPT_VERSION)
+    raise ImportError(
+        'IPOPT >=3.14.0 is required for intermediate iterate access; '
+        f'found {version}. Upgrade IPOPT and reinstall cyipopt.'
+    )
 
   callbacks = _CyIpoptCallbacks(nlp)
   var_lb, var_ub = _validate_bounds(nlp.var_bounds, nlp.num_vars)

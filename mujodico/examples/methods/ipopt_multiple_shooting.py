@@ -12,11 +12,12 @@ class IpoptMultipleShooting:
     self._history = []
 
     def update_params(stats, params):
-      if stats['x'] is not None:
-        xs, us = self.solver._nlp._unpack(stats['x'])
-        self._history.append({
-            'iter': stats['iter'], 'xs': xs.copy(), 'us': us.copy(),
-        })
+      xs, us = self.solver._nlp._unpack(stats['x'])
+      self._history.append({
+          'iter': stats['iter'],
+          'xs': xs,
+          'us': us,
+      })
       return params
 
     self.solver = trajopt.IPOptTrajOpt(
