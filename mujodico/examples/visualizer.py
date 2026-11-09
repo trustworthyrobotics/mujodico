@@ -16,6 +16,7 @@ class Visualizer:
     self._condition = threading.Condition()
     self._playbacks = []
     self._selected = 0
+    self._selected_iteration = -1
     self._recording = None
     self._visualized_task = None
     self._version = 0
@@ -36,8 +37,42 @@ class Visualizer:
       self._playbacks.append((task, dict(traj)))
       if self._recording is None:
         self._selected = len(self._playbacks) - 1
+        self._selected_iteration = -1
       self._version += 1
       self._condition.notify_all()
+
+  @staticmethod
+  def _iteration_trajectory(traj, iteration):
+    """Resolve a snapshot while retaining the playback's information."""
+    if iteration < 0:
+      return traj
+    return {**traj, **traj['history'][iteration]}
+
+  def _select_iteration(self, index, iteration):
+    with self._condition:
+      if index != self._selected or self._recording is not None:
+        return self._selected_iteration
+      _, traj = self._playbacks[index]
+      iteration = min(max(int(iteration), -1), len(traj.get('history', [])) - 1)
+      if iteration != self._selected_iteration:
+        self._selected_iteration = iteration
+        self._version += 1
+        self._condition.notify_all()
+      return iteration
+
+  def _configure_iteration_control(self, server):
+    visualizer = getattr(server, 'task_visualizer', None)
+    if visualizer is None:
+      return
+    with self._condition:
+      index = self._selected
+      _, traj = self._playbacks[index]
+      visualizer.set_iteration_control(
+          len(traj.get('history', [])),
+          self._selected_iteration,
+          lambda iteration: self._select_iteration(index, iteration),
+          disabled=self._recording is not None,
+      )
 
   def _download_pickle(self, client, index):
     with self._condition:
@@ -74,6 +109,7 @@ class Visualizer:
       return
     visualizer = getattr(server, 'task_visualizer', None)
     if visualizer is not None:
+      visualizer.cleanup()
       del server.task_visualizer
     self._visualized_task = task
 
@@ -157,6 +193,8 @@ class Visualizer:
     for frame in range(task.horizon + 1):
       with server.atomic():
         task.update_visualization(server, traj, frame)
+        if frame == 0:
+          self._configure_iteration_control(server)
       if serializer is not None:
         serializer.insert_sleep(task.model.opt.timestep)
       if plots:
@@ -224,6 +262,7 @@ class Visualizer:
       client,
       index,
       *,
+      iteration=-1,
       video=False,
       plots=False,
       viser_recording=False,
@@ -232,6 +271,7 @@ class Visualizer:
       raise ValueError('Select at least one recording type.')
     with self._condition:
       task, traj = self._playbacks[index]
+      traj = self._iteration_trajectory(traj, iteration)
 
     if video or plots:
       ffmpeg = shutil.which('ffmpeg')
@@ -396,6 +436,7 @@ class Visualizer:
         event.target.value = index
         if index != self._selected:
           self._selected = index
+          self._selected_iteration = -1
           self._version += 1
           self._condition.notify_all()
 
@@ -419,11 +460,13 @@ class Visualizer:
         self._recording = (
             event.client,
             self._selected,
+            self._selected_iteration,
             video,
             plots,
             viser_recording,
         )
         playback.disabled = True
+        self._configure_iteration_control(server)
         for control in record_controls:
           control.disabled = True
         download_recording.label = 'Recording...'
@@ -454,6 +497,7 @@ class Visualizer:
         recording = self._recording
         if recording is None and self._version != version:
           task, traj = self._playbacks[self._selected]
+          traj = self._iteration_trajectory(traj, self._selected_iteration)
           playback.max = len(self._playbacks) - 1
           playback.value = self._selected
           playback.disabled = False
@@ -472,12 +516,13 @@ class Visualizer:
           frame = 0
 
       if recording is not None:
-        client, index, video, plots, viser_recording = recording
+        client, index, iteration, video, plots, viser_recording = recording
         try:
           self._record_playback(
               server,
               client,
               index,
+              iteration=iteration,
               video=video,
               plots=plots,
               viser_recording=viser_recording,
@@ -489,6 +534,7 @@ class Visualizer:
         finally:
           with self._condition:
             self._recording = None
+            self._configure_iteration_control(server)
             playback.max = len(self._playbacks) - 1
             playback.disabled = False
             for control in record_controls:
@@ -500,6 +546,7 @@ class Visualizer:
       tic = time.perf_counter()
       self._prepare_visualization(server, task)
       task.update_visualization(server, traj, frame)
+      self._configure_iteration_control(server)
       remaining = task.model.opt.timestep - (time.perf_counter() - tic)
       if remaining > 0:
         with self._condition:

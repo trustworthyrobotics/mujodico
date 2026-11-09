@@ -26,8 +26,26 @@ class TaskVisualizer:
     self._mj_scene.camera_tracking_enabled = False
 
     self._folder = server.gui.add_folder('Task', expand_by_default=True)
+    self._on_select_iteration = None
     with self._folder:
+      self._iteration = server.gui.add_number(
+          'Iteration',
+          initial_value=-1,
+          min=-1,
+          max=-1,
+          step=1,
+          disabled=True,
+          hint='-1 plays the final result; 0 and above select recorded '
+          'iterations by their zero-based position in history.',
+      )
       self._info_panel = server.gui.add_markdown('')
+
+    @self._iteration.on_update
+    def _select_iteration(event):
+      # Programmatic updates synchronize the control without selecting again.
+      if event.client is not None and self._on_select_iteration is not None:
+        self._iteration.value = self._on_select_iteration(event.target.value)
+
     self._plots: dict[str, viser.GuiPlotlyHandle] = {}
 
     self._cleaned_up = False
@@ -45,6 +63,14 @@ class TaskVisualizer:
 
   def set_text(self, text: str) -> None:
     self._info_panel.content = text
+
+  def set_iteration_control(
+      self, history_count, iteration, on_select, *, disabled=False
+  ) -> None:
+    self._on_select_iteration = on_select
+    self._iteration.max = history_count - 1
+    self._iteration.value = iteration
+    self._iteration.disabled = disabled or history_count == 0
 
   def set_plot(self, name: str, figure: go.Figure) -> None:
     figure.update_layout(margin=dict(l=0, r=0, t=0, b=0))
@@ -74,6 +100,7 @@ class TaskVisualizer:
   def cleanup(self) -> None:
     if self._cleaned_up:
       return
+    self._on_select_iteration = None
     self._folder.remove()
     self._server.scene.reset()
     self._plots.clear()

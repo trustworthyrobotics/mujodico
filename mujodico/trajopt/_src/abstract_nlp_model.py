@@ -245,46 +245,42 @@ class _CyIpoptCallbacks:
 
   def __init__(self, nlp: AbstractNLPModel):
     self._nlp = nlp
+    self._problem = None
     self._jac_rows, self._jac_cols = _validate_structure(
         nlp.jacobian_structure(), nlp.num_constraints, nlp.num_vars
     )
     self._hess_rows, self._hess_cols = _validate_structure(
         nlp.hessian_structure(), nlp.num_vars, nlp.num_vars
     )
-    self._x = None
 
   def objective(self, x):
-    self._x = x
     return self._nlp.objective(x)
 
   def gradient(self, x):
-    self._x = x
     return self._nlp.gradient(x)
 
   def constraints(self, x):
-    self._x = x
     return self._nlp.constraints(x)
 
   def jacobianstructure(self):
     return self._jac_rows, self._jac_cols
 
   def jacobian(self, x):
-    self._x = x
     return self._nlp.jacobian_entries(x)
 
   def hessianstructure(self):
     return self._hess_rows, self._hess_cols
 
   def hessian(self, x, lagrange, objective_factor):
-    self._x = x
     return self._nlp.hessian_entries(x, lagrange, objective_factor)
 
   def intermediate(
       self, alg_mod, iter, objective, inf_pr, inf_du, mu,
       d_norm, regularization_size, alpha_du, alpha_pr, ls_trials,
   ):
+    current = self._problem.get_current_iterate(scaled=False)
     self._nlp.intermediate({
-        'x': self._x,
+        'x': None if current is None else np.array(current['x']).copy(),
         'alg_mod': alg_mod,
         'iter': iter,
         'objective': objective,
@@ -313,7 +309,7 @@ def _to_cyipopt(nlp: AbstractNLPModel):
   var_lb, var_ub = _validate_bounds(nlp.var_bounds, nlp.num_vars)
   con_lb, con_ub = _validate_bounds(nlp.constraint_bounds, nlp.num_constraints)
 
-  return cyipopt.Problem(
+  problem = cyipopt.Problem(
       n=nlp.num_vars,
       m=nlp.num_constraints,
       problem_obj=callbacks,
@@ -322,6 +318,8 @@ def _to_cyipopt(nlp: AbstractNLPModel):
       cl=con_lb,
       cu=con_ub,
   )
+  callbacks._problem = problem
+  return problem
 
 
 def _validate_bounds(bounds, size: int):

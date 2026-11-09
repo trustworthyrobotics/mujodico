@@ -1,4 +1,5 @@
 import importlib
+from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -89,7 +90,10 @@ class AbstractNLPModelTest(parameterized.TestCase):
     except Exception as e:
       self.skipTest(f'cyipopt is unavailable: {e}')
 
-    cyipopt_nlp_problem = NonnegativeQuadraticNLP().to_cyipopt()
+    nlp = NonnegativeQuadraticNLP()
+    nlp.intermediate = mock.Mock()
+
+    cyipopt_nlp_problem = nlp.to_cyipopt()
     cyipopt_nlp_problem.add_option('print_level', 0)
 
     x0 = [0.0, 0.0]
@@ -97,6 +101,7 @@ class AbstractNLPModelTest(parameterized.TestCase):
 
     np.testing.assert_allclose(stats['x'], [1.0, 1.0], atol=1e-4)
     np.testing.assert_allclose(stats['obj_val'], 1.0, atol=1e-6)
+    nlp.intermediate.assert_called()
 
   @parameterized.parameters('RelaxationSolver', 'PenaltySolver', 'Crossover')
   def test_solve_mpcc(self, solver_method):
