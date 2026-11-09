@@ -1,9 +1,8 @@
 import dataclasses
 import mujoco
-from mujodico.examples.tasks.task_visualizer import TaskVisualizer
+from mujodico.examples.tasks.task_playback import TaskPlayback
 from mujodico.mjx import ContactApproxType
 import numpy as np
-import viser
 
 
 @dataclasses.dataclass(frozen=True)
@@ -148,10 +147,7 @@ Task: {self.__class__.__name__}
   contact_smoothing = {self.contact_smoothing}
 ''')
 
-  def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
+  def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
     model = self.model
-    visualizer = getattr(server, 'task_visualizer', None)
-    if visualizer is None:
-      server.task_visualizer = visualizer = TaskVisualizer(server, model)
     visualizer.update_scene(traj['xs'][k, :model.nq])
     visualizer.set_text(str(traj.get('info', '')))

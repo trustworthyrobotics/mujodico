@@ -1,9 +1,9 @@
 import mujoco
 from mujodico.examples.tasks.task import Task
+from mujodico.examples.tasks.task_playback import TaskPlayback
 from mujodico.examples.tasks import plotly_util
 import numpy as np
 import plotly.graph_objects as go
-import viser
 
 
 _XML = """
@@ -96,8 +96,8 @@ class PushMultiSphere2d(Task):
         contact_smoothing=contact_smoothing,
     )
 
-  def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
-    super().update_visualization(server, traj, k)
+  def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
+    super().update_visualization(visualizer, traj, k)
 
     xs = traj['xs']
 
@@ -152,7 +152,7 @@ class PushMultiSphere2d(Task):
         xaxis={'range': [-1, 1]},
         yaxis={'range': [-1, 1], 'scaleanchor': 'x', 'scaleratio': 1},
     )
-    server.task_visualizer.set_plot('visualization', fig)
+    visualizer.set_plot('visualization', fig)
 
 
 if __name__ == '__main__':
