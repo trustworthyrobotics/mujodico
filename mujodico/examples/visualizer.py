@@ -381,7 +381,7 @@ class Visualizer:
           disabled=True,
           hint='Zero-based index of the saved playback to play.',
       )
-      with server.gui.add_folder('Record', expand_by_default=True):
+      with server.gui.add_folder('Record', expand_by_default=False):
         record_scene = server.gui.add_checkbox(
             '3D scene',
             initial_value=True,
@@ -406,7 +406,7 @@ class Visualizer:
                 'Download the selected recording formats in one playback pass.'
             ),
         )
-      with server.gui.add_folder('Pickle', expand_by_default=True):
+      with server.gui.add_folder('Pickle', expand_by_default=False):
         download_pickle = server.gui.add_button(
             'Download pickle',
             disabled=True,
