@@ -11,6 +11,19 @@ class IpoptLiftedMultipleShooting:
     self.transcription = methods.LiftedMultipleShootingTranscription(task)
 
     trans = self.transcription
+    self._history = []
+
+    def update_params(stats, params):
+      if stats['x'] is not None:
+        xs, ws = self.solver._nlp._unpack(stats['x'])
+        self._history.append({
+            'iter': stats['iter'],
+            'xs': xs.copy(),
+            'us': ws[:, :task.nu].copy(),
+            'cfs': ws[:, task.nu:].copy(),
+        })
+      return params
+
     self.solver = trajopt.IPOptTrajOpt(
         N=trans.N,
         nx=trans.nx,
@@ -30,6 +43,7 @@ class IpoptLiftedMultipleShooting:
         x_bounds=trans.x_bounds,
         u_bounds=trans.w_bounds,
         params_trace=self.transcription.params,
+        update_params=update_params,
     )
 
   def update(self, task: Task):
@@ -43,6 +57,7 @@ class IpoptLiftedMultipleShooting:
     nu = us_init.shape[-1]
     cfs_init = traj_init.get('cfs', np.zeros((N, nw - nu)))
     ws_init = np.hstack([us_init, cfs_init])
+    self._history = []
 
     xs_opt, ws_opt, info = self.solver.solve(
         self.transcription.params,
@@ -71,4 +86,5 @@ class IpoptLiftedMultipleShooting:
         'xs': xs_opt,
         'us': ws_opt[:, :nu],
         'cfs': ws_opt[:, nu:],
+        'history': self._history,
     }

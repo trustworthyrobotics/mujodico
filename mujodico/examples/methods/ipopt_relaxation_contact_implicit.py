@@ -10,6 +10,7 @@ class IpoptRelaxationContactImplicit:
   def __init__(self, task: Task):
     self.transcription = methods.ContactImplicitTranscription(task)
     trans = self.transcription
+    self._history = []
 
     self.initial_smoothing = jp.array(task.contact_smoothing)
 
@@ -40,6 +41,14 @@ class IpoptRelaxationContactImplicit:
       return trans.local_inequality(x, w, xnext)
 
     def update_params(stats, params):
+      if stats['x'] is not None:
+        xs, ws = self.solver._nlp._unpack(stats['x'])
+        self._history.append({
+            'iter': stats['iter'],
+            'xs': xs.copy(),
+            'us': ws[:, :task.nu].copy(),
+            'cfs': ws[:, task.nu:].copy(),
+        })
       # TODO(wei-chen): Find better homotopy update.
       smoothing = params[1]
       iter = stats['iter']
@@ -73,6 +82,7 @@ class IpoptRelaxationContactImplicit:
     nu = us_init.shape[-1]
     cfs_init = traj_init.get('cfs', np.zeros((N, nw - nu)))
     ws_init = np.hstack([us_init, cfs_init])
+    self._history = []
 
     xs_opt, ws_opt, info = self.solver.solve(
         (self.transcription.params, self.initial_smoothing),
@@ -101,4 +111,5 @@ class IpoptRelaxationContactImplicit:
         'xs': xs_opt,
         'us': ws_opt[:, :nu],
         'cfs': ws_opt[:, nu:],
+        'history': self._history,
     }

@@ -9,6 +9,16 @@ class IpoptMultipleShooting:
     self.transcription = methods.MultipleShootingTranscription(task)
 
     trans = self.transcription
+    self._history = []
+
+    def update_params(stats, params):
+      if stats['x'] is not None:
+        xs, us = self.solver._nlp._unpack(stats['x'])
+        self._history.append({
+            'iter': stats['iter'], 'xs': xs.copy(), 'us': us.copy(),
+        })
+      return params
+
     self.solver = trajopt.IPOptTrajOpt(
         trans.N,
         trans.nx,
@@ -22,12 +32,14 @@ class IpoptMultipleShooting:
         x_bounds=trans.x_bounds,
         u_bounds=trans.u_bounds,
         params_trace=self.transcription.params,
+        update_params=update_params,
     )
 
   def update(self, task: Task):
     self.transcription.update(task)
 
   def solve(self, traj_init: dict, *, iterations: int = 500, verbose: bool = True):
+    self._history = []
     xs_opt, us_opt, info = self.solver.solve(
         self.transcription.params,
         traj_init['xs'],
@@ -51,4 +63,4 @@ class IpoptMultipleShooting:
         ])
     )
 
-    return {'xs': xs_opt, 'us': us_opt}
+    return {'xs': xs_opt, 'us': us_opt, 'history': self._history}
