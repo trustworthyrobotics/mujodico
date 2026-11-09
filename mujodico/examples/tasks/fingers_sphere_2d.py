@@ -1,10 +1,10 @@
 import mujoco
 from mujodico.examples.tasks.task import Task
+from mujodico.examples.tasks.task_playback import TaskPlayback
 from mujodico.examples.tasks import plotly_util
 import numpy as np
 import plotly.graph_objects as go
 import plotly.subplots
-import viser
 
 
 _XML = """
@@ -146,8 +146,8 @@ class FingersSphere2d(Task):
         col=1,
     )
 
-  def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
-    super().update_visualization(server, traj, k)
+  def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
+    super().update_visualization(visualizer, traj, k)
 
     fig = plotly.subplots.make_subplots(
         rows=3, cols=1,
@@ -157,7 +157,7 @@ class FingersSphere2d(Task):
     for object_dof in (0, 1, 2):
       self._plot_object_dof(fig, k, traj['xs'], object_dof)
 
-    server.task_visualizer.set_plot('trajectory', fig)
+    visualizer.set_plot('trajectory', fig)
 
 
 if __name__ == '__main__':

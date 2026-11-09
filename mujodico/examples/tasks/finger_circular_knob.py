@@ -1,9 +1,9 @@
 import mujoco
 from mujodico.examples.tasks.task import Task
+from mujodico.examples.tasks.task_playback import TaskPlayback
 from mujodico.examples.tasks import plotly_util
 import numpy as np
 import plotly.graph_objects as go
-import viser
 
 
 _XML = """
@@ -84,8 +84,8 @@ class FingerCircularKnob(Task):
         contact_smoothing=contact_smoothing,
     )
 
-  def update_visualization(self, server: viser.ViserServer, traj: dict, k: int):
-    super().update_visualization(server, traj, k)
+  def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
+    super().update_visualization(visualizer, traj, k)
 
     xs = traj['xs']
     ts = np.arange(xs.shape[0]) * self.model.opt.timestep
@@ -118,7 +118,7 @@ class FingerCircularKnob(Task):
         xaxis={'range': t_range},
         yaxis={'range': y_range, 'dtick': 45},
     )
-    server.task_visualizer.set_plot('trajectory', fig)
+    visualizer.set_plot('trajectory', fig)
 
 
 if __name__ == '__main__':

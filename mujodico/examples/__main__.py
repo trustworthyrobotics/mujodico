@@ -5,6 +5,7 @@ from absl import app
 from absl import flags
 from mujodico.examples.methods import get_method_names, parse_method_name, util
 from mujodico.examples.tasks import get_task_names, parse_task_name
+from mujodico.examples.tasks.task_playback import TaskPlayback
 from mujodico.examples.visualizer import Visualizer
 
 
@@ -89,7 +90,7 @@ def _main(argv) -> None:
   - solve time: {solve_time:.4f} sec
   - iterations: {iters}
 '''
-      visualizer.add(task, traj)
+      visualizer.add(TaskPlayback(task, traj))
 
   while True:
     time.sleep(3600)
