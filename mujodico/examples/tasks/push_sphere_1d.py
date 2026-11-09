@@ -108,7 +108,7 @@ class PushSphere1d(Task):
         xaxis={'range': t_range},
         yaxis={'range': y_range},
     )
-    visualizer.set_plot('visualization', fig)
+    visualizer.set_plot('trajectory', fig)
 
 
 if __name__ == '__main__':
