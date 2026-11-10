@@ -93,14 +93,44 @@ class AbstractNLPModelTest(parameterized.TestCase):
     nlp = NonnegativeQuadraticNLP()
     nlp.intermediate = mock.Mock()
 
-    cyipopt_nlp_problem = nlp.to_cyipopt()
-    cyipopt_nlp_problem.add_option('print_level', 0)
+    cyipopt_problem = nlp.to_cyipopt()
+    cyipopt_problem.add_option('print_level', 0)
 
     x0 = [0.0, 0.0]
-    _, stats = cyipopt_nlp_problem.solve(x0)
+    x, stats = cyipopt_problem.solve(x0)
 
     np.testing.assert_allclose(stats['x'], [1.0, 1.0], atol=1e-4)
     np.testing.assert_allclose(stats['obj_val'], 1.0, atol=1e-6)
+    nlp.intermediate.assert_called()
+
+  @parameterized.named_parameters(
+      ('Interior-point Direct', 1),
+      ('Interior-point CG', 2),
+      ('Active Set SQP', 4)
+  )
+  def test_solve_nlp_knitro(self, algorithm):
+    try:
+      importlib.import_module('knitro')
+    except (ImportError, OSError) as e:
+      self.skipTest(f'Knitro is unavailable: {e}')
+
+    nlp = NonnegativeQuadraticNLP()
+    nlp.intermediate = mock.Mock()
+
+    knitro_problem = nlp.to_knitro()
+    knitro_problem.add_option('nlp_algorithm', algorithm)
+    knitro_problem.add_option('outlev', 0)
+    knitro_problem.add_option('opttol', 1e-8)
+
+    try:
+      x, info = knitro_problem.solve([0.5, 0.5])
+    except RuntimeError as e:
+      if 'KN_new() is -520' in str(e):
+        self.skipTest(f'Knitro license is unavailable: {e}')
+
+    self.assertEqual(info['status'], 0)
+    np.testing.assert_allclose(info['x'], [1.0, 1.0], atol=1e-4)
+    np.testing.assert_allclose(info['obj_val'], 1.0, atol=1e-6)
     nlp.intermediate.assert_called()
 
   @parameterized.parameters('RelaxationSolver', 'PenaltySolver', 'Crossover')
