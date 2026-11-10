@@ -32,7 +32,7 @@ class CCOptTrajOpt:
                   u_lb ≤ uₖ ≤ u_ub                                         for k=0,...,N-1
                   local complementarity constraints                       for k=0,...,N
 
-  Falls back to IPOPT if there are no complementarity constraints.
+  Falls back to MadNLP if there are no complementarity constraints.
   """
 
   class Method(Enum):
@@ -109,9 +109,9 @@ class CCOptTrajOpt:
     jl_nlp = nlp.to_nlpmodels_jl(vars_init)
 
     if not self._has_complementarity_constraint:
-      self._ensure_jl_packages(('NLPModelsIpopt',))
+      self._ensure_jl_packages(('MadNLP',))
       tic = time.perf_counter()
-      stats = jl.NLPModelsIpopt.ipopt(jl_nlp, **kwargs)
+      stats = jl.MadNLP.madnlp(jl_nlp, **kwargs)
     else:
       self._ensure_jl_packages(('CCOpt', 'MPCCModels'))
       mpcc = self._make_jl_mpcc(jl_nlp, convert_vertical_form=True)
