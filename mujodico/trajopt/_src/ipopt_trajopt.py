@@ -18,7 +18,7 @@ from mujodico.trajopt._src.types import (
 )
 
 
-class IPOptTrajOpt:
+class IpoptTrajOpt:
   """Solves the following stagewise multiple-shooting NLP with IPOPT.
 
     minimizeₓ,ᵤ   ∑ₖ₌₀ᴺ⁻¹ local_cost(xₖ, uₖ, xₖ₊₁, k, params) + terminal_cost(x_N, params)
