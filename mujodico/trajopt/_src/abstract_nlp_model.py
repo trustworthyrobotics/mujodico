@@ -86,6 +86,20 @@ class AbstractNLPModel(ABC):
     """
     return _to_cyipopt(self)
 
+  def to_knitro(self):
+    """Return a Knitro adapter with ``add_option`` and ``solve(x0)`` methods.
+
+    Set ``nlp_algorithm`` to 1 for interior-point/direct, 2 for
+    interior-point/CG, or 4 for SQP. Otherwise Knitro selects the algorithm.
+    ``solve`` returns ``(x, info)``; ``info`` contains ``status``, ``obj_val``,
+    ``x``, and signed multipliers ``mult_g`` (constraints) and ``mult_x``
+    (variable bounds). Each solve creates and frees its own solver context.
+    ``intermediate`` receives ``x``, ``iter``, ``objective``, ``inf_pr``, and
+    ``inf_du`` after each iteration.
+    Requires the optional ``knitro`` package and a valid Knitro license.
+    """
+    return _to_knitro(self)
+
 
 _JULIA_ADAPTER_SETUP = r"""
 using NLPModels
@@ -327,6 +341,140 @@ def _to_cyipopt(nlp: AbstractNLPModel):
   )
   callbacks._problem = problem
   return problem
+
+
+class _KnitroProblem:
+
+  def __init__(self, nlp: AbstractNLPModel, knitro):
+    self._nlp = nlp
+    self._knitro = knitro
+    self._options = {}
+
+  def add_option(self, key, value):
+    self._options[key] = value
+
+  def solve(self, x0):
+    nlp = self._nlp
+    kn = self._knitro
+
+    x0 = np.asarray(x0, dtype=np.float64)
+    if x0.shape != (nlp.num_vars,):
+      raise ValueError(f'x0 must have shape ({nlp.num_vars},), got {x0.shape}')
+
+    var_lb, var_ub = _validate_bounds(nlp.var_bounds, nlp.num_vars)
+    con_lb, con_ub = _validate_bounds(nlp.constraint_bounds, nlp.num_constraints)
+    jr, jc = _validate_structure(
+        nlp.jacobian_structure(), nlp.num_constraints, nlp.num_vars
+    )
+    hr, hc = _validate_structure(
+        nlp.hessian_structure(), nlp.num_vars, nlp.num_vars
+    )
+
+    # Knitro expects the upper triangle. Keep the original entry ordering.
+    hr, hc = np.minimum(hr, hc), np.maximum(hr, hc)
+    if len(np.unique(np.column_stack((hr, hc)), axis=0)) != len(hr):
+      raise ValueError('Hessian structure must contain each symmetric entry once')
+
+    with kn.KN_new() as kc:
+      kn.KN_add_vars(kc, nlp.num_vars)
+      kn.KN_set_var_lobnds(kc, xLoBnds=np.maximum(var_lb, -kn.KN_INFINITY))
+      kn.KN_set_var_upbnds(kc, xUpBnds=np.minimum(var_ub, kn.KN_INFINITY))
+      if nlp.num_constraints:
+        kn.KN_add_cons(kc, nlp.num_constraints)
+        kn.KN_set_con_lobnds(kc, cLoBnds=np.maximum(con_lb, -kn.KN_INFINITY))
+        kn.KN_set_con_upbnds(kc, cUpBnds=np.minimum(con_ub, kn.KN_INFINITY))
+      kn.KN_set_obj_goal(kc, kn.KN_OBJGOAL_MINIMIZE)
+
+      cb = kn.KN_add_eval_callback(kc, funcCallback=self._eval_fc)
+      kn.KN_set_cb_grad(
+          kc,
+          cb,
+          objGradIndexVars=kn.KN_DENSE,
+          jacIndexCons=jr,
+          jacIndexVars=jc,
+          gradCallback=self._eval_ga,
+      )
+      kn.KN_set_cb_hess(
+          kc,
+          cb,
+          hessIndexVars1=hr,
+          hessIndexVars2=hc,
+          hessCallback=self._eval_h,
+      )
+
+      kn.KN_set_newpt_callback(kc, self._intermediate)
+      kn.KN_set_var_primal_init_values(kc, xInitVals=x0)
+
+      kn.KN_set_int_param(kc, 'hessian_no_f', 1)
+      for key, value in self._options.items():
+        if isinstance(value, (int, np.integer)):
+          kn.KN_set_int_param(kc, key, int(value))
+        elif isinstance(value, (float, np.floating)):
+          kn.KN_set_double_param(kc, key, float(value))
+        elif isinstance(value, str):
+          kn.KN_set_char_param(kc, key, value)
+        else:
+          raise TypeError(f'unsupported Knitro option value for {key!r}: {value!r}')
+
+      kn.KN_solve(kc)
+      status, objective, x, multipliers = kn.KN_get_solution(kc)
+      x = np.asarray(x, dtype=np.float64).copy()
+      multipliers = np.asarray(multipliers, dtype=np.float64)
+      info = {
+          'status': status,
+          'obj_val': objective,
+          'x': x.copy(),
+          'mult_g': multipliers[: nlp.num_constraints].copy(),
+          'mult_x': multipliers[nlp.num_constraints :].copy(),
+      }
+    return x, info
+
+  def _eval_fc(self, kc, cb, request, result, user_params):
+    x = np.asarray(request.x, dtype=np.float64)
+    result.obj = self._nlp.objective(x)
+    if self._nlp.num_constraints:
+      result.c[:] = self._nlp.constraints(x)
+    return 0
+
+  def _eval_ga(self, kc, cb, request, result, user_params):
+    x = np.asarray(request.x, dtype=np.float64)
+    result.objGrad[:] = self._nlp.gradient(x)
+    if result.jac is not None:
+      result.jac[:] = self._nlp.jacobian_entries(x)
+    return 0
+
+  def _eval_h(self, kc, cb, request, result, user_params):
+    x = np.asarray(request.x, dtype=np.float64)
+    # Knitro appends variable-bound multipliers after constraint multipliers.
+    lagrange = np.asarray(request.lambda_, dtype=np.float64)
+    if result.hess is not None:
+      result.hess[:] = self._nlp.hessian_entries(
+          x, lagrange[: self._nlp.num_constraints], request.sigma
+      )
+    return 0
+
+  def _intermediate(self, kc, x, multipliers, user_params):
+    kn = self._knitro
+    self._nlp.intermediate({
+        'x': np.asarray(x, dtype=np.float64).copy(),
+        'iter': kn.KN_get_number_iters(kc),
+        'objective': kn.KN_get_obj_value(kc),
+        'inf_pr': kn.KN_get_abs_feas_error(kc),
+        'inf_du': kn.KN_get_abs_opt_error(kc),
+    })
+    return 0
+
+
+def _to_knitro(nlp: AbstractNLPModel):
+    try:
+      knitro = importlib.import_module('knitro')
+    except ImportError as e:
+      raise ImportError(
+          'Optional solver dependency not installed. Install it with:\n\n'
+          '    pip install knitro\n\n'
+          'A valid Knitro license is also required.'
+      ) from e
+    return _KnitroProblem(nlp, knitro)
 
 
 def _validate_bounds(bounds, size: int):
