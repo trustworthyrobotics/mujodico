@@ -5,7 +5,7 @@ import jax.numpy as jp
 import numpy as np
 
 from mujodico.trajopt._src import lqr_equality_constrained as lqr
-from mujodico.trajopt._src.ipopt_trajopt import IPOptTrajOpt
+from mujodico.trajopt._src.ipopt_trajopt import IpoptTrajOpt
 
 
 _CASES = (
@@ -112,7 +112,7 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
     nc = solution.e.shape[1]
 
     params = solution
-    solver = IPOptTrajOpt(
+    solver = IpoptTrajOpt(
         T,
         nx,
         nu,

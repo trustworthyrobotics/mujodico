@@ -20,7 +20,7 @@ class IpoptMultipleShooting:
       })
       return params
 
-    self.solver = trajopt.IPOptTrajOpt(
+    self.solver = trajopt.IpoptTrajOpt(
         trans.N,
         trans.nx,
         trans.nu,
