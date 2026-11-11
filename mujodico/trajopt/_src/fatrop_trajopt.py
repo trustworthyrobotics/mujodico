@@ -294,6 +294,8 @@ class _FatropProblem:
         jp.zeros((N + 1, self._nh), dtype),
         jp.zeros(nx, dtype),
     )
+    add('retract_state', m.retract_state, x, x, scale)
+    add('retract_control', m.retract_control, u, u, scale)
 
   def _evaluate(self, name, args):
     tic = time.perf_counter()
@@ -376,6 +378,12 @@ class _FatropProblem:
       self, scale, u, x, lam_dyn, lam_eq, lam_ineq, lam_initial
   ):
     return self._evaluate('RSQt', (scale, u, x, lam_dyn, lam_eq, lam_ineq, lam_initial))
+
+  def batched_apply_retraction_xk(self, x, delta_x, alpha):
+    return self._evaluate('retract_state', (x, delta_x, alpha))
+
+  def batched_apply_retraction_uk(self, u, delta_u, alpha):
+    return self._evaluate('retract_control', (u, delta_u, alpha))
 
   def intermediate(self, iteration, x, u, stats):
     if self.update_params is None:

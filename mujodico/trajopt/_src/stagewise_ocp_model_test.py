@@ -90,6 +90,18 @@ class StagewiseOcpModelTest(parameterized.TestCase):
         0.5,
     )
 
+  def test_euclidean_retractions(self):
+    m = _model()
+    x, dx = self.xs[0], jp.array([-0.3, 0.8])
+    u, du = self.us[0], jp.array([-0.5])
+    for alpha in (0.0, 0.25, 1.0):
+      np.testing.assert_allclose(
+          m.retract_state(x, dx, alpha, self.params), x + alpha * dx
+      )
+      np.testing.assert_allclose(
+          m.retract_control(u, du, alpha, self.params), u + alpha * du
+      )
+
   @parameterized.parameters(True, False)
   def test_values_and_derivative_blocks(self, gauss_newton):
     m = _model(gauss_newton=gauss_newton, params_trace=self.params)
