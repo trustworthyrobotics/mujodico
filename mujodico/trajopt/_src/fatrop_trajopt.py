@@ -11,12 +11,9 @@ import numpy as np
 from mujodico.trajopt._src.types import (
   Bounds,
   Params,
-  TerminalCost,
-  TerminalEqualityConstraint,
-  TerminalInequalityConstraint,
+  StageFunction,
+  StateFunction,
 )
-
-StageFunction = Callable[[jax.Array, jax.Array, jax.Array, Params], jax.Array]
 
 
 class FatropTrajOpt:
@@ -30,11 +27,11 @@ class FatropTrajOpt:
       initial_state: Callable[[Params], jax.Array],
       dynamics: StageFunction,
       stage_cost: StageFunction,
-      terminal_cost: TerminalCost,
+      terminal_cost: StateFunction,
       stage_equality_constraint: StageFunction | None = None,
       stage_inequality_constraint: StageFunction | None = None,
-      terminal_equality_constraint: TerminalEqualityConstraint | None = None,
-      terminal_inequality_constraint: TerminalInequalityConstraint | None = None,
+      terminal_equality_constraint: StateFunction | None = None,
+      terminal_inequality_constraint: StateFunction | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
       gauss_newton: bool = True,
