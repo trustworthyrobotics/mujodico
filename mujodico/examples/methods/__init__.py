@@ -2,6 +2,8 @@ from mujodico.examples.methods.ccopt_contact_implicit import CcoptCrossoverConta
 from mujodico.examples.methods.ccopt_contact_implicit import CcoptPenaltyContactImplicit
 from mujodico.examples.methods.ccopt_contact_implicit import CcoptRelaxationContactImplicit
 from mujodico.examples.methods.ciopt_contact_implicit import CioptImpactContactImplicit
+from mujodico.examples.methods.fatrop_lifted_multiple_shooting import FatropLiftedMultipleShooting
+from mujodico.examples.methods.fatrop_multiple_shooting import FatropMultipleShooting
 from mujodico.examples.methods.impact_contact_implicit import ImpactContactImplicit
 from mujodico.examples.methods.ipopt_lifted_multiple_shooting import IpoptLiftedMultipleShooting
 from mujodico.examples.methods.ipopt_multiple_shooting import IpoptMultipleShooting
@@ -20,6 +22,8 @@ __all__ = [
     'CcoptPenaltyContactImplicit',
     'CcoptRelaxationContactImplicit',
     'CioptImpactContactImplicit',
+    'FatropLiftedMultipleShooting',
+    'FatropMultipleShooting',
     'ImpactContactImplicit',
     'IpoptLiftedMultipleShooting',
     'IpoptMultipleShooting',
@@ -39,6 +43,8 @@ _METHODS = [
     CcoptPenaltyContactImplicit,
     CcoptRelaxationContactImplicit,
     CioptImpactContactImplicit,
+    FatropLiftedMultipleShooting,
+    FatropMultipleShooting,
     ImpactContactImplicit,
     IpoptRelaxationContactImplicit,
     IpoptLiftedMultipleShooting,
