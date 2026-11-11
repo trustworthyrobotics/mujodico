@@ -445,3 +445,9 @@ class StagewiseOcpModel:
 
   def initial_jacobian(self, x0, params):
     return self._evaluate('initial_jacobian', x0, params)
+
+  def retract_state(self, x, dx, alpha, params):
+    return x + alpha * dx
+
+  def retract_control(self, u, du, alpha, params):
+    return u + alpha * du
