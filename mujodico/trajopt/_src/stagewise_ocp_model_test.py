@@ -1,5 +1,6 @@
 from absl.testing import absltest
 from absl.testing import parameterized
+from unittest import mock
 import jax
 import jax.numpy as jp
 import numpy as np
@@ -66,6 +67,29 @@ class StagewiseOcpModelTest(parameterized.TestCase):
     self.xs = jp.array([[0.2, 0.3], [0.4, 0.5], [0.6, 0.7]])
     self.us = jp.array([[0.1], [0.2]])
 
+  def test_evaluators_are_composable_without_aot_compilation(self):
+    with mock.patch.object(
+        jax.stages.Lowered,
+        'compile',
+        side_effect=AssertionError('Model AOT compilation'),
+    ):
+      m = _model(params_trace=self.params)
+    self.assertFalse(hasattr(m, '_params'))
+    composed = jax.jit(lambda x, u, p: jp.sum(m.objective(x, u, p)))
+    executable = composed.lower(self.xs, self.us, self.params).compile()
+    changed = self.params | {'a': 0.9}
+    np.testing.assert_allclose(
+        executable(self.xs, self.us, changed),
+        jp.sum(m.objective(self.xs, self.us, changed)),
+    )
+    self.assertAlmostEqual(
+        float(
+            executable(self.xs, self.us, changed)
+            - executable(self.xs, self.us, self.params)
+        ),
+        0.5,
+    )
+
   @parameterized.parameters(True, False)
   def test_values_and_derivative_blocks(self, gauss_newton):
     m = _model(gauss_newton=gauss_newton, params_trace=self.params)
@@ -75,9 +99,9 @@ class StagewiseOcpModelTest(parameterized.TestCase):
         jax.vmap(_cost, in_axes=(0, 0, 0, None))(xs[:-1], us, ks, p),
         _terminal(xs[-1], p)[None],
     ])
-    np.testing.assert_allclose(m.objective(xs, us), costs)
-    self.assertIsInstance(m.objective(xs, us), jax.Array)
-    gx, gu = m.objective_gradient(xs, us)
+    np.testing.assert_allclose(m.objective(xs, us, params=p), costs)
+    self.assertIsInstance(m.objective(xs, us, params=p), jax.Array)
+    gx, gu = m.objective_gradient(xs, us, params=p)
     self.assertEqual(gx.shape, (3, 2))
     self.assertEqual(gu.shape, (2, 1))
     np.testing.assert_allclose(
@@ -86,13 +110,15 @@ class StagewiseOcpModelTest(parameterized.TestCase):
     np.testing.assert_allclose(gx[-1], 4 * xs[-1] ** 3)
     np.testing.assert_allclose(gu, 2 * us + xs[:-1, :1])
 
-    A, B = m.dynamics_jacobian(xs[:-1], us)
+    A, B = m.dynamics_jacobian(xs[:-1], us, xs[1:], params=p)
     np.testing.assert_allclose(A, np.broadcast_to(np.eye(2), (2, 2, 2)))
     np.testing.assert_allclose(
         B, jp.stack([2 * us[:, 0], jp.cos(us[:, 0])], axis=1)[:, :, None]
     )
+    with self.assertRaisesRegex(ValueError, 'expected shape'):
+      m.dynamics_jacobian(xs[:-1], us, xs, params=p)
     np.testing.assert_allclose(
-        m.dynamics_residual(xs[:-1], us, xs[1:]),
+        m.dynamics_residual(xs[:-1], us, xs[1:], params=p),
         jax.vmap(_dynamics, in_axes=(0, 0, 0, None))(xs[:-1], us, ks, p)
         - xs[1:],
     )
@@ -108,10 +134,10 @@ class StagewiseOcpModelTest(parameterized.TestCase):
         ('stage_inequality', stage_ineq),
     ):
       np.testing.assert_allclose(
-          getattr(m, name + '_residual')(xs[:-1], us),
+          getattr(m, name + '_residual')(xs[:-1], us, params=p),
           jax.vmap(fn, in_axes=(0, 0, 0, None))(xs[:-1], us, ks, p),
       )
-      actual = getattr(m, name + '_jacobian')(xs[:-1], us)
+      actual = getattr(m, name + '_jacobian')(xs[:-1], us, params=p)
       expected = jax.vmap(
           jax.jacfwd(fn, argnums=(0, 1)), in_axes=(0, 0, 0, None)
       )(xs[:-1], us, ks, p)
@@ -122,10 +148,11 @@ class StagewiseOcpModelTest(parameterized.TestCase):
         ('terminal_inequality', terminal_ineq),
     ):
       np.testing.assert_allclose(
-          getattr(m, name + '_residual')(xs[-1]), fn(xs[-1], p)
+          getattr(m, name + '_residual')(xs[-1], params=p), fn(xs[-1], p)
       )
       np.testing.assert_allclose(
-          getattr(m, name + '_jacobian')(xs[-1]), jax.jacfwd(fn)(xs[-1], p)
+          getattr(m, name + '_jacobian')(xs[-1], params=p),
+          jax.jacfwd(fn)(xs[-1], p),
       )
     np.testing.assert_allclose(
         m.stage_inequality_bounds[0], [-1.0, -np.inf, -2.0]
@@ -135,9 +162,9 @@ class StagewiseOcpModelTest(parameterized.TestCase):
         m.terminal_inequality_bounds[0], [-1.0, -3.0, -4.0]
     )
     np.testing.assert_allclose(m.terminal_inequality_bounds[1], [3.0, 5.0, 6.0])
-    np.testing.assert_allclose(m.initial_state(), p['x0'])
-    np.testing.assert_allclose(m.initial_residual(xs[0]), 0.0)
-    np.testing.assert_allclose(m.initial_jacobian(xs[0]), np.eye(2))
+    np.testing.assert_allclose(m.initial_state(params=p), p['x0'])
+    np.testing.assert_allclose(m.initial_residual(xs[0], params=p), 0.0)
+    np.testing.assert_allclose(m.initial_jacobian(xs[0], params=p), np.eye(2))
 
     multipliers = (
         jp.array([2.0, 3.0]),
@@ -166,7 +193,7 @@ class StagewiseOcpModelTest(parameterized.TestCase):
 
     dense = jax.hessian(reference)(jp.concatenate([xs.ravel(), us.ravel()]))
     hxx, hxu, huu = m.lagrangian_hessian(
-        xs, us, *multipliers, objective_factor=scale
+        xs, us, *multipliers, objective_factor=scale, params=p
     )
     self.assertEqual(hxx.shape, (3, 2, 2))
     self.assertEqual(hxu.shape, (2, 2, 1))
@@ -181,37 +208,17 @@ class StagewiseOcpModelTest(parameterized.TestCase):
         )
         np.testing.assert_allclose(huu[k], dense[6 + k : 7 + k, 6 + k : 7 + k])
     changed = m.lagrangian_hessian(
-        xs, us, multipliers[0] * 100, *multipliers[1:], objective_factor=scale
+        xs,
+        us,
+        multipliers[0] * 100,
+        *multipliers[1:],
+        objective_factor=scale,
+        params=p
     )
     for actual, expected in zip(changed, (hxx, hxu, huu)):
       np.testing.assert_array_equal(actual, expected)
     with self.assertRaisesRegex(ValueError, 'expected shape'):
-      m.lagrangian_hessian(xs, us, jp.zeros(3), *multipliers[1:])
-
-  def test_parameter_reuse_and_recompilation(self):
-    m = _model()
-    with self.assertRaisesRegex(RuntimeError, 'set_params'):
-      m.objective(self.xs, self.us)
-    m.set_params(self.params)
-    compiled = m._callbacks['objective']
-    m.set_params({'x0': jp.array([1.0, 2.0]), 'a': np.array(0.9)})
-    self.assertIs(compiled, m._callbacks['objective'])
-    np.testing.assert_allclose(m.initial_state(), [1.0, 2.0])
-    self.assertAlmostEqual(
-        float(
-            m.objective(self.xs, self.us)[1]
-            - _cost(self.xs[1], self.us[1], 1, self.params)
-        ),
-        0.5,
-    )
-    m.set_params(self.params | {'extra': jp.zeros(3)})
-    self.assertIsNot(compiled, m._callbacks['objective'])
-    compiled = m._callbacks['objective']
-    m.set_params(self.params | {'extra': jp.zeros(4)})
-    self.assertIsNot(compiled, m._callbacks['objective'])
-    compiled = m._callbacks['objective']
-    m.set_params(self.params | {'extra': jp.zeros(4, dtype=jp.float32)})
-    self.assertIsNot(compiled, m._callbacks['objective'])
+      m.lagrangian_hessian(xs, us, jp.zeros(3), *multipliers[1:], 1.0, params=p)
 
   @parameterized.parameters(0, 2)
   def test_empty_constraints_and_controls(self, N):
@@ -224,13 +231,20 @@ class StagewiseOcpModelTest(parameterized.TestCase):
         stage_cost=lambda x, u, k, p: jp.sum(x * x),
         terminal_cost=lambda x, p: jp.sum(x * x),
     )
-    m.set_params(None)
+    m.initialize(None)
     xs, us = jp.ones((N + 1, 2)), jp.zeros((N, 0))
-    self.assertEqual(m.objective(xs, us).shape, (N + 1,))
-    self.assertEqual(m.objective_gradient(xs, us)[1].shape, (N, 0))
-    self.assertEqual(m.stage_equality_jacobian(xs[:-1], us)[1].shape, (N, 0, 0))
-    self.assertEqual(m.dynamics_jacobian(xs[:-1], us)[1].shape, (N, 2, 0))
-    self.assertEqual(m.terminal_inequality_residual(xs[-1]).shape, (0,))
+    self.assertEqual(m.objective(xs, us, params=None).shape, (N + 1,))
+    self.assertEqual(m.objective_gradient(xs, us, params=None)[1].shape, (N, 0))
+    self.assertEqual(
+        m.stage_equality_jacobian(xs[:-1], us, params=None)[1].shape, (N, 0, 0)
+    )
+    self.assertEqual(
+        m.dynamics_jacobian(xs[:-1], us, xs[1:], params=None)[1].shape,
+        (N, 2, 0),
+    )
+    self.assertEqual(
+        m.terminal_inequality_residual(xs[-1], params=None).shape, (0,)
+    )
     blocks = m.lagrangian_hessian(
         xs,
         us,
@@ -240,6 +254,8 @@ class StagewiseOcpModelTest(parameterized.TestCase):
         jp.zeros((N, 0)),
         jp.zeros(0),
         jp.zeros(0),
+        1.0,
+        params=None,
     )
     self.assertEqual(blocks[0].shape, (N + 1, 2, 2))
     self.assertEqual(blocks[2].shape, (N, 0, 0))

@@ -11,14 +11,9 @@ from mujodico.trajopt._src.types import Bounds, Params, StageFunction, StateFunc
 class StagewiseOcpModel:
   """An explicit OCP, independent of a solver or solver callback layout.
 
-  Call set_params before evaluation unless params_trace was supplied. Values
-  may change without recompilation; parameter tree/shape/dtype changes compile
-  new executables. Evaluators return JAX arrays. Stage-only inputs have N rows;
-  objective and Hessian inputs have N+1 state rows and N control rows.
-
   Inequality evaluators return raw bounded values. Their effective bounds
-  include bounded state variables, bounded controls (stage only), then user
-  inequalities. Jacobians use output-by-input layout and separate x/u blocks.
+  include bounded state variables, bounded controls (non-termina only), then
+  user inequalities. Jacobians use output-by-input layout and separate x/u blocks.
   """
 
   def __init__(
@@ -43,7 +38,11 @@ class StagewiseOcpModel:
       params_trace: Params | None = None,
   ):
     for name, value, minimum in (('N', N, 0), ('nx', nx, 1), ('nu', nu, 0)):
-      if not isinstance(value, Integral) or isinstance(value, bool) or value < minimum:
+      if (
+          not isinstance(value, Integral)
+          or isinstance(value, bool)
+          or value < minimum
+      ):
         raise ValueError(f'{name} must be an integer >= {minimum}.')
 
     self.N, self.nx, self.nu = int(N), int(nx), int(nu)
@@ -62,11 +61,28 @@ class StagewiseOcpModel:
     self._user_terminal_bounds = terminal_inequality_bounds
     self._gauss_newton = gauss_newton
 
-    self._signature = None
-    self._callbacks = {}
+    self._initialized = False
+    self._evaluators = {}
 
     if params_trace is not None:
-      self.set_params(params_trace)
+      self.initialize(params_trace)
+
+  def initialize(self, params_trace: Params) -> None:
+    if self._initialized:
+      return
+    evaluators, shapes, stage_bounds, terminal_bounds, sizes = (
+        self._build_evaluators(params_trace)
+    )
+    self._evaluators, self._input_specs = evaluators, shapes
+    self._stage_bounds, self._terminal_bounds = stage_bounds, terminal_bounds
+    self._constraint_sizes = sizes
+    self._initialized = True
+
+  def _require_initialized(self):
+    if not self._initialized:
+      raise RuntimeError(
+          'Pass params_trace or call initialize(params_trace) before accessing metadata.'
+      )
 
   @staticmethod
   def _bounds(bounds, size, name, *, inequality=False):
@@ -86,34 +102,28 @@ class StagewiseOcpModel:
       raise ValueError(f'{name} requires lower < upper and no NaN entries.')
     return lower, upper
 
-  def set_params(self, params: Params) -> None:
-    # Normalize numeric leaves so Python scalars and equivalent array scalars
-    # share the same compiled signature (including JAX weak-type behavior).
-    params = jax.tree_util.tree_map(lambda v: jp.asarray(np.asarray(v)), params)
-    leaves, treedef = jax.tree_util.tree_flatten(params)
-    signature = treedef, tuple((v.shape, v.dtype) for v in leaves)
-    if signature != self._signature:
-      callbacks, shapes, stage_bounds, terminal_bounds = self._compile(params)
-      self._callbacks, self._input_specs = callbacks, shapes
-      self._stage_bounds, self._terminal_bounds = stage_bounds, terminal_bounds
-      self._signature = signature
-    self._params = params
+  @property
+  def evaluation_dtype(self):
+    self._require_initialized()
+    return self._input_specs['objective'][0][1]
 
-  def _require_compiled(self):
-    if self._signature is None:
-      raise RuntimeError('Call set_params(params) before evaluating the OCP.')
+  @property
+  def constraint_sizes(self) -> tuple[int, int, int, int]:
+    """Stage equality/inequality and terminal equality/inequality counts."""
+    self._require_initialized()
+    return self._constraint_sizes
 
   @property
   def stage_inequality_bounds(self) -> Bounds:
-    self._require_compiled()
+    self._require_initialized()
     return tuple(v.copy() for v in self._stage_bounds)
 
   @property
   def terminal_inequality_bounds(self) -> Bounds:
-    self._require_compiled()
+    self._require_initialized()
     return tuple(v.copy() for v in self._terminal_bounds)
 
-  def _compile(self, params):
+  def _build_evaluators(self, params):
     N, nx, nu = self.N, self.nx, self.nu
     x, u, k = jp.zeros(nx), jp.zeros(nu), jp.array(0)
 
@@ -142,10 +152,14 @@ class StagewiseOcpModel:
       return jp.zeros(0)
 
     stage_eq = (
-        self._user_stage_eq_fn if self._user_stage_eq_fn is not None else empty_stage
+        self._user_stage_eq_fn
+        if self._user_stage_eq_fn is not None
+        else empty_stage
     )
     user_stage_ineq = (
-        self._user_stage_ineq_fn if self._user_stage_ineq_fn is not None else empty_stage
+        self._user_stage_ineq_fn
+        if self._user_stage_ineq_fn is not None
+        else empty_stage
     )
     terminal_eq = (
         self._user_terminal_eq_fn
@@ -159,9 +173,13 @@ class StagewiseOcpModel:
     )
 
     ng = check(stage_eq, (x, u, k, params), None, 'stage equality')
-    user_nh = check(user_stage_ineq, (x, u, k, params), None, 'stage inequality')
+    user_nh = check(
+        user_stage_ineq, (x, u, k, params), None, 'stage inequality'
+    )
     ng_terminal = check(terminal_eq, (x, params), None, 'terminal equality')
-    user_nh_terminal = check(user_terminal_ineq, (x, params), None, 'terminal inequality')
+    user_nh_terminal = check(
+        user_terminal_ineq, (x, params), None, 'terminal inequality'
+    )
 
     user_stage_bounds = self._bounds(
         self._user_stage_bounds,
@@ -176,8 +194,12 @@ class StagewiseOcpModel:
         inequality=True,
     )
 
-    xi = np.flatnonzero(np.isfinite(self.x_bounds[0]) | np.isfinite(self.x_bounds[1]))
-    ui = np.flatnonzero(np.isfinite(self.u_bounds[0]) | np.isfinite(self.u_bounds[1]))
+    xi = np.flatnonzero(
+        np.isfinite(self.x_bounds[0]) | np.isfinite(self.x_bounds[1])
+    )
+    ui = np.flatnonzero(
+        np.isfinite(self.u_bounds[0]) | np.isfinite(self.u_bounds[1])
+    )
 
     stage_bounds = tuple(
         np.concatenate(
@@ -225,6 +247,12 @@ class StagewiseOcpModel:
     def dynamics_residual(xs, us, xs_next, p):
       return batch(self._user_dynamics_fn, (nx,))(xs, us, p) - xs_next
 
+    def dynamics_jacobian(xs, us, xs_next, p):
+      return batch(
+          jax.jacfwd(self._user_dynamics_fn, argnums=(0, 1)),
+          ((nx, nx), (nx, nu)),
+      )(xs, us, p)
+
     def initial_residual(x, p):
       return x - self._user_initial_state_fn(p)
 
@@ -271,18 +299,17 @@ class StagewiseOcpModel:
 
     def add(name, fn, *args):
       shapes[name] = tuple((arg.shape, arg.dtype) for arg in args)
-      functions[name] = jax.jit(fn).lower(*args, params).compile()
+      functions[name] = fn
 
     add('objective', objective, xs, us)
     add('objective_gradient', objective_gradient, xs, us)
     add('dynamics_residual', dynamics_residual, xs[:-1], us, xs[1:])
     add(
         'dynamics_jacobian',
-        batch(
-            jax.jacfwd(self._user_dynamics_fn, argnums=(0, 1)), ((nx, nx), (nx, nu))
-        ),
+        dynamics_jacobian,
         xs[:-1],
         us,
+        xs[1:],
     )
     for name, fn, size in (
         ('stage_equality', stage_eq, ng),
@@ -317,10 +344,17 @@ class StagewiseOcpModel:
         jp.zeros(nh_terminal),
         jp.asarray(1.0),
     )
-    return functions, shapes, stage_bounds, terminal_bounds
+    return (
+        functions,
+        shapes,
+        stage_bounds,
+        terminal_bounds,
+        (ng, nh, ng_terminal, nh_terminal),
+    )
 
   def _evaluate(self, name, *args):
-    self._require_compiled()
+    params, args = args[-1], args[:-1]
+    self.initialize(params)
     # Use the trace dtypes, including for integer-valued array inputs.
     specs = self._input_specs[name]
     args = tuple(
@@ -329,15 +363,15 @@ class StagewiseOcpModel:
     for value, (shape, _) in zip(args, specs):
       if value.shape != shape:
         raise ValueError(f'{name}: expected shape {shape}, got {value.shape}.')
-    return self._callbacks[name](*args, self._params)
+    return self._evaluators[name](*args, params)
 
-  def objective(self, xs, us):
+  def objective(self, xs, us, params):
     """Return stage and terminal costs, shape (N+1,)."""
-    return self._evaluate('objective', xs, us)
+    return self._evaluate('objective', xs, us, params)
 
-  def objective_gradient(self, xs, us):
+  def objective_gradient(self, xs, us, params):
     """Return (gx, gu) with shapes (N+1, nx) and (N, nu)."""
-    return self._evaluate('objective_gradient', xs, us)
+    return self._evaluate('objective_gradient', xs, us, params)
 
   def lagrangian_hessian(
       self,
@@ -349,7 +383,8 @@ class StagewiseOcpModel:
       lam_stage_ineq,
       lam_terminal_eq,
       lam_terminal_ineq,
-      objective_factor=1.0,
+      objective_factor,
+      params,
   ):
     """Return (Hxx, Hxu, Huu), retaining the terminal block only in Hxx.
 
@@ -368,44 +403,45 @@ class StagewiseOcpModel:
         lam_terminal_eq,
         lam_terminal_ineq,
         objective_factor,
+        params,
     )
 
-  def dynamics_residual(self, xs, us, xs_next):
-    return self._evaluate('dynamics_residual', xs, us, xs_next)
+  def dynamics_residual(self, xs, us, xs_next, params):
+    return self._evaluate('dynamics_residual', xs, us, xs_next, params)
 
-  def dynamics_jacobian(self, xs, us):
-    """Return (A, B) shaped (N, nx, nx) and (N, nx, nu)."""
-    return self._evaluate('dynamics_jacobian', xs, us)
+  def dynamics_jacobian(self, xs, us, xs_next, params):
+    """Return residual derivatives (A, B) shaped (N, nx, nx), (N, nx, nu)."""
+    return self._evaluate('dynamics_jacobian', xs, us, xs_next, params)
 
-  def stage_equality_residual(self, xs, us):
-    return self._evaluate('stage_equality_residual', xs, us)
+  def stage_equality_residual(self, xs, us, params):
+    return self._evaluate('stage_equality_residual', xs, us, params)
 
-  def stage_equality_jacobian(self, xs, us):
-    return self._evaluate('stage_equality_jacobian', xs, us)
+  def stage_equality_jacobian(self, xs, us, params):
+    return self._evaluate('stage_equality_jacobian', xs, us, params)
 
-  def stage_inequality_residual(self, xs, us):
-    return self._evaluate('stage_inequality_residual', xs, us)
+  def stage_inequality_residual(self, xs, us, params):
+    return self._evaluate('stage_inequality_residual', xs, us, params)
 
-  def stage_inequality_jacobian(self, xs, us):
-    return self._evaluate('stage_inequality_jacobian', xs, us)
+  def stage_inequality_jacobian(self, xs, us, params):
+    return self._evaluate('stage_inequality_jacobian', xs, us, params)
 
-  def terminal_equality_residual(self, x):
-    return self._evaluate('terminal_equality_residual', x)
+  def terminal_equality_residual(self, x, params):
+    return self._evaluate('terminal_equality_residual', x, params)
 
-  def terminal_equality_jacobian(self, x):
-    return self._evaluate('terminal_equality_jacobian', x)
+  def terminal_equality_jacobian(self, x, params):
+    return self._evaluate('terminal_equality_jacobian', x, params)
 
-  def terminal_inequality_residual(self, x):
-    return self._evaluate('terminal_inequality_residual', x)
+  def terminal_inequality_residual(self, x, params):
+    return self._evaluate('terminal_inequality_residual', x, params)
 
-  def terminal_inequality_jacobian(self, x):
-    return self._evaluate('terminal_inequality_jacobian', x)
+  def terminal_inequality_jacobian(self, x, params):
+    return self._evaluate('terminal_inequality_jacobian', x, params)
 
-  def initial_state(self):
-    return self._evaluate('initial_state')
+  def initial_state(self, params):
+    return self._evaluate('initial_state', params)
 
-  def initial_residual(self, x0):
-    return self._evaluate('initial_residual', x0)
+  def initial_residual(self, x0, params):
+    return self._evaluate('initial_residual', x0, params)
 
-  def initial_jacobian(self, x0):
-    return self._evaluate('initial_jacobian', x0)
+  def initial_jacobian(self, x0, params):
+    return self._evaluate('initial_jacobian', x0, params)
