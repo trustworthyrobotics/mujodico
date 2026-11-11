@@ -8,15 +8,21 @@ import jax
 import jax.numpy as jp
 import numpy as np
 
+from mujodico.trajopt._src.stagewise_ocp_model import StagewiseOcpModel
 from mujodico.trajopt._src.types import (
-  Bounds,
-  Params,
-  StageFunction,
-  StateFunction,
+    Bounds,
+    Params,
+    StageFunction,
+    StateFunction,
 )
 
 
 class FatropTrajOpt:
+  """Compile callbacks at construction when params_trace is supplied.
+
+  With params_trace=None, compilation waits until the first solve. Subsequent
+  parameter values must match the signature used for compilation.
+  """
 
   def __init__(
       self,
@@ -30,8 +36,10 @@ class FatropTrajOpt:
       terminal_cost: StateFunction,
       stage_equality_constraint: StageFunction | None = None,
       stage_inequality_constraint: StageFunction | None = None,
+      stage_inequality_bounds: Bounds | None = None,
       terminal_equality_constraint: StateFunction | None = None,
       terminal_inequality_constraint: StateFunction | None = None,
+      terminal_inequality_bounds: Bounds | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
       gauss_newton: bool = True,
@@ -42,318 +50,36 @@ class FatropTrajOpt:
       self._cyfatrop = importlib.import_module('cyfatrop')
     except (ImportError, OSError) as e:
       raise ImportError(
-          'FatropTrajOpt requires the optional cyfatrop package. '
-          'Install it with:\n\n'
-          '    pip install git+https://github.com/wei-chen-li/cyfatrop.git'
+          'FatropTrajOpt requires the optional cyfatrop package. Install it'
+          ' with:\n\n    pip install'
+          ' git+https://github.com/wei-chen-li/cyfatrop.git'
       ) from e
 
-    self.N, self.nx, self.nu = int(N), int(nx), int(nu)
-    self.update_params = update_params
-    self._initial_state = initial_state
-    self._dynamics = dynamics
-    self._stage_cost = stage_cost
-    self._terminal_cost = terminal_cost
-    self._stage_eq = stage_equality_constraint
-    self._stage_ineq = stage_inequality_constraint
-    self._terminal_eq = terminal_equality_constraint
-    self._terminal_ineq = terminal_inequality_constraint
-    self._x_bounds = self._check_bounds(x_bounds, nx, 'x_bounds')
-    self._u_bounds = self._check_bounds(u_bounds, nu, 'u_bounds')
-    self._gauss_newton = gauss_newton
-    self._signature = None
-    self._callback_time = self._conversion_time = 0.0
+    self._model = StagewiseOcpModel(
+        N,
+        nx,
+        nu,
+        initial_state=initial_state,
+        dynamics=dynamics,
+        stage_cost=stage_cost,
+        terminal_cost=terminal_cost,
+        stage_equality_constraint=stage_equality_constraint,
+        stage_inequality_constraint=stage_inequality_constraint,
+        stage_inequality_bounds=stage_inequality_bounds,
+        terminal_equality_constraint=terminal_equality_constraint,
+        terminal_inequality_constraint=terminal_inequality_constraint,
+        terminal_inequality_bounds=terminal_inequality_bounds,
+        x_bounds=x_bounds,
+        u_bounds=u_bounds,
+        gauss_newton=gauss_newton,
+    )
 
-    # Keep cyfatrop optional at module import time, while still satisfying
-    # its requirement that the problem inherit exactly one public ABC.
     class Problem(_FatropProblem, self._cyfatrop.TrajOptAbstract):
       pass
 
-    self._problem = Problem(self)
-    if params_trace is not None:
-      self._set_params(params_trace)
-
-  @staticmethod
-  def _check_bounds(bounds, size, name):
-    if bounds is None:
-      return np.full(size, -np.inf), np.full(size, np.inf)
-    lower, upper = (np.asarray(v, dtype=float).copy() for v in bounds)
-    if lower.shape != (size,) or upper.shape != (size,):
-      raise ValueError(f'{name} must contain arrays of shape ({size},).')
-    if (
-        np.any(np.isnan(lower))
-        or np.any(np.isnan(upper))
-        or np.any(lower >= upper)
-    ):
-      raise ValueError(
-          f'{name} must have lower < upper and no NaN entries; '
-          'express fixed variables through equality constraints.'
-      )
-    return lower, upper
-
-  def _set_params(self, params):
-    x0 = np.asarray(self._initial_state(params), dtype=float)
-    if x0.shape != (self.nx,) or not np.all(np.isfinite(x0)):
-      raise ValueError(
-          f'initial_state(params) must return a finite ({self.nx},) array.'
-      )
-    leaves, treedef = jax.tree_util.tree_flatten(params)
-    signature = treedef, tuple(
-        (np.shape(v), np.asarray(v).dtype.str) for v in leaves
+    self._problem = Problem(
+        self._model, params_trace=params_trace, update_params=update_params
     )
-    self._params, self._x0 = params, x0.copy()
-    if signature != self._signature:
-      self._compile(params)
-      self._signature = signature
-
-  def _compile(self, params_trace):
-    N, nx, nu = self.N, self.nx, self.nu
-    x_trace, u_trace, k_trace = jp.zeros(nx), jp.zeros(nu), jp.array(0)
-    x_indices = np.flatnonzero(
-        np.isfinite(self._x_bounds[0]) | np.isfinite(self._x_bounds[1])
-    )
-    u_indices = np.flatnonzero(
-        np.isfinite(self._u_bounds[0]) | np.isfinite(self._u_bounds[1])
-    )
-
-    def count(fn, args, name):
-      if fn is None:
-        return 0
-      shape = jax.eval_shape(fn, *args).shape
-      if len(shape) != 1:
-        raise ValueError(f'{name} must return a one-dimensional array.')
-      return shape[0]
-
-    stage_args = x_trace, u_trace, k_trace, params_trace
-    terminal_args = x_trace, params_trace
-    ng = count(self._stage_eq, stage_args, 'stage equality') if N else 0
-    nh = count(self._stage_ineq, stage_args, 'stage inequality') if N else 0
-    ng_terminal = count(self._terminal_eq, terminal_args, 'terminal equality')
-    nh_terminal = count(
-        self._terminal_ineq, terminal_args, 'terminal inequality'
-    )
-    ng_ineq = nh + x_indices.size + u_indices.size
-    ng_ineq_terminal = nh_terminal + x_indices.size
-    if not N:
-      ng, ng_ineq = ng_terminal, ng_ineq_terminal
-    if ng_terminal > ng or ng_ineq_terminal > ng_ineq:
-      raise ValueError(
-          'cyfatrop.TrajOptAbstract requires terminal constraint counts '
-          'not to exceed stage counts (including variable bounds).'
-      )
-    if (N and ng > nu) or ng_terminal > (nx if N else 0):
-      raise ValueError(
-          'Too many equalities for cyfatrop.TrajOptAbstract: stage '
-          'equalities plus the fixed initial state must fit stage variables; '
-          'terminal equalities must fit terminal state variables.'
-      )
-    if jax.eval_shape(self._terminal_cost, *terminal_args).shape != ():
-      raise ValueError('terminal_cost must return a scalar.')
-    if N:
-      if jax.eval_shape(self._stage_cost, *stage_args).shape != ():
-        raise ValueError('stage_cost must return a scalar.')
-      if jax.eval_shape(self._dynamics, *stage_args).shape != (nx,):
-        raise ValueError(f'dynamics must return an array of shape ({nx},).')
-
-    self._ng, self._ng_terminal = ng, ng_terminal
-    self._ng_ineq, self._ng_ineq_terminal = ng_ineq, ng_ineq_terminal
-    stage_lower = np.concatenate([
-        np.zeros(nh),
-        self._x_bounds[0][x_indices],
-        self._u_bounds[0][u_indices],
-    ])
-    stage_upper = np.concatenate([
-        np.full(nh, np.inf),
-        self._x_bounds[1][x_indices],
-        self._u_bounds[1][u_indices],
-    ])
-    terminal_lower = np.concatenate(
-        [np.zeros(nh_terminal), self._x_bounds[0][x_indices]]
-    )
-    terminal_upper = np.concatenate(
-        [np.full(nh_terminal, np.inf), self._x_bounds[1][x_indices]]
-    )
-    self._bounds = tuple(
-        np.concatenate([
-            np.broadcast_to(stage, (N, ng_ineq))
-            if N
-            else np.empty((0, ng_ineq)),
-            np.pad(terminal, (0, ng_ineq - ng_ineq_terminal))[None],
-        ])
-        for stage, terminal in (
-            (stage_lower, terminal_lower),
-            (stage_upper, terminal_upper),
-        )
-    )
-
-    def stage_cost(y, k, p):
-      return self._stage_cost(y[nu:], y[:nu], k, p)
-
-    def terminal_cost(y, k, p):
-      return self._terminal_cost(y[nu:], p)
-
-    def dynamics(y, k, p):
-      return self._dynamics(y[nu:], y[:nu], k, p)
-
-    def stage_eq(y, k, p):
-      return (
-          jp.zeros(0)
-          if self._stage_eq is None
-          else self._stage_eq(y[nu:], y[:nu], k, p)
-      )
-
-    def terminal_eq(y, k, p):
-      value = (
-          jp.zeros(0)
-          if self._terminal_eq is None
-          else self._terminal_eq(y[nu:], p)
-      )
-      return jp.pad(value, (0, ng - ng_terminal))
-
-    def stage_ineq(y, k, p):
-      value = (
-          jp.zeros(0)
-          if self._stage_ineq is None
-          else self._stage_ineq(y[nu:], y[:nu], k, p)
-      )
-      return jp.concatenate([value, y[nu:][x_indices], y[:nu][u_indices]])
-
-    def terminal_ineq(y, k, p):
-      value = (
-          jp.zeros(0)
-          if self._terminal_ineq is None
-          else self._terminal_ineq(y[nu:], p)
-      )
-      value = jp.concatenate([value, y[nu:][x_indices]])
-      return jp.pad(value, (0, ng_ineq - ng_ineq_terminal))
-
-    ks = jp.arange(N)
-
-    def batch(stage, terminal):
-      def evaluate(u, x, p):
-        ys = jp.concatenate([u, x[:-1]], axis=1)
-        y_terminal = jp.concatenate([jp.zeros(nu), x[-1]])
-        last = terminal(y_terminal, jp.array(N), p)
-        first = (
-            jax.vmap(stage, in_axes=(0, 0, None))(ys, ks, p)
-            if N
-            else jp.zeros((0, *last.shape))
-        )
-        return jp.concatenate([first, last[None]], axis=0)
-
-      return evaluate
-
-    def jacobian_transpose(fn):
-      return lambda *args: jax.jacfwd(fn)(*args).T
-
-    def batched_b(x_next, u, x, p):
-      if not N:
-        return jp.zeros((0, nx))
-      ys = jp.concatenate([u, x], axis=1)
-      return jax.vmap(dynamics, in_axes=(0, 0, None))(ys, ks, p) - x_next
-
-    def batched_BAt(x_next, u, x, p):
-      if not N:
-        return jp.zeros((0, nu + nx, nx))
-      ys = jp.concatenate([u, x], axis=1)
-      return jax.vmap(jacobian_transpose(dynamics), in_axes=(0, 0, None))(
-          ys, ks, p
-      )
-
-    def stage_lagrangian(y, ld, le, li, k, scale, p):
-      value = scale * stage_cost(y, k, p)
-      if not self._gauss_newton:
-        value += jp.vdot(ld, dynamics(y, k, p))
-        value += jp.vdot(le, stage_eq(y, k, p))
-        value += jp.vdot(li, stage_ineq(y, k, p))
-      return value
-
-    def terminal_lagrangian(y, le, li, scale, p):
-      value = scale * terminal_cost(y, jp.array(N), p)
-      if not self._gauss_newton:
-        value += jp.vdot(le, terminal_eq(y, jp.array(N), p))
-        value += jp.vdot(li, terminal_ineq(y, jp.array(N), p))
-      return value
-
-    def batched_RSQt(u, x, scale, ld, le, li, p):
-      ys = jp.concatenate([u, x[:-1]], axis=1)
-      y_terminal = jp.concatenate([jp.zeros(nu), x[-1]])
-      last = jax.hessian(terminal_lagrangian)(
-          y_terminal, le[-1], li[-1], scale, p
-      )
-      first = (
-          jax.vmap(
-              jax.hessian(stage_lagrangian), in_axes=(0, 0, 0, 0, 0, None, None)
-          )(
-              ys,
-              ld,
-              le[:-1],
-              li[:-1],
-              ks,
-              scale,
-              p,
-          )
-          if N
-          else jp.zeros((0, nu + nx, nu + nx))
-      )
-      return jp.concatenate([first, last[None]], axis=0)
-
-    u_batch, x_batch = jp.zeros((N, nu)), jp.zeros((N + 1, nx))
-    self._callbacks = {}
-    for name, fn in (
-        ('L', batch(stage_cost, terminal_cost)),
-        ('rq', batch(jax.grad(stage_cost), jax.grad(terminal_cost))),
-        ('g', batch(stage_eq, terminal_eq)),
-        (
-            'Gt',
-            batch(
-                jacobian_transpose(stage_eq), jacobian_transpose(terminal_eq)
-            ),
-        ),
-        ('gineq', batch(stage_ineq, terminal_ineq)),
-        (
-            'Gt_ineq',
-            batch(
-                jacobian_transpose(stage_ineq),
-                jacobian_transpose(terminal_ineq),
-            ),
-        ),
-    ):
-      self._callbacks[name] = (
-          jax.jit(fn).lower(u_batch, x_batch, params_trace).compile()
-      )
-    for name, fn in (('b', batched_b), ('BAt', batched_BAt)):
-      self._callbacks[name] = (
-          jax.jit(fn)
-          .lower(x_batch[1:], u_batch, x_batch[:-1], params_trace)
-          .compile()
-      )
-    self._callbacks['RSQt'] = (
-        jax.jit(batched_RSQt)
-        .lower(
-            u_batch,
-            x_batch,
-            jp.array(1.0),
-            jp.zeros((N, nx)),
-            jp.zeros((N + 1, ng)),
-            jp.zeros((N + 1, ng_ineq)),
-            params_trace,
-        )
-        .compile()
-    )
-
-  def _evaluate(self, name, *args):
-    tic = time.perf_counter()
-    jax_args = tuple(jp.asarray(arg) for arg in args)
-    jax.block_until_ready(jax_args)
-    self._conversion_time += time.perf_counter() - tic
-    tic = time.perf_counter()
-    result = self._callbacks[name](*jax_args, self._params)
-    result.block_until_ready()
-    self._callback_time += time.perf_counter() - tic
-    tic = time.perf_counter()
-    result = np.asarray(result, dtype=float)
-    self._conversion_time += time.perf_counter() - tic
-    return result
 
   def solve(
       self,
@@ -362,121 +88,305 @@ class FatropTrajOpt:
       us_init: jax.Array | np.ndarray,
       **options,
   ) -> tuple[np.ndarray, np.ndarray, dict]:
-    """Return (xs, us, info), forwarding options to cyfatrop.Solver.
+    self._problem.prepare(xs_init, us_init, params)
+    self._problem.reset_stats()
 
-    Shapes are (N+1, nx) for xs and (N, nu) for us. Compilation is excluded
-    from total_time, as in the other trajectory optimizer wrappers.
-    """
-    xs_init, us_init = np.asarray(xs_init, dtype=float), np.asarray(
-        us_init, dtype=float
-    )
-    if xs_init.shape != (self.N + 1, self.nx):
-      raise ValueError(f'xs_init must have shape ({self.N + 1}, {self.nx}).')
-    if us_init.shape != (self.N, self.nu):
-      raise ValueError(f'us_init must have shape ({self.N}, {self.nu}).')
-    self._set_params(params)
-    self._xs_init = xs_init.copy()
-    self._us_init = us_init.copy()
-    self._callback_time = self._conversion_time = 0.0
     solver = self._cyfatrop.Solver(self._problem, options=options)
+
     tic = time.perf_counter()
     result = solver.solve()
     total_time = time.perf_counter() - tic
+
     info = dict(result.stats)
     info.update(
         status=result.status,
         success=result.success,
         obj_val=result.objective,
         total_time=total_time,
-        callback_time=self._callback_time,
-        conversion_time=self._conversion_time,
+        **self._problem.stats,
     )
     return np.asarray(result.x), np.asarray(result.u), info
 
 
 class _FatropProblem:
-  """Implementation mixed with TrajOptAbstract after the optional import."""
 
-  def __init__(self, optimizer):
-    self.opt = optimizer
+  def __init__(
+      self, model: StagewiseOcpModel, *, params_trace=None, update_params=None
+  ):
+    self.model = model
+    self.update_params = update_params
+    self.reset_stats()
+    self._compiled_signature = None
+    if params_trace is not None:
+      self._initialize(params_trace)
+
+  def reset_stats(self):
+    self._callback_time = self._conversion_time = 0.0
+
+  @property
+  def stats(self):
+    return {
+        'callback_time': self._callback_time,
+        'conversion_time': self._conversion_time,
+    }
+
+  @staticmethod
+  def _parameter_signature(params):
+    leaves, treedef = jax.tree_util.tree_flatten(params)
+    avals = tuple(jax.typeof(v) for v in leaves)
+    return treedef, tuple((v.shape, v.dtype, v.weak_type) for v in avals)
+
+  def prepare(self, xs_init, us_init, params):
+    m = self.model
+
+    xs, us = np.asarray(xs_init, dtype=float), np.asarray(us_init, dtype=float)
+    if xs.shape != (m.N + 1, m.nx):
+      raise ValueError(f'xs_init must have shape ({m.N + 1}, {m.nx}).')
+    if us.shape != (m.N, m.nu):
+      raise ValueError(f'us_init must have shape ({m.N}, {m.nu}).')
+
+    self._xs_init, self._us_init = xs.copy(), us.copy()
+
+    if self._compiled_signature is None:
+      self._initialize(params)
+      return
+
+    signature = self._parameter_signature(params)
+    if signature != self._compiled_signature:
+      raise ValueError(
+          'params must match the params_trace tree, shapes, dtypes, and weak'
+          ' types; construct a new FatropTrajOpt for a different signature.'
+      )
+    self._params = params
+
+  def _initialize(self, params):
+    m = self.model
+    m.initialize(params)
+
+    self._params = params
+    self._params_signature = self._parameter_signature(params)
+    if self._compiled_signature == self._params_signature:
+      return
+
+    self._stage_ng, self._stage_nh, self._ng_terminal, self._nh_terminal = m.constraint_sizes
+    self._ng = self._stage_ng if m.N else self._ng_terminal
+    self._nh = self._stage_nh if m.N else self._nh_terminal
+
+    if self._ng_terminal > self._ng or self._nh_terminal > self._nh:
+      raise ValueError(
+          'cyfatrop requires terminal constraint counts not to exceed stage counts.'
+      )
+
+    self._compile_callbacks()
+    self._compiled_signature = self._params_signature
+
+    self._bounds = tuple(
+        np.concatenate([
+            np.broadcast_to(stage, (m.N, self._nh))
+            if m.N
+            else np.empty((0, self._nh)),
+            np.pad(terminal, (0, self._nh - self._nh_terminal))[None],
+        ])
+        for stage, terminal in zip(
+            m.stage_inequality_bounds, m.terminal_inequality_bounds
+        )
+    )
+
+  def _compile_callbacks(self):
+    m = self.model
+    N, nx, nu = m.N, m.nx, m.nu
+
+    def objective(u, x, scale, p):
+      return scale * m.objective(x, u, p)
+
+    def gradient(u, x, scale, p):
+      gx, gu = m.objective_gradient(x, u, p)
+      return scale * jp.concatenate(
+          [jp.concatenate([gu, jp.zeros((1, nu))]), gx], axis=1
+      )
+
+    def dynamics_jacobian(x_next, u, x, p):
+      A, B = m.dynamics_jacobian(x, u, x_next, p)
+      return jp.concatenate([B, A], axis=-1).swapaxes(-1, -2)
+
+    def constraint(kind, width, terminal_count, jacobian=False):
+      suffix = '_jacobian' if jacobian else '_residual'
+      stage_fn = getattr(m, 'stage_' + kind + suffix)
+      terminal_fn = getattr(m, 'terminal_' + kind + suffix)
+
+      def evaluate(u, x, p):
+        stage = stage_fn(x[:-1], u, p)
+        terminal = terminal_fn(x[-1], p)
+        if jacobian:
+          jx, ju = stage
+          stage = jp.concatenate([ju, jx], axis=-1).swapaxes(-1, -2)
+          terminal = jp.pad(terminal.T, ((nu, 0), (0, width - terminal_count)))
+        else:
+          terminal = jp.pad(terminal, (0, width - terminal_count))
+        if not N:
+          return terminal[None]
+        return jp.concatenate([stage, terminal[None]], axis=0)
+
+      return evaluate
+
+    def hessian(scale, u, x, ld, le, li, initial, p):
+      stage_eq = le[:-1] if N else jp.zeros((0, self._stage_ng))
+      stage_ineq = li[:-1] if N else jp.zeros((0, self._stage_nh))
+      hxx, hxu, huu = m.lagrangian_hessian(
+          x,
+          u,
+          initial,
+          ld,
+          stage_eq,
+          stage_ineq,
+          le[-1, : self._ng_terminal],
+          li[-1, : self._nh_terminal],
+          scale,
+          p,
+      )
+      huu = jp.concatenate([huu, jp.zeros((1, nu, nu))])
+      hxu = jp.concatenate([hxu, jp.zeros((1, nx, nu))])
+      return jp.concatenate(
+          [
+              jp.concatenate([huu, hxu.swapaxes(-1, -2)], axis=2),
+              jp.concatenate([hxu, hxx], axis=2),
+          ],
+          axis=1,
+      )
+
+    dtype = m.evaluation_dtype
+    x, u = jp.zeros((N + 1, nx), dtype), jp.zeros((N, nu), dtype)
+    scale = jp.asarray(1.0, dtype=dtype)
+
+    self._callbacks = {}
+    self._callback_dtypes = {}
+
+    def add(name, fn, *args):
+      self._callbacks[name] = jax.jit(fn).lower(*args, self._params).compile()
+      self._callback_dtypes[name] = tuple(arg.dtype for arg in args)
+
+    add('g_initial', m.initial_residual, x[0])
+    add('Gt_initial', lambda x, p: m.initial_jacobian(x, p).T, x[0])
+    add('L', objective, u, x, scale)
+    add('rq', gradient, u, x, scale)
+    add(
+        'b',
+        lambda xp, u, x, p: m.dynamics_residual(x, u, xp, p),
+        x[1:],
+        u,
+        x[:-1],
+    )
+    add('BAt', dynamics_jacobian, x[1:], u, x[:-1])
+    for kind, width, terminal_count, names in (
+        ('equality', self._ng, self._ng_terminal, ('g', 'Gt')),
+        ('inequality', self._nh, self._nh_terminal, ('gineq', 'Gt_ineq')),
+    ):
+      for jacobian, name in zip((False, True), names):
+        add(name, constraint(kind, width, terminal_count, jacobian), u, x)
+    add(
+        'RSQt',
+        hessian,
+        scale,
+        u,
+        x,
+        jp.zeros((N, nx), dtype),
+        jp.zeros((N + 1, self._ng), dtype),
+        jp.zeros((N + 1, self._nh), dtype),
+        jp.zeros(nx, dtype),
+    )
+
+  def _evaluate(self, name, args):
+    tic = time.perf_counter()
+    args = tuple(
+        jp.asarray(arg, dtype=dtype)
+        for arg, dtype in zip(args, self._callback_dtypes[name])
+    )
+    jax.block_until_ready(args)
+    self._conversion_time += time.perf_counter() - tic
+    tic = time.perf_counter()
+    result = self._callbacks[name](*args, self._params)
+    jax.block_until_ready(result)
+    self._callback_time += time.perf_counter() - tic
+    tic = time.perf_counter()
+    result = np.asarray(result, dtype=float)
+    self._conversion_time += time.perf_counter() - tic
+    return result
 
   def get_horizon_length(self):
-    return self.opt.N + 1
+    return self.model.N + 1
 
   def get_nx(self):
-    return self.opt.nx
+    return self.model.nx
 
   def get_nu(self):
-    return self.opt.nu
+    return self.model.nu
 
   def get_ng(self):
-    return self.opt._ng
+    return self._ng
 
   def get_ng_terminal(self):
-    return self.opt._ng_terminal
+    return self._ng_terminal
 
   def get_ng_ineq(self):
-    return self.opt._ng_ineq
+    return self._nh
 
   def get_ng_ineq_terminal(self):
-    return self.opt._ng_ineq_terminal
+    return self._nh_terminal
 
   def batched_get_bounds(self):
-    return self.opt._bounds
+    return self._bounds
 
   def batched_get_initial_xk(self):
-    return self.opt._xs_init
+    return self._xs_init
 
   def batched_get_initial_uk(self):
-    return self.opt._us_init
+    return self._us_init
 
   def eval_g_initial(self, x0):
-    return np.asarray(x0) - self.opt._x0
+    return self._evaluate('g_initial', (x0,))
 
   def eval_Gt_initial(self, x0):
-    return np.eye(self.opt.nx)
+    return self._evaluate('Gt_initial', (x0,))
 
   def batched_eval_b(self, x_next, u, x):
-    return self.opt._evaluate('b', x_next, u, x)
+    return self._evaluate('b', (x_next, u, x))
 
   def batched_eval_BAt(self, x_next, u, x):
-    return self.opt._evaluate('BAt', x_next, u, x)
+    return self._evaluate('BAt', (x_next, u, x))
 
   def batched_eval_L(self, scale, u, x):
-    return scale * self.opt._evaluate('L', u, x)
+    return self._evaluate('L', (u, x, scale))
 
   def batched_eval_rq(self, scale, u, x):
-    return scale * self.opt._evaluate('rq', u, x)
+    return self._evaluate('rq', (u, x, scale))
 
   def batched_eval_g(self, u, x):
-    return self.opt._evaluate('g', u, x)
-
-  def batched_eval_Gt(self, u, x):
-    return self.opt._evaluate('Gt', u, x)
+    return self._evaluate('g', (u, x))
 
   def batched_eval_gineq(self, u, x):
-    return self.opt._evaluate('gineq', u, x)
+    return self._evaluate('gineq', (u, x))
+
+  def batched_eval_Gt(self, u, x):
+    return self._evaluate('Gt', (u, x))
 
   def batched_eval_Gt_ineq(self, u, x):
-    return self.opt._evaluate('Gt_ineq', u, x)
+    return self._evaluate('Gt_ineq', (u, x))
 
   def batched_eval_RSQt(
       self, scale, u, x, lam_dyn, lam_eq, lam_ineq, lam_initial
   ):
-    return self.opt._evaluate('RSQt', u, x, scale, lam_dyn, lam_eq, lam_ineq)
+    return self._evaluate('RSQt', (scale, u, x, lam_dyn, lam_eq, lam_ineq, lam_initial))
 
   def intermediate(self, iteration, x, u, stats):
-    if self.opt.update_params is None:
+    if self.update_params is None:
       return
-    stats = dict(stats, iter=iteration, xs=x, us=u)
-    params = self.opt.update_params(stats, self.opt._params)
-    leaves, treedef = jax.tree_util.tree_flatten(params)
-    signature = treedef, tuple(
-        (np.shape(v), np.asarray(v).dtype.str) for v in leaves
-    )
-    if signature != self.opt._signature:
+    tic = time.perf_counter()
+    params = self.update_params(dict(stats, iter=iteration, xs=x, us=u), self._params)
+    signature = self._parameter_signature(params)
+    if signature != self._params_signature:
       raise ValueError(
-          'update_params must preserve parameter tree structure, shapes, and'
-          ' dtypes.'
+          'update_params must preserve parameter tree structure, shapes, and dtypes.'
       )
-    self.opt._set_params(params)
+    jax.block_until_ready(params)
+    self._params = params
+    self._conversion_time += time.perf_counter() - tic
