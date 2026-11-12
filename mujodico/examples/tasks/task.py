@@ -3,6 +3,7 @@ import mujoco
 from mujodico.examples.tasks.task_playback import TaskPlayback
 from mujodico.mjx import ContactApproxType
 import numpy as np
+from scipy.spatial.transform import Rotation, Slerp
 
 
 @dataclasses.dataclass(frozen=True)
@@ -19,11 +20,11 @@ class Task:
   contact_approx: ContactApproxType = ContactApproxType.HUNT_CROSSLEY
 
   @property
-  def nx(self):
+  def nx(self) -> int:
     return self.model.nq + self.model.nv + self.model.na
 
   @property
-  def nu(self):
+  def nu(self) -> int:
     return self.model.nu
 
   def __post_init__(self):
@@ -45,7 +46,7 @@ class Task:
     assert (self.u_ref <= u_ub).all()
 
   @property
-  def x_bounds(self):
+  def x_bounds(self) -> tuple[np.ndarray, np.ndarray]:
     m = self.model
 
     q_lb = np.full(m.nq, -np.inf)
@@ -84,7 +85,7 @@ class Task:
     return x_lb, x_ub
 
   @property
-  def u_bounds(self):
+  def u_bounds(self) -> tuple[np.ndarray, np.ndarray]:
     m = self.model
 
     u_lb = np.where(
@@ -100,20 +101,32 @@ class Task:
     return u_lb, u_ub
 
   @property
-  def xs_init(self):
+  def xs_init(self) -> np.ndarray:
     xs = np.linspace(self.x_0, self.x_goal, self.horizon + 1)
 
     mask = np.diag(self.Q) > 0
     xs[:, ~mask] = self.x_0[~mask]
 
+    for i in self.quaternion_w_idxs:
+      if np.any(mask[i : i + 4]):
+        # SciPy uses [x, y, z, w]; interpolate the complete quaternion block.
+        endpoints = np.stack([self.x_0[i : i + 4], self.x_goal[i : i + 4]])
+        rotations = Rotation.from_quat(np.roll(endpoints, -1, axis=1))
+        quaternions = Slerp([0, 1], rotations)(
+            np.linspace(0, 1, self.horizon + 1)
+        ).as_quat()
+        xs[:, i : i + 4] = np.roll(quaternions, 1, axis=1)
+      else:
+        xs[:, i : i + 4] = self.x_0[i : i + 4]
+
     return xs
 
   @property
-  def us_init(self):
-    return np.zeros((self.horizon, self.nu))
+  def us_init(self) -> np.ndarray:
+    return np.tile(self.u_ref, (self.horizon, 1))
 
   @property
-  def quaternion_w_idxs(self):
+  def quaternion_w_idxs(self) -> tuple[int, ...]:
     idxs = []
     for j in range(self.model.njnt):
       typ = self.model.jnt_type[j]
@@ -122,13 +135,13 @@ class Task:
         idxs.append(adr + 3)
       elif typ == mujoco.mjtJoint.mjJNT_BALL:
         idxs.append(adr)
-    return idxs
+    return tuple(idxs)
 
   def print_summary(self):
     x_lb, x_ub = self.x_bounds
     u_lb, u_ub = self.u_bounds
     qw_idxs = self.quaternion_w_idxs
-    print(f'''
+    print(f"""
 Task: {self.__class__.__name__}
   horizon = {self.horizon}
   nx = {self.nx} (nq={self.model.nq}, nv={self.model.nv}, na={self.model.na})
@@ -145,7 +158,7 @@ Task: {self.__class__.__name__}
   u_lb = {u_lb}
   u_ub = {u_ub}
   contact_smoothing = {self.contact_smoothing}
-''')
+""")
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
     model = self.model

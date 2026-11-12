@@ -230,9 +230,21 @@ def axis_angle_to_quat(axis: jax.Array, angle: jax.Array) -> jax.Array:
 
 def quat_integrate(q: jax.Array, v: jax.Array, dt: jax.Array) -> jax.Array:
   """Integrates a quaternion given angular velocity and dt."""
-  v, norm_ = normalize_with_norm(v)
-  angle = dt * norm_
-  q_res = axis_angle_to_quat(v, angle)
+  step = dt * v
+  angle2 = jp.dot(step, step)
+  small = angle2 < 1e-6
+  angle = jp.sqrt(jp.where(small, 1.0, angle2))
+  scalar = jp.where(
+      small,
+      1 - angle2 / 8 + angle2**2 / 384 - angle2**3 / 46080,
+      jp.cos(angle / 2),
+  )
+  scale = jp.where(
+      small,
+      0.5 - angle2 / 48 + angle2**2 / 3840 - angle2**3 / 645120,
+      jp.sin(angle / 2) / angle,
+  )
+  q_res = jp.concatenate([scalar[None], scale * step])
   q_res = quat_mul(q, q_res)
   return normalize(q_res)
 
