@@ -17,6 +17,10 @@ class StagewiseOcpModel:
   user inequalities. Derivatives use tangent coordinates, output-by-input
   layout, and separate state/control blocks. Quaternion inputs and dynamics
   outputs must be unit quaternions in scalar-first order.
+
+  By default dynamics Jacobians hold the next-state chart fixed. Set
+  full_dynamics_jacobian=True to differentiate the next-state retraction too
+  and solve the resulting implicit linearization.
   """
 
   def __init__(
@@ -39,6 +43,7 @@ class StagewiseOcpModel:
       u_bounds: Bounds | None = None,
       quaternion_positions: tuple[int, ...] = (),
       gauss_newton: bool = True,
+      full_dynamics_jacobian: bool = False,
       params_trace: Params | None = None,
   ):
     for name, value, minimum in (('N', N, 0), ('nx', nx, 1), ('nu', nu, 0)):
@@ -83,6 +88,7 @@ class StagewiseOcpModel:
     self._user_stage_bounds = stage_inequality_bounds
     self._user_terminal_bounds = terminal_inequality_bounds
     self._gauss_newton = gauss_newton
+    self._full_dynamics_jacobian = full_dynamics_jacobian
 
     self._initialized = False
     self._evaluators = {}
@@ -298,17 +304,6 @@ class StagewiseOcpModel:
       return jp.concatenate([gx, terminal[None]]), gu
 
     def dynamics_local(x, u, xnext, k, p):
-      """
-      For quaternions:
-        q̅ₖ₊₁ Exp(δθₖ₊₁) = f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))
-        Exp(δθₖ₊₁) = q̅ₖ₊₁⁻¹ f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))
-        Log(q̅ₖ₊₁⁻¹ f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))) - δθₖ₊₁ = 0
-      Or in general
-        Retr(x̅ₖ₊₁,δxₖ₊₁) = f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))
-        Difference(f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ)), x̅ₖ₊₁) - δxₖ₊₁ = 0
-      and when differentiated gives
-        rₖ + Aₖ δxₖ + Bₖ δuₖ - δxₖ₊₁ = 0.
-      # """
       return self._state_difference(self._user_dynamics_fn(x, u, k, p), xnext)
 
     def dynamics_residual(x, u, xnext, p):
@@ -319,10 +314,35 @@ class StagewiseOcpModel:
     def dynamics_jacobian(x, u, xnext, p):
       if not N:
         return jp.zeros((0, tx, tx)), jp.zeros((0, tx, nu))
-      return jax.vmap(
-          stage_derivative(dynamics_local, jax.jacfwd),
-          in_axes=(0, 0, 0, 0, None),
-      )(x, u, xnext, ks, p)
+
+      if not self._full_dynamics_jacobian:
+        return jax.vmap(
+            stage_derivative(dynamics_local, jax.jacfwd),
+            in_axes=(0, 0, 0, 0, None),
+        )(x, u, xnext, ks, p)
+
+      def linearize(x, u, xnext, k):
+        def residual(dx, du, dxnext):
+          return dynamics_local(
+              self.retract_state(x, dx, 1.0, p),
+              self.retract_control(u, du, 1.0, p),
+              self.retract_state(xnext, dxnext, 1.0, p),
+              k,
+              p,
+          )
+
+        jx, ju, jnext = jax.jacfwd(residual, argnums=(0, 1, 2))(
+            jp.zeros(tx, dtype=x.dtype),
+            jp.zeros_like(u),
+            jp.zeros(tx, dtype=xnext.dtype),
+        )
+        ab = jp.concatenate([jx, ju], axis=1)
+        for count, i in enumerate(self.quaternion_positions):
+          rows = slice(i - count, i - count + 3)
+          ab = ab.at[rows].set(-jp.linalg.solve(jnext[rows, rows], ab[rows]))
+        return ab[:, :tx], ab[:, tx:]
+
+      return jax.vmap(linearize, in_axes=(0, 0, 0, 0))(x, u, xnext, ks)
 
     def initial_residual(x, p):
       return self._state_difference(self._user_initial_state_fn(p), x)
@@ -487,8 +507,36 @@ class StagewiseOcpModel:
   def dynamics_jacobian(self, xs, us, xs_next, params):
     """Return (A, B), shapes (N, tx, tx), (N, tx, nu), with tx=nx_tangent.
 
-    Hold the xs_next charts fixed. Their local next-state increments enter
-    the linearized dynamics as -dxnext.
+    When full_dynamics_jacobian=False, for quaternions
+        q̅ₖ₊₁ Exp(δθₖ₊₁) = f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))
+        Exp(δθₖ₊₁) = q̅ₖ₊₁⁻¹ f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))
+        Log(q̅ₖ₊₁⁻¹ f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))) - δθₖ₊₁ = 0
+    or in general
+        Retr(x̅ₖ₊₁,δxₖ₊₁) = f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))
+        Difference(f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ)), x̅ₖ₊₁) - δxₖ₊₁ = 0
+    differentiating at zero increments gives
+        rₖ + Aₖ δxₖ + Bₖ δuₖ - δxₖ₊₁ = 0
+    where
+        rₖ = Difference(f(x̅ₖ,u̅ₖ), x̅ₖ₊₁)
+        Aₖ = ∂Difference(f(Retr(x̅ₖ,δxₖ),u̅ₖ), x̅ₖ₊₁) / ∂δxₖ
+        Bₖ = ∂Difference(f(x̅ₖ,Retr(u̅ₖ,δuₖ)), x̅ₖ₊₁) / ∂δuₖ
+    The next-state Jacobian is -I by construction.
+
+    When full_dynamics_jacobian=True, differentiate the original dynamics
+    residual with respect to all tangent increments, including the next state.
+    For quaternions
+        Log((q̅ₖ₊₁ Exp(δθₖ₊₁))⁻¹ f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))) = 0
+    Or in general
+        Difference(f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ)), Retr(x̅ₖ₊₁,δxₖ₊₁)) = 0
+    Differentiating at zero increments gives
+        rₖ + Jₓ δxₖ + Jᵤ δuₖ + Jₙ δxₖ₊₁ = 0
+    Since Jₙ is generally not -I for quaternion states, multiply the
+    linearized equation by -Jₙ⁻¹:
+        -Jₙ⁻¹ rₖ - Jₙ⁻¹ Jₓ δxₖ - Jₙ⁻¹ Jᵤ δuₖ - δxₖ₊₁ = 0
+    with -Jₙ⁻¹ rₖ = Jₗ(rₖ) rₖ = rₖ.
+
+    Hence, both approaches give the same residual, but generally different
+    A and B matrices away from dynamics feasibility.
     """
     return self._evaluate('dynamics_jacobian', xs, us, xs_next, params)
 

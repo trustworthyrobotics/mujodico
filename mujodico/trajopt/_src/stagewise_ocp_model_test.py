@@ -400,9 +400,14 @@ class StagewiseOcpModelTest(parameterized.TestCase):
           )
           np.testing.assert_allclose(gx[-1], expected, atol=1e-9)
 
-  @parameterized.named_parameters(*_COORDINATES)
-  def test_dynamics_residuals_and_jacobians(self, quaternion):
-    c, tx = _case(quaternion), 5 if quaternion else 6
+  @parameterized.product(
+      quaternion=(False, True), full_dynamics_jacobian=(False, True)
+  )
+  def test_dynamics_residuals_and_jacobians(
+      self, quaternion, full_dynamics_jacobian
+  ):
+    c = _case(quaternion, full_dynamics_jacobian=full_dynamics_jacobian)
+    tx = c.model.nx_tangent
     m = c.model
     residuals = m.dynamics_residual(c.xs[:-1], c.us, c.xs[1:], c.params)
     A, B = jax.jit(m.dynamics_jacobian)(c.xs[:-1], c.us, c.xs[1:], c.params)
@@ -421,19 +426,35 @@ class StagewiseOcpModelTest(parameterized.TestCase):
             lambda d: _difference(
                 _dynamics(
                     _retract(x, d[:tx], c.positions),
-                    u + d[tx:],
+                    u + d[tx : tx + 2],
                     k,
                     c.params,
                     quaternion=True,
                     xp=np,
                 ),
-                c.xs[k + 1],
+                _retract(c.xs[k + 1], d[tx + 2 :], c.positions),
                 c.positions,
             ),
-            np.zeros(tx + 2),
+            np.zeros(2 * tx + 2),
+        )
+        jx_u, jnext = expected[:, : tx + 2], expected[:, tx + 2 :]
+        expected = (
+            -np.linalg.solve(jnext, jx_u) if full_dynamics_jacobian else jx_u
         )
         np.testing.assert_allclose(
             np.concatenate([A[k], B[k]], axis=1), expected, atol=1e-9
+        )
+        if full_dynamics_jacobian:
+          np.testing.assert_allclose(
+              jx_u + jnext @ np.concatenate([A[k], B[k]], axis=1),
+              0.0,
+              atol=1e-9,
+          )
+        self.assertGreater(np.linalg.norm(jnext + np.eye(tx)), 0.1)
+        # For quaternion-log defects, normalizing the constant term preserves
+        # the residual: -Jnext**-1 r = r.
+        np.testing.assert_allclose(
+            -np.linalg.solve(jnext, residuals[k]), residuals[k], atol=1e-9
         )
       else:
         expected_a, expected_b = np.eye(6), np.zeros((6, 2))
