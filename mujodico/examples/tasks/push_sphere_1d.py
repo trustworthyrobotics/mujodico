@@ -68,8 +68,6 @@ class PushSphere1d(Task):
     )
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
-    super().update_visualization(visualizer, traj, k)
-
     xs = traj['xs']
     ts = np.arange(xs.shape[0]) * self.model.opt.timestep
     t_range = [min(ts), max(ts)]
