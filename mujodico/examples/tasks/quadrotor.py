@@ -78,7 +78,6 @@ class Quadrotor(Task):
     )
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
-    super().update_visualization(visualizer, traj, k)
     xs = np.asarray(traj["xs"])
     ts = np.arange(len(xs)) * self.model.opt.timestep
     rotations = Rotation.from_quat(np.roll(xs[:, 3:7], -1, axis=1))
