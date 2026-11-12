@@ -8,6 +8,15 @@ from mujodico.trajopt._src.types import Bounds, LocalComplementarityConstraint
 import numpy as np
 
 
+def _put_optimization_model(mjmodel: mujoco.MjModel, **kwargs) -> mjx.Model:
+  """Control clipping is disabled to avoid the plant saturating controls.
+  It is up to the optimizer to enforce control bounds explicitly."""
+  model = mjx.put_model(mjmodel, **kwargs)
+  return model.tree_replace({
+      'opt.disableflags': model.opt.disableflags | mjx.DisableBit.CLAMPCTRL
+  })
+
+
 def shooting_transcription(
     mjmodel: mujoco.MjModel,
     contact_approximation: mjx.ContactApproxType,
@@ -27,13 +36,13 @@ def shooting_transcription(
   Returns:
     dynamics: ``dynamics(x, u)`` returns the next state.
   """
-  model = mjx.put_model(
+  model = _put_optimization_model(
       mjmodel,
       impl='jax',
       contact_approximation=contact_approximation,
       contact_smoothing=0.0,
   )
-  smooth_model = mjx.put_model(
+  smooth_model = _put_optimization_model(
       mjmodel,
       impl=model.impl,
       contact_approximation=contact_approximation,
@@ -87,7 +96,7 @@ def lifted_shooting_transcription(
     stage_inequality: constraint ``stage_inequality(x, w) ≥ 0``.
     w_bounds: pair of lower and upper bounds for ``w``.
   """
-  model = mjx.put_model(
+  model = _put_optimization_model(
       mjmodel,
       impl='jax',
       contact_approximation=contact_approximation,
@@ -167,7 +176,7 @@ def contact_implicit_transcription(
     local_complementarity: local complementarity constraints.
     w_bounds: pair of lower and upper bounds for ``w``.
   """
-  model = mjx.put_model(
+  model = _put_optimization_model(
       mjmodel,
       impl='jax',
       # As long as contact_approximation is not 'mujoco', efc_J and efc_pos
