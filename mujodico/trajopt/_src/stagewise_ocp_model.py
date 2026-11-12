@@ -421,7 +421,6 @@ class StagewiseOcpModel:
     ):
       add(name + '_residual', fn, x)
       add(name + '_jacobian', state_derivative(fn, jax.jacfwd), x)
-    add('initial_state', self._user_initial_state_fn)
     add('initial_residual', initial_residual, x)
     add('initial_jacobian', state_derivative(initial_residual, jax.jacfwd), x)
     add(
@@ -563,9 +562,6 @@ class StagewiseOcpModel:
 
   def terminal_inequality_jacobian(self, x, params):
     return self._evaluate('terminal_inequality_jacobian', x, params)
-
-  def initial_state(self, params):
-    return self._evaluate('initial_state', params)
 
   def initial_residual(self, x0, params):
     return self._evaluate('initial_residual', x0, params)

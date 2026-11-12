@@ -487,7 +487,6 @@ class StagewiseOcpModelTest(parameterized.TestCase):
   def test_initial_condition(self, quaternion):
     c = _case(quaternion)
     m, x, tx = c.model, c.xs[0], c.model.nx_tangent
-    np.testing.assert_array_equal(m.initial_state(c.params), c.params['x0'])
     np.testing.assert_allclose(
         m.initial_residual(x, c.params),
         _difference(c.params['x0'], x, c.positions),
