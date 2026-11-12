@@ -30,6 +30,7 @@ class FatropMultipleShooting:
         terminal_cost=trans.terminal_cost,
         x_bounds=trans.x_bounds,
         u_bounds=trans.u_bounds,
+        quaternion_positions=task.quaternion_w_idxs,
         params_trace=trans.params,
         update_params=update_params,
     )

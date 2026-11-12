@@ -1,5 +1,3 @@
-"""JAX trajectory optimization through cyfatrop's batched interface."""
-
 import importlib
 import time
 from collections.abc import Callable
@@ -18,11 +16,6 @@ from mujodico.trajopt._src.types import (
 
 
 class FatropTrajOpt:
-  """Compile callbacks at construction when params_trace is supplied.
-
-  With params_trace=None, compilation waits until the first solve. Subsequent
-  parameter values must match the signature used for compilation.
-  """
 
   def __init__(
       self,
@@ -42,6 +35,7 @@ class FatropTrajOpt:
       terminal_inequality_bounds: Bounds | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
+      quaternion_positions: tuple[int, ...] = (),
       gauss_newton: bool = True,
       params_trace: Params | None = None,
       update_params: Callable[[dict, Params], Params] | None = None,
@@ -71,6 +65,7 @@ class FatropTrajOpt:
         terminal_inequality_bounds=terminal_inequality_bounds,
         x_bounds=x_bounds,
         u_bounds=u_bounds,
+        quaternion_positions=quaternion_positions,
         gauss_newton=gauss_newton,
     )
 
@@ -144,6 +139,16 @@ class _FatropProblem:
       raise ValueError(f'xs_init must have shape ({m.N + 1}, {m.nx}).')
     if us.shape != (m.N, m.nu):
       raise ValueError(f'us_init must have shape ({m.N}, {m.nu}).')
+    for i in m.quaternion_positions:
+      quaternions = xs[:, i:i+4]
+      if (
+        not np.all(np.isfinite(quaternions)) or
+        not np.allclose(np.linalg.norm(quaternions, axis=1), 1.0, rtol=0, atol=1e-6)
+      ):
+        raise ValueError(
+            f'xs_init quaternion block at index {i} must contain finite unit'
+            ' quaternions (norm tolerance 1e-6).'
+        )
 
     self._xs_init, self._us_init = xs.copy(), us.copy()
 
@@ -194,7 +199,7 @@ class _FatropProblem:
 
   def _compile_callbacks(self):
     m = self.model
-    N, nx, nu = m.N, m.nx, m.nu
+    N, nx, nu, tx = m.N, m.nx, m.nu, m.nx_tangent
 
     def objective(u, x, scale, p):
       return scale * m.objective(x, u, p)
@@ -245,7 +250,7 @@ class _FatropProblem:
           p,
       )
       huu = jp.concatenate([huu, jp.zeros((1, nu, nu))])
-      hxu = jp.concatenate([hxu, jp.zeros((1, nx, nu))])
+      hxu = jp.concatenate([hxu, jp.zeros((1, tx, nu))])
       return jp.concatenate(
           [
               jp.concatenate([huu, hxu.swapaxes(-1, -2)], axis=2),
@@ -256,6 +261,8 @@ class _FatropProblem:
 
     dtype = m.evaluation_dtype
     x, u = jp.zeros((N + 1, nx), dtype), jp.zeros((N, nu), dtype)
+    for i in m.quaternion_positions:
+      x = x.at[:, i].set(1.0)
     scale = jp.asarray(1.0, dtype=dtype)
 
     self._callbacks = {}
@@ -289,12 +296,12 @@ class _FatropProblem:
         scale,
         u,
         x,
-        jp.zeros((N, nx), dtype),
+        jp.zeros((N, tx), dtype),
         jp.zeros((N + 1, self._ng), dtype),
         jp.zeros((N + 1, self._nh), dtype),
-        jp.zeros(nx, dtype),
+        jp.zeros(tx, dtype),
     )
-    add('retract_state', m.retract_state, x, x, scale)
+    add('retract_state', m.retract_state, x, jp.zeros((N+1, tx), dtype), scale)
     add('retract_control', m.retract_control, u, u, scale)
 
   def _evaluate(self, name, args):
@@ -319,6 +326,9 @@ class _FatropProblem:
 
   def get_nx(self):
     return self.model.nx
+
+  def get_nx_tangent(self):
+    return self.model.nx_tangent
 
   def get_nu(self):
     return self.model.nu

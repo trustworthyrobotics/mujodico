@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jp
 import numpy as np
 
+from mujodico.trajopt._src import manifold
 from mujodico.trajopt._src.types import Bounds, Params, StageFunction, StateFunction
 
 
@@ -12,8 +13,10 @@ class StagewiseOcpModel:
   """An explicit OCP, independent of a solver or solver callback layout.
 
   Inequality evaluators return raw bounded values. Their effective bounds
-  include bounded state variables, bounded controls (non-termina only), then
-  user inequalities. Jacobians use output-by-input layout and separate x/u blocks.
+  include bounded state variables, bounded controls (non-terminal only), then
+  user inequalities. Derivatives use tangent coordinates, output-by-input
+  layout, and separate state/control blocks. Quaternion inputs and dynamics
+  outputs must be unit quaternions in scalar-first order.
   """
 
   def __init__(
@@ -34,6 +37,7 @@ class StagewiseOcpModel:
       terminal_inequality_bounds: Bounds | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
+      quaternion_positions: tuple[int, ...] = (),
       gauss_newton: bool = True,
       params_trace: Params | None = None,
   ):
@@ -45,7 +49,26 @@ class StagewiseOcpModel:
       ):
         raise ValueError(f'{name} must be an integer >= {minimum}.')
 
+    if any(
+        not isinstance(i, Integral)
+        or isinstance(i, bool)
+        or i < 0
+        or i + 4 > nx
+        for i in quaternion_positions
+    ):
+      raise ValueError(
+          'quaternion_positions must contain valid quaternion start indices.'
+      )
+
+    quaternion_positions = tuple(sorted(int(i) for i in quaternion_positions))
+    if any(b < a + 4 for a, b in zip(quaternion_positions, quaternion_positions[1:])):
+      raise ValueError(
+          'quaternion_positions must not contain duplicate or overlapping blocks.'
+      )
+
     self.N, self.nx, self.nu = int(N), int(nx), int(nu)
+    self.nx_tangent = self.nx - len(quaternion_positions)
+    self.quaternion_positions = quaternion_positions
     self.x_bounds = self._bounds(x_bounds, nx, 'x_bounds')
     self.u_bounds = self._bounds(u_bounds, nu, 'u_bounds')
 
@@ -124,8 +147,36 @@ class StagewiseOcpModel:
     return tuple(v.copy() for v in self._terminal_bounds)
 
   def _build_evaluators(self, params):
-    N, nx, nu = self.N, self.nx, self.nu
+    N, nx, nu, tx = self.N, self.nx, self.nu, self.nx_tangent
+
     x, u, k = jp.zeros(nx), jp.zeros(nu), jp.array(0)
+    for i in self.quaternion_positions:
+      x = x.at[i].set(1.0)
+
+    def stage_derivative(fn, differentiate):
+      def evaluate(x, u, *args):
+        p = args[-1]
+
+        def local(dx, du):
+          return fn(
+              self.retract_state(x, dx, 1.0, p),
+              self.retract_control(u, du, 1.0, p),
+              *args,
+          )
+
+        return differentiate(local, argnums=(0, 1))(
+            jp.zeros(tx, dtype=x.dtype), jp.zeros_like(u)
+        )
+
+      return evaluate
+
+    def state_derivative(fn, differentiate):
+      def evaluate(x, *args):
+        return differentiate(
+            lambda dx: fn(self.retract_state(x, dx, 1.0, args[-1]), *args)
+        )(jp.zeros(tx, dtype=x.dtype))
+
+      return evaluate
 
     def check(fn, args, expected, name):
       shape = jax.eval_shape(fn, *args).shape
@@ -240,26 +291,46 @@ class StagewiseOcpModel:
       ])
 
     def objective_gradient(xs, us, p):
-      return jax.grad(
-          lambda xs, us: jp.sum(objective(xs, us, p)), argnums=(0, 1)
-      )(xs, us)
+      gx, gu = batch(
+          stage_derivative(self._user_stage_cost_fn, jax.grad), ((tx,), (nu,))
+      )(xs[:-1], us, p)
+      terminal = state_derivative(self._user_terminal_cost_fn, jax.grad)(xs[-1], p)
+      return jp.concatenate([gx, terminal[None]]), gu
 
-    def dynamics_residual(xs, us, xs_next, p):
-      return batch(self._user_dynamics_fn, (nx,))(xs, us, p) - xs_next
+    def dynamics_local(x, u, xnext, k, p):
+      """
+      For quaternions:
+        q̅ₖ₊₁ Exp(δθₖ₊₁) = f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))
+        Exp(δθₖ₊₁) = q̅ₖ₊₁⁻¹ f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))
+        Log(q̅ₖ₊₁⁻¹ f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))) - δθₖ₊₁ = 0
+      Or in general
+        Retr(x̅ₖ₊₁,δxₖ₊₁) = f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ))
+        Difference(f(Retr(x̅ₖ,δxₖ), Retr(u̅ₖ,δuₖ)), x̅ₖ₊₁) - δxₖ₊₁ = 0
+      and when differentiated gives
+        rₖ + Aₖ δxₖ + Bₖ δuₖ - δxₖ₊₁ = 0.
+      # """
+      return self._state_difference(self._user_dynamics_fn(x, u, k, p), xnext)
 
-    def dynamics_jacobian(xs, us, xs_next, p):
-      return batch(
-          jax.jacfwd(self._user_dynamics_fn, argnums=(0, 1)),
-          ((nx, nx), (nx, nu)),
-      )(xs, us, p)
+    def dynamics_residual(x, u, xnext, p):
+      if not N:
+        return jp.zeros((0, tx), dtype=x.dtype)
+      return jax.vmap(dynamics_local, in_axes=(0, 0, 0, 0, None))(x, u, xnext, ks, p)
+
+    def dynamics_jacobian(x, u, xnext, p):
+      if not N:
+        return jp.zeros((0, tx, tx)), jp.zeros((0, tx, nu))
+      return jax.vmap(
+          stage_derivative(dynamics_local, jax.jacfwd),
+          in_axes=(0, 0, 0, 0, None),
+      )(x, u, xnext, ks, p)
 
     def initial_residual(x, p):
-      return x - self._user_initial_state_fn(p)
+      return self._state_difference(self._user_initial_state_fn(p), x)
 
     def stage_lagrangian(x, u, xnext, k, ld, le, li, scale, p):
       value = scale * self._user_stage_cost_fn(x, u, k, p)
       if not self._gauss_newton:
-        value += jp.vdot(ld, self._user_dynamics_fn(x, u, k, p) - xnext)
+        value += jp.vdot(ld, dynamics_local(x, u, xnext, k, p))
         value += jp.vdot(le, stage_eq(x, u, k, p))
         value += jp.vdot(li, stage_ineq(x, u, k, p))
       return value
@@ -274,26 +345,28 @@ class StagewiseOcpModel:
     def lagrangian_hessian(xs, us, lam_init, ld, le, li, lte, lti, scale, p):
       if N:
         blocks = jax.vmap(
-            jax.hessian(stage_lagrangian, argnums=(0, 1)),
+            stage_derivative(stage_lagrangian, jax.hessian),
             in_axes=(0, 0, 0, 0, 0, 0, 0, None, None),
         )(xs[:-1], us, xs[1:], ks, ld, le, li, scale, p)
         hxx, hxu, huu = blocks[0][0], blocks[0][1], blocks[1][1]
       else:
         hxx, hxu, huu = (
-            jp.zeros((0, nx, nx)),
-            jp.zeros((0, nx, nu)),
+            jp.zeros((0, tx, tx)),
+            jp.zeros((0, tx, nu)),
             jp.zeros((0, nu, nu)),
         )
-      terminal = jax.hessian(terminal_lagrangian)(xs[-1], lte, lti, scale, p)
+      terminal = state_derivative(terminal_lagrangian, jax.hessian)(
+          xs[-1], lte, lti, scale, p
+      )
       hxx = jp.concatenate([hxx, terminal[None]])
       if not self._gauss_newton:
-        initial = jax.hessian(
-            lambda x: jp.vdot(lam_init, initial_residual(x, p))
-        )(xs[0])
+        initial = state_derivative(
+            lambda x, p: jp.vdot(lam_init, initial_residual(x, p)), jax.hessian
+        )(xs[0], p)
         hxx = hxx.at[0].add(initial)
       return hxx, hxu, huu
 
-    xs, us = jp.zeros((N + 1, nx)), jp.zeros((N, nu))
+    xs, us = jp.broadcast_to(x, (N + 1, nx)), jp.zeros((N, nu))
     shapes = {}
     functions = {}
 
@@ -318,7 +391,7 @@ class StagewiseOcpModel:
       add(name + '_residual', batch(fn, (size,)), xs[:-1], us)
       add(
           name + '_jacobian',
-          batch(jax.jacfwd(fn, argnums=(0, 1)), ((size, nx), (size, nu))),
+          batch(stage_derivative(fn, jax.jacfwd), ((size, tx), (size, nu))),
           xs[:-1],
           us,
       )
@@ -327,17 +400,17 @@ class StagewiseOcpModel:
         ('terminal_inequality', terminal_ineq),
     ):
       add(name + '_residual', fn, x)
-      add(name + '_jacobian', jax.jacfwd(fn), x)
+      add(name + '_jacobian', state_derivative(fn, jax.jacfwd), x)
     add('initial_state', self._user_initial_state_fn)
     add('initial_residual', initial_residual, x)
-    add('initial_jacobian', jax.jacfwd(initial_residual), x)
+    add('initial_jacobian', state_derivative(initial_residual, jax.jacfwd), x)
     add(
         'lagrangian_hessian',
         lagrangian_hessian,
         xs,
         us,
-        jp.zeros((nx,)),
-        jp.zeros((N, nx)),
+        jp.zeros((tx,)),
+        jp.zeros((N, tx)),
         jp.zeros((N, ng)),
         jp.zeros((N, nh)),
         jp.zeros(ng_terminal),
@@ -370,7 +443,7 @@ class StagewiseOcpModel:
     return self._evaluate('objective', xs, us, params)
 
   def objective_gradient(self, xs, us, params):
-    """Return (gx, gu) with shapes (N+1, nx) and (N, nu)."""
+    """Return gradients, shapes (N+1, nx_tangent), (N, nu)."""
     return self._evaluate('objective_gradient', xs, us, params)
 
   def lagrangian_hessian(
@@ -388,9 +461,10 @@ class StagewiseOcpModel:
   ):
     """Return (Hxx, Hxu, Huu), retaining the terminal block only in Hxx.
 
-    Multiplier shapes are (nx,), (N, nx), (N, ng), (N, nh), (ng_terminal,),
+    Multiplier shapes are (tx,), (N, tx), (N, ng), (N, nh), (ng_terminal,),
     and (nh_terminal,). Inequality counts include bounded variables. Blocks
-    have shapes (N+1, nx, nx), (N, nx, nu), and (N, nu, nu).
+    have shapes (N+1, tx, tx), (N, tx, nu), and (N, nu, nu), where tx is
+    nx_tangent. Dynamics curvature uses the fixed next-state chart.
     """
     return self._evaluate(
         'lagrangian_hessian',
@@ -407,10 +481,15 @@ class StagewiseOcpModel:
     )
 
   def dynamics_residual(self, xs, us, xs_next, params):
+    """Return differences from xs_next to predicted states, shape (N, tx)."""
     return self._evaluate('dynamics_residual', xs, us, xs_next, params)
 
   def dynamics_jacobian(self, xs, us, xs_next, params):
-    """Return residual derivatives (A, B) shaped (N, nx, nx), (N, nx, nu)."""
+    """Return (A, B), shapes (N, tx, tx), (N, tx, nu), with tx=nx_tangent.
+
+    Hold the xs_next charts fixed. Their local next-state increments enter
+    the linearized dynamics as -dxnext.
+    """
     return self._evaluate('dynamics_jacobian', xs, us, xs_next, params)
 
   def stage_equality_residual(self, xs, us, params):
@@ -447,7 +526,45 @@ class StagewiseOcpModel:
     return self._evaluate('initial_jacobian', x0, params)
 
   def retract_state(self, x, dx, alpha, params):
-    return x + alpha * dx
+    x, dx = jp.asarray(x), jp.asarray(dx)
+    assert x.ndim in (1, 2) and x.shape[-1] == self.nx
+    assert dx.shape == (*x.shape[:-1], self.nx_tangent)
+
+    if x.ndim == 2:
+      return jax.vmap(self.retract_state, in_axes=(0, 0, None, None))(
+          x, dx, alpha, params
+      )
+
+    blocks, previous = [], 0
+    for count, i in enumerate(self.quaternion_positions):
+      blocks.append(x[previous:i] + alpha * dx[previous - count : i - count])
+      blocks.append(
+          manifold.quat_multiply(
+              x[i : i + 4],
+              manifold.quat_exp(alpha * dx[i - count : i - count + 3]),
+          )
+      )
+      previous = i + 4
+    blocks.append(x[previous:] + alpha * dx[previous-len(self.quaternion_positions):])
+    return jp.concatenate(blocks)
+
+  def _state_difference(self, xnext_pred, xnext):
+    blocks, previous = [], 0
+    for i in self.quaternion_positions:
+      blocks.append(xnext_pred[previous:i] - xnext[previous:i])
+      blocks.append(
+          manifold.quat_log(
+              manifold.quat_multiply(
+                  manifold.quat_inverse(xnext[i : i + 4]), xnext_pred[i : i + 4]
+              )
+          )
+      )
+      previous = i + 4
+    blocks.append(xnext_pred[previous:] - xnext[previous:])
+    return jp.concatenate(blocks)
 
   def retract_control(self, u, du, alpha, params):
+    u, du = jp.asarray(u), jp.asarray(du)
+    assert u.ndim in (1, 2) and u.shape[-1] == self.nu
+    assert du.shape == u.shape
     return u + alpha * du
