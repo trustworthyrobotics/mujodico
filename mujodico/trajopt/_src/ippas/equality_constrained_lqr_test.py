@@ -1,3 +1,5 @@
+from unittest import mock
+
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
@@ -177,10 +179,23 @@ class EqualityConstrainedLQRTest(parameterized.TestCase):
     solution2 = jax.jit(lqr.solve)(prob2)
 
     prob3 = solution.replace_rhs(q=prob2.q, r=prob2.r, c=prob2.c, e=prob2.e, x0=prob2.x0)
-    solution3 = jax.jit(lqr.solve)(prob3)
+    self.assertIs(prob3._cache, solution._cache)
+    # Replaced residuals must reuse the existing matrix factorization.
+    with mock.patch.object(
+        lqr, '_build_matrix_cache', side_effect=AssertionError('Cache rebuilt')
+    ):
+      eager = lqr.solve(prob3)
+      solution3 = jax.jit(lqr.solve)(prob3)
+    self.assertIs(eager._cache, solution._cache)
+    self._assert_kkt(eager, tol=tol)
     self._assert_kkt(solution3, tol=tol)
     self._assert_against_ipopt(solution3, tol=tol)
     for field in ('x', 'u', 'lmbda', 'beta'):
+      np.testing.assert_allclose(
+          getattr(solution2, field),
+          getattr(eager, field),
+          rtol=tol, atol=tol,
+      )
       np.testing.assert_allclose(
           getattr(solution2, field),
           getattr(solution3, field),
