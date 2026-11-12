@@ -37,6 +37,7 @@ class FatropTrajOpt:
       u_bounds: Bounds | None = None,
       quaternion_positions: tuple[int, ...] = (),
       gauss_newton: bool = True,
+      full_dynamics_jacobian: bool = False,
       params_trace: Params | None = None,
       update_params: Callable[[dict, Params], Params] | None = None,
   ):
@@ -67,6 +68,7 @@ class FatropTrajOpt:
         u_bounds=u_bounds,
         quaternion_positions=quaternion_positions,
         gauss_newton=gauss_newton,
+        full_dynamics_jacobian=full_dynamics_jacobian,
     )
 
     class Problem(_FatropProblem, self._cyfatrop.TrajOptAbstract):
