@@ -3,10 +3,8 @@ import tempfile
 import mujoco
 from mujodico.examples.tasks.task import Task
 from mujodico.examples.tasks.task_playback import TaskPlayback
-from mujodico.examples.tasks import plotly_util
+from mujodico.examples.tasks import util_uplot
 import numpy as np
-import plotly.graph_objects as go
-import plotly.subplots
 import viser
 
 
@@ -84,65 +82,36 @@ class AllegroPen(Task):
         contact_smoothing=contact_smoothing,
     )
 
-  def _plot_object_dof(self, fig: go.Figure, k: int, xs: np.ndarray, object_dof: int):
-    ts = np.arange(xs.shape[0]) * self.model.opt.timestep
-    t_range = [min(ts), max(ts)]
-
-    dof = 16 + object_dof
-    if object_dof < 3:
-      values = xs[:, dof]
-      goal = self.x_goal[dof]
-    else:
-      values = 1.0 - (xs[:, dof:dof+4] @ self.x_goal[dof:dof+4])**2
-      goal = 0.0
-
-    y_min = min(np.min(values), goal)
-    y_max = max(np.max(values), goal)
-    y_pad = max(y_max - y_min, 1e-5) * 0.05
-    y_range = [y_min - y_pad, y_max + y_pad]
-
-    plotly_util.add_line(
-        fig=fig,
-        x=ts[:k+1],
-        y=values[:k+1],
-        color='blue',
-        row=object_dof + 1,
-        col=1,
-    )
-    plotly_util.add_line(
-        fig=fig,
-        x=t_range,
-        y=[goal, goal],
-        color='black',
-        linestyle='dash',
-        row=object_dof + 1,
-        col=1,
-    )
-    fig.update_xaxes(
-        title_text='Time (sec)' if object_dof == 3 else None,
-        range=t_range,
-        row=object_dof + 1,
-        col=1,
-    )
-    fig.update_yaxes(
-        title_text=['X Position (m)', 'Y Position (m)', 'Z Position (m)', 'Quaternion error'][object_dof],
-        range=y_range,
-        row=object_dof + 1,
-        col=1,
-    )
-
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
     super().update_visualization(visualizer, traj, k)
-
-    fig = plotly.subplots.make_subplots(
-        rows=4, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.02,
+    xs = traj['xs']
+    ts = np.arange(xs.shape[0]) * self.model.opt.timestep
+    labels = (
+        'X Position (m)',
+        'Y Position (m)',
+        'Z Position (m)',
+        'Quaternion error',
     )
-    for object_dof in (0, 1, 2, 3):
-      self._plot_object_dof(fig, k, traj['xs'], object_dof)
-
-    visualizer.set_plot('trajectory', fig)
+    panels = []
+    for object_dof, label in enumerate(labels):
+      dof = 16 + object_dof
+      if object_dof < 3:
+        values = xs[:, dof]
+        goal = self.x_goal[dof]
+      else:
+        values = 1.0 - (xs[:, dof : dof + 4] @ self.x_goal[dof : dof + 4]) ** 2
+        goal = 0.0
+      panels.append(
+          util_uplot.time_series_panel(
+              ts,
+              values,
+              k + 1,
+              ylabel=label,
+              references=(util_uplot.ReferenceLine(goal),),
+              xlabel='Time (sec)' if object_dof == 3 else '',
+          )
+      )
+    visualizer.set_plot('trajectory', util_uplot.UplotFigure(tuple(panels)))
 
 
 if __name__ == '__main__':

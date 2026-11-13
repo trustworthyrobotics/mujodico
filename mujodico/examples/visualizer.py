@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 import contextlib
-import logging
 from pathlib import Path
 import pickle
 import re
@@ -49,6 +48,11 @@ class Playback(ABC):
 
   def set_interactive(self, enabled: bool) -> None:
     """Enable or freeze controls that can change playback during recording."""
+
+  @contextlib.contextmanager
+  def plot_renderer(self):
+    """Prepare and release any resources needed by get_plot_frames()."""
+    yield
 
 
 class Visualizer:
@@ -105,46 +109,6 @@ class Visualizer:
       self._attached_playback = None
     playback.attach(server)
     self._attached_playback = playback
-
-  @contextlib.contextmanager
-  def _plot_renderer(self, directory):
-    try:
-      import kaleido
-
-      logging.getLogger('kaleido').setLevel(logging.WARNING)
-      logging.getLogger('choreographer').setLevel(logging.WARNING)
-    except ImportError as error:
-      raise ImportError(
-          'Plot recording requires Kaleido 1.1 or newer. Install it with pip'
-          ' install "kaleido>=1.1" and install Chrome with plotly_get_chrome.'
-      ) from error
-    if not hasattr(kaleido, 'start_sync_server'):
-      raise ImportError('Upgrade Kaleido with pip install "kaleido>=1.1".')
-
-    import plotly.graph_objects as go
-
-    # Probe before starting the persistent server: a browser startup failure
-    # in Kaleido's background server can otherwise leave a sync call waiting.
-    options = dict(
-        page_generator=kaleido.PageGenerator(mathjax=False), timeout=30
-    )
-    try:
-      kaleido.calc_fig_sync(
-          go.Figure(),
-          opts=dict(format='png', width=64, height=64),
-          kopts=options,
-      )
-    except Exception as error:
-      raise RuntimeError(
-          'Could not start Plotly image export. Install Kaleido 1.1 or newer '
-          'and Chrome/Chromium (run plotly_get_chrome). '
-          f'Details: {error}'
-      ) from error
-    try:
-      kaleido.start_sync_server(**options)
-      yield
-    finally:
-      kaleido.stop_sync_server()
 
   def _skip_plot_recording(self, client, error):
     client.add_notification(
@@ -302,7 +266,7 @@ class Visualizer:
       with contextlib.ExitStack() as resources:
         if plots:
           try:
-            resources.enter_context(self._plot_renderer(path))
+            resources.enter_context(playback.plot_renderer())
           except Exception as error:
             self._skip_plot_recording(client, error)
             plots = False

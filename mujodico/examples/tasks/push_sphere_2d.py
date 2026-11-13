@@ -1,9 +1,8 @@
 import mujoco
 from mujodico.examples.tasks.task import Task
 from mujodico.examples.tasks.task_playback import TaskPlayback
-from mujodico.examples.tasks import plotly_util
+from mujodico.examples.tasks import util_plotly
 import numpy as np
-import plotly.graph_objects as go
 
 
 _XML = """
@@ -92,36 +91,36 @@ class PushSphere2d(Task):
 
     xs = traj['xs']
 
-    fig = go.Figure()
-    plotly_util.add_line(
+    fig = util_plotly.new_fig()
+    util_plotly.add_line(
         fig=fig,
         x=xs[:k+1, 0],
         y=xs[:k+1, 1],
         name='Pusher',
         color='red',
     )
-    plotly_util.add_circle(
+    util_plotly.add_circle(
         fig=fig,
         x=xs[k, 0],
         y=xs[k, 1],
         r=0.05,
         color='red',
     )
-    plotly_util.add_line(
+    util_plotly.add_line(
         fig=fig,
         x=xs[:k+1, 2],
         y=xs[:k+1, 3],
         name='Object',
         color='blue',
     )
-    plotly_util.add_circle(
+    util_plotly.add_circle(
         fig=fig,
         x=xs[k, 2],
         y=xs[k, 3],
         r=0.08,
         color='blue',
     )
-    plotly_util.add_circle(
+    util_plotly.add_circle(
         fig=fig,
         x=self.x_goal[2],
         y=self.x_goal[3],
@@ -140,5 +139,4 @@ class PushSphere2d(Task):
 
 
 if __name__ == '__main__':
-  task = PushSphere2d()
-  task.print_summary()
+  PushSphere2d().print_summary()

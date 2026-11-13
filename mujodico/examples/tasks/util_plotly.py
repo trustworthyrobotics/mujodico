@@ -2,6 +2,12 @@ import numpy as np
 import plotly.graph_objects as go
 
 
+def new_fig() -> go.Figure:
+  figure = go.Figure()
+  figure.update_layout(margin=dict(l=0, r=0, t=0, b=0))
+  return figure
+
+
 def add_line(
     fig: go.Figure,
     x, y,

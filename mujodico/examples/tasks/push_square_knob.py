@@ -1,9 +1,9 @@
 import mujoco
 from mujodico.examples.tasks.task import Task
 from mujodico.examples.tasks.task_playback import TaskPlayback
-from mujodico.examples.tasks import plotly_util
+from mujodico.examples.tasks import util_plotly
+from mujodico.examples.tasks import util_uplot
 import numpy as np
-import plotly.graph_objects as go
 
 
 _XML = """
@@ -96,67 +96,60 @@ class PushSquareKnob(Task):
 
     xs = traj['xs']
     ts = np.arange(xs.shape[0]) * self.model.opt.timestep
-    t_range = [min(ts), max(ts)]
 
-    y_min = min(np.min(xs[:, 2]), self.x_goal[2])
-    y_max = max(np.max(xs[:, 2]), self.x_goal[2])
-    y_pad = max(y_max - y_min, 1e-5) * 0.05
-    y_range = np.rad2deg([y_min - y_pad, y_max + y_pad])
+    visualizer.set_plot(
+        'trajectory',
+        util_uplot.UplotFigure((
+            util_uplot.time_series_panel(
+                ts,
+                np.rad2deg(xs[:, 2]),
+                k + 1,
+                ylabel='Angle (deg)',
+                labels=('Angle',),
+                colors=('blue',),
+                references=(
+                    util_uplot.ReferenceLine(
+                        np.rad2deg(self.x_goal[2]), 'Angle goal'
+                    ),
+                ),
+                tick_step=45,
+            ),
+        )),
+    )
 
-    fig = go.Figure()
-    plotly_util.add_line(
+    fig = util_plotly.new_fig()
+    util_plotly.add_line(
         fig=fig,
-        x=ts[:k+1],
-        y=np.rad2deg(xs[:k+1, 2]),
-        name='Angle',
-        color='blue',
-    )
-    plotly_util.add_line(
-        fig=fig,
-        x=t_range,
-        y=np.rad2deg([self.x_goal[2]] * 2),
-        name='Angle goal',
-        color='black',
-        linestyle='dash',
-    )
-    fig.update_layout(
-        xaxis_title='Time (sec)',
-        yaxis_title='Angle (deg)',
-        xaxis={'range': t_range},
-        yaxis={'range': y_range, 'dtick': 45},
-    )
-    visualizer.set_plot('trajectory', fig)
-
-    fig = go.Figure()
-    plotly_util.add_line(
-        fig=fig,
-        x=xs[:k+1, 0],
-        y=xs[:k+1, 1],
+        x=xs[: k + 1, 0],
+        y=xs[: k + 1, 1],
         name='Pusher',
         color='red',
     )
-    plotly_util.add_circle(
+    util_plotly.add_circle(
         fig=fig,
         x=xs[k, 0],
         y=xs[k, 1],
         r=0.02,
         color='red',
     )
-    plotly_util.add_rectangle(
+    util_plotly.add_rectangle(
         fig=fig,
-        x=0.0, y=0.0,
+        x=0.0,
+        y=0.0,
         theta=xs[k, 2],
-        w=0.16, h=0.16,
+        w=0.16,
+        h=0.16,
         name='Knob',
         color='blue',
     )
-    plotly_util.add_rectangle(
+    util_plotly.add_rectangle(
         fig=fig,
         x=0.04 * np.cos(xs[k, 2]),
         y=0.04 * np.sin(xs[k, 2]),
         theta=xs[k, 2],
-        w=0.08, h=0.003,
-        color='black'
+        w=0.08,
+        h=0.003,
+        color='black',
     )
     fig.update_layout(
         xaxis_title='x',
@@ -168,5 +161,4 @@ class PushSquareKnob(Task):
 
 
 if __name__ == '__main__':
-  task = PushSquareKnob()
-  task.print_summary()
+  PushSquareKnob().print_summary()
