@@ -86,6 +86,8 @@ class PushBox2d(Task):
     )
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
+    super().update_visualization(visualizer, traj, k)
+
     xs = traj['xs']
 
     fig = go.Figure()
