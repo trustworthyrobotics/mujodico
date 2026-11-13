@@ -1,9 +1,8 @@
 import mujoco
 from mujodico.examples.tasks.task import Task
 from mujodico.examples.tasks.task_playback import TaskPlayback
-from mujodico.examples.tasks import plotly_util
+from mujodico.examples.tasks import util_uplot
 import numpy as np
-import plotly.graph_objects as go
 
 
 _XML = """
@@ -89,38 +88,27 @@ class FingerCircularKnob(Task):
 
     xs = traj['xs']
     ts = np.arange(xs.shape[0]) * self.model.opt.timestep
-    t_range = [min(ts), max(ts)]
 
-    y_min = min(np.min(xs[:, 2]), self.x_goal[2])
-    y_max = max(np.max(xs[:, 2]), self.x_goal[2])
-    y_pad = max(y_max - y_min, 1e-5) * 0.05
-    y_range = np.rad2deg([y_min - y_pad, y_max + y_pad])
-
-    fig = go.Figure()
-    plotly_util.add_line(
-        fig=fig,
-        x=ts[:k+1],
-        y=np.rad2deg(xs[:k+1, 2]),
-        name='Angle',
-        color='blue',
+    visualizer.set_plot(
+        'trajectory',
+        util_uplot.UplotFigure((
+            util_uplot.time_series_panel(
+                ts,
+                np.rad2deg(xs[:, 2]),
+                k + 1,
+                ylabel='Angle (deg)',
+                labels=('Angle',),
+                colors=('blue',),
+                references=(
+                    util_uplot.ReferenceLine(
+                        np.rad2deg(self.x_goal[2]), 'Angle goal'
+                    ),
+                ),
+                tick_step=45,
+            ),
+        )),
     )
-    plotly_util.add_line(
-        fig=fig,
-        x=t_range,
-        y=np.rad2deg([self.x_goal[2]] * 2),
-        name='Angle goal',
-        color='black',
-        linestyle='dash',
-    )
-    fig.update_layout(
-        xaxis_title='Time (sec)',
-        yaxis_title='Angle (deg)',
-        xaxis={'range': t_range},
-        yaxis={'range': y_range, 'dtick': 45},
-    )
-    visualizer.set_plot('trajectory', fig)
 
 
 if __name__ == '__main__':
-  task = FingerCircularKnob()
-  task.print_summary()
+  FingerCircularKnob().print_summary()

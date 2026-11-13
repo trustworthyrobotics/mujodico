@@ -1,11 +1,8 @@
-"""Point-to-point quadrotor flight with four individual rotor thrusts."""
-
 import mujoco
 import numpy as np
-from plotly.subplots import make_subplots
 from scipy.spatial.transform import Rotation
 
-from mujodico.examples.tasks import plotly_util
+from mujodico.examples.tasks import util_uplot
 from mujodico.examples.tasks.task import Task
 from mujodico.examples.tasks.task_playback import TaskPlayback
 
@@ -79,83 +76,65 @@ class Quadrotor(Task):
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
     super().update_visualization(visualizer, traj, k)
-    xs = np.asarray(traj["xs"])
+
+    xs = np.asarray(traj['xs'])
     ts = np.arange(len(xs)) * self.model.opt.timestep
+
     rotations = Rotation.from_quat(np.roll(xs[:, 3:7], -1, axis=1))
     goal_rotation = Rotation.from_quat(np.roll(self.x_goal[3:7], -1))
     attitude_error = np.rad2deg(
         np.linalg.norm((goal_rotation.inv() * rotations).as_rotvec(), axis=1)
     )
+
     values = np.column_stack([xs[:, :3], attitude_error])
     goals = np.r_[self.x_goal[:3], 0.0]
-    fig = make_subplots(
-        rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.02
-    )
-    for row, label in enumerate(
-        ["X Position (m)", "Y Position (m)", "Z Position (m)", "Attitude error (deg)"],
-        start=1,
-    ):
-      data, goal = values[:, row - 1], goals[row - 1]
-      lower, upper = min(data.min(), goal), max(data.max(), goal)
-      padding = max(upper - lower, 1e-5) * 0.05
-      plotly_util.add_line(
-          fig, ts[: k + 1], data[: k + 1], color="blue", row=row, col=1
-      )
-      plotly_util.add_line(
-          fig,
-          [ts[0], ts[-1]],
-          [goal, goal],
-          color="black",
-          linestyle="dash",
-          row=row,
-          col=1,
-      )
-      fig.update_xaxes(
-          range=[ts[0], ts[-1]],
-          title_text="Time (sec)" if row == 4 else None,
-          row=row,
-          col=1,
-      )
-      fig.update_yaxes(
-          title_text=label,
-          range=[lower - padding, upper + padding],
-          row=row,
-          col=1,
-      )
-    visualizer.set_plot("trajectory", fig)
 
-    if "us" in traj:
-      us = np.asarray(traj["us"])
-      fig = make_subplots(
-          rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.02
-      )
+    labels = [
+        'X Position (m)',
+        'Y Position (m)',
+        'Z Position (m)',
+        'Attitude error (deg)',
+    ]
+    visualizer.set_plot(
+        'trajectory',
+        util_uplot.UplotFigure(
+            tuple(
+                util_uplot.time_series_panel(
+                    ts,
+                    values[:, i],
+                    k + 1,
+                    ylabel=label,
+                    references=(util_uplot.ReferenceLine(goals[i]),),
+                    xlabel='Time (sec)' if i == 3 else '',
+                )
+                for i, label in enumerate(labels)
+            )
+        ),
+    )
+
+    if 'us' in traj:
+      us = np.asarray(traj['us'])
       lower, upper = self.u_bounds
-      for i, name in enumerate(("Front", "Left", "Back", "Right")):
-        plotly_util.add_line(
-            fig, ts[:k], us[:k, i], color="blue", row=i + 1, col=1
-        )
-        for value, color, style in (
-            (self.u_ref[i], "black", "dash"),
-            (lower[i], "red", "dot"),
-            (upper[i], "red", "dot"),
-        ):
-          plotly_util.add_line(
-              fig,
-              [ts[0], ts[-1]],
-              [value, value],
-              color=color,
-              linestyle=style,
-              row=i + 1,
-              col=1,
-          )
-        fig.update_xaxes(
-            range=[ts[0], ts[-1]],
-            title_text="Time (sec)" if i == 3 else None,
-            row=i + 1,
-            col=1,
-        )
-        fig.update_yaxes(title_text=f"{name} thrust (N)", row=i + 1, col=1)
-      visualizer.set_plot("controls", fig)
+      visualizer.set_plot(
+          'controls',
+          util_uplot.UplotFigure(
+              tuple(
+                  util_uplot.time_series_panel(
+                      ts,
+                      us[:, i],
+                      k,
+                      ylabel=f'{name} thrust (N)',
+                      references=(
+                          util_uplot.ReferenceLine(self.u_ref[i], 'Reference'),
+                          util_uplot.ReferenceLine(lower[i], 'Lower bound', 'red', (2, 3)),
+                          util_uplot.ReferenceLine(upper[i], 'Upper bound', 'red', (2, 3)),
+                      ),
+                      xlabel='Time (sec)' if i == 3 else '',
+                  )
+                  for i, name in enumerate(('Front', 'Left', 'Back', 'Right'))
+              )
+          ),
+      )
 
 
 if __name__ == "__main__":

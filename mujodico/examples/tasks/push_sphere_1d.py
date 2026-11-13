@@ -1,9 +1,8 @@
 import mujoco
 from mujodico.examples.tasks.task import Task
 from mujodico.examples.tasks.task_playback import TaskPlayback
-from mujodico.examples.tasks import plotly_util
+from mujodico.examples.tasks import util_uplot
 import numpy as np
-import plotly.graph_objects as go
 
 
 _XML = """
@@ -72,45 +71,24 @@ class PushSphere1d(Task):
 
     xs = traj['xs']
     ts = np.arange(xs.shape[0]) * self.model.opt.timestep
-    t_range = [min(ts), max(ts)]
 
-    y_min = min(np.min(xs[:, :2]), self.x_goal[1])
-    y_max = max(np.max(xs[:, :2]), self.x_goal[1])
-    y_pad = max(y_max - y_min, 1e-5) * 0.05
-    y_range = [y_min - y_pad, y_max + y_pad]
-
-    fig = go.Figure()
-    plotly_util.add_line(
-        fig=fig,
-        x=ts[:k+1],
-        y=xs[:k+1, 0],
-        name='Pusher',
-        color='red',
+    visualizer.set_plot(
+        'trajectory',
+        util_uplot.UplotFigure((
+            util_uplot.time_series_panel(
+                ts,
+                xs[:, :2],
+                k + 1,
+                ylabel='Position (m)',
+                labels=('Pusher', 'Object'),
+                colors=('red', 'blue'),
+                references=(
+                    util_uplot.ReferenceLine(self.x_goal[1], 'Object goal'),
+                ),
+            ),
+        )),
     )
-    plotly_util.add_line(
-        fig=fig,
-        x=ts[:k+1],
-        y=xs[:k+1, 1],
-        name='Object',
-        color='blue',
-    )
-    plotly_util.add_line(
-        fig=fig,
-        x=t_range,
-        y=[self.x_goal[1]] * 2,
-        name='Object goal',
-        color='black',
-        linestyle='dash',
-    )
-    fig.update_layout(
-        xaxis_title='Time (sec)',
-        yaxis_title='Position (m)',
-        xaxis={'range': t_range},
-        yaxis={'range': y_range},
-    )
-    visualizer.set_plot('trajectory', fig)
 
 
 if __name__ == '__main__':
-  task = PushSphere1d()
-  task.print_summary()
+  PushSphere1d().print_summary()

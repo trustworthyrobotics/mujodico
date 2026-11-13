@@ -1,10 +1,8 @@
 import mujoco
 from mujodico.examples.tasks.task import Task
 from mujodico.examples.tasks.task_playback import TaskPlayback
-from mujodico.examples.tasks import plotly_util
+from mujodico.examples.tasks import util_uplot
 import numpy as np
-import plotly.graph_objects as go
-import plotly.subplots
 
 
 _XML = """
@@ -104,62 +102,33 @@ class FingersSphere2d(Task):
         contact_smoothing=contact_smoothing,
     )
 
-  def _plot_object_dof(self, fig: go.Figure, k: int, xs: np.ndarray, object_dof: int):
-    ts = np.arange(xs.shape[0]) * self.model.opt.timestep
-    t_range = [min(ts), max(ts)]
-
-    dof = 4 + object_dof
-    y_min = min(np.min(xs[:, dof]), self.x_goal[dof])
-    y_max = max(np.max(xs[:, dof]), self.x_goal[dof])
-    y_pad = max(y_max - y_min, 1e-5) * 0.05
-    y_range = [y_min - y_pad, y_max + y_pad]
-
-    convert = np.rad2deg if object_dof == 2 else (lambda x: x)
-
-    plotly_util.add_line(
-        fig=fig,
-        x=ts[:k+1],
-        y=convert(xs[:k+1, dof]),
-        color='blue',
-        row=object_dof + 1,
-        col=1,
-    )
-    plotly_util.add_line(
-        fig=fig,
-        x=t_range,
-        y=convert([self.x_goal[dof]] * 2),
-        color='black',
-        linestyle='dash',
-        row=object_dof + 1,
-        col=1,
-    )
-    fig.update_xaxes(
-        title_text='Time (sec)' if object_dof == 2 else None,
-        range=t_range,
-        row=object_dof + 1,
-        col=1,
-    )
-    fig.update_yaxes(
-        title_text=['X Position (m)', 'Y Position (m)', 'Angle (deg)'][object_dof],
-        range=convert(y_range),
-        row=object_dof + 1,
-        col=1,
-    )
-
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
     super().update_visualization(visualizer, traj, k)
 
-    fig = plotly.subplots.make_subplots(
-        rows=3, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.02,
-    )
-    for object_dof in (0, 1, 2):
-      self._plot_object_dof(fig, k, traj['xs'], object_dof)
+    xs = traj['xs']
+    ts = np.arange(xs.shape[0]) * self.model.opt.timestep
 
-    visualizer.set_plot('trajectory', fig)
+    labels = ('X Position (m)', 'Y Position (m)', 'Angle (deg)')
+    panels = []
+    for object_dof, label in enumerate(labels):
+      dof = 4 + object_dof
+      values = xs[:, dof]
+      goal = self.x_goal[dof]
+      if object_dof == 2:
+        values = np.rad2deg(values)
+        goal = np.rad2deg(goal)
+      panels.append(
+          util_uplot.time_series_panel(
+              ts,
+              values,
+              k + 1,
+              ylabel=label,
+              references=(util_uplot.ReferenceLine(goal),),
+              xlabel='Time (sec)' if object_dof == 2 else '',
+          )
+      )
+    visualizer.set_plot('trajectory', util_uplot.UplotFigure(tuple(panels)))
 
 
 if __name__ == '__main__':
-  task = FingersSphere2d()
-  task.print_summary()
+  FingersSphere2d().print_summary()
