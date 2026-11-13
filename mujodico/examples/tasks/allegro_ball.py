@@ -135,6 +135,8 @@ class AllegroBall(Task):
     )
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
+    super().update_visualization(visualizer, traj, k)
+
     fig = plotly.subplots.make_subplots(
         rows=4, cols=1,
         shared_xaxes=True,

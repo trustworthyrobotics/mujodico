@@ -161,4 +161,6 @@ Task: {self.__class__.__name__}
 """)
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
-    """Update task-specific plots for the current playback frame."""
+    model = self.model
+    visualizer.update_scene(traj['xs'][k, :model.nq])
+    visualizer.set_text(str(traj.get('info', '')))

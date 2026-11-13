@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import html
 import threading
 from typing import TYPE_CHECKING
 from typing_extensions import override
@@ -55,7 +54,6 @@ class TaskPlayback(Playback):
     self._data = None
     self._mj_scene = None
     self._folder = None
-    self._folder_expanded = None
     self._iteration = None
     self._info_panel = None
     self._plots: dict[str, viser.GuiPlotlyHandle] = {}
@@ -96,10 +94,6 @@ class TaskPlayback(Playback):
         self._folder = server.gui.add_folder('Task', expand_by_default=True)
         history_count = len(self._traj.get('history', []))
         with self._folder:
-          self._folder_expanded = server.gui.add_checkbox(
-              'Task folder expanded', initial_value=True
-          )
-          self._track_folder_expansion()
           self._iteration = server.gui.add_number(
               'Iteration',
               initial_value=-1,
@@ -117,41 +111,6 @@ class TaskPlayback(Playback):
       except Exception:
         self.cleanup()
         raise
-
-  def _track_folder_expansion(self) -> None:
-    # Viser keeps folder expansion in React state, with no Python callback.
-    # A hidden checkbox relays the header's chevron state through its normal
-    # GUI input events. The iframe runs the bridge for each connecting client
-    # and is removed together with the folder.
-    checkbox_id = self._folder_expanded._impl.uuid
-    script = """
-      const doc = window.parent.document;
-      const folder = window.frameElement.closest('.mantine-Paper-root');
-      const header = folder.firstElementChild;
-      const sync = () => {
-        const checkbox = doc.getElementById(CHECKBOX_ID);
-        const icon = header.querySelector('svg');
-        if (!checkbox || !icon) return;
-        const expanded = icon.classList.contains('tabler-icon-chevron-up');
-        if (checkbox.checked !== expanded) checkbox.click();
-      };
-      const observer = new MutationObserver(sync);
-      observer.observe(header, {
-        attributes: true, childList: true, subtree: true,
-      });
-      window.addEventListener('pagehide', () => observer.disconnect());
-      sync();
-    """.replace('CHECKBOX_ID', repr(checkbox_id))
-    content = (
-        '<style>'
-        f'div:has(> .mantine-Flex-root label[for="{checkbox_id}"])'
-        '{display: none;}'
-        '</style>'
-        '<iframe style="display:none" title="Task folder state" srcdoc="'
-        + html.escape(f'<script>{script}</script>', quote=True)
-        + '"></iframe>'
-    )
-    self._server.gui.add_html(content)
 
   def _select_iteration(self, event) -> None:
     # Server-side control updates must not trigger another selection.
@@ -185,10 +144,7 @@ class TaskPlayback(Playback):
       traj = self._traj
       if self._selected_iteration >= 0:
         traj = {**traj, **traj['history'][self._selected_iteration]}
-      self.update_scene(traj['xs'][self._frame, :self._task.model.nq])
-      self.set_text(str(traj.get('info', '')))
-      if self._folder_expanded.value:
-        self._task.update_visualization(self, traj, self._frame)
+      self._task.update_visualization(self, traj, self._frame)
       self._frame += 1
       return True
 
@@ -241,7 +197,6 @@ class TaskPlayback(Playback):
       self._data = None
       self._mj_scene = None
       self._folder = None
-      self._folder_expanded = None
       self._iteration = None
       self._info_panel = None
       self._plots.clear()
