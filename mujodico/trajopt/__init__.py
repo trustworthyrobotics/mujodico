@@ -1,6 +1,7 @@
 from mujodico.trajopt._src.ccopt_trajopt import CCOptTrajOpt
 from mujodico.trajopt._src.fatrop_trajopt import FatropTrajOpt
 from mujodico.trajopt._src.ipopt_trajopt import IpoptTrajOpt
+from mujodico.trajopt._src.ippas_trajopt import IppasTrajOpt
 from mujodico.trajopt._src.knitro_trajopt import KnitroTrajOpt
 from mujodico.trajopt._src.transcriptions import contact_implicit_transcription
 from mujodico.trajopt._src.transcriptions import lifted_shooting_transcription
@@ -11,6 +12,7 @@ __all__ = [
     'CCOptTrajOpt',
     'FatropTrajOpt',
     'IpoptTrajOpt',
+    'IppasTrajOpt',
     'KnitroTrajOpt',
     'contact_implicit_transcription',
     'lifted_shooting_transcription',
