@@ -1,3 +1,4 @@
+from dataclasses import replace
 from unittest import mock
 
 from absl.testing import absltest
@@ -20,6 +21,8 @@ _RHS_FIELDS = (
     'r_gf',
     'r_cf_l',
     'r_cf_u',
+    'r_s',
+    'r_sf',
     'r0',
 )
 _STEP_FIELDS = (
@@ -33,6 +36,8 @@ _STEP_FIELDS = (
     'dz_u',
     'dzf_l',
     'dzf_u',
+    'dy',
+    'dyf',
 )
 _CASES = (
     ('two_sided', 2, 67, 5, 3, 2, 4, 2, 'two_sided', 'pd'),
@@ -126,6 +131,8 @@ def _random_problem_data(seed, T, nx, nu, ne, ng, ngf, bounds, curvature):
       ('r_gf', (ngf,)),
       ('r_cf_l', (ngf,)),
       ('r_cf_u', (ngf,)),
+      ('r_s', (T, ng)),
+      ('r_sf', (ngf,)),
       ('r0', (nx,)),
   ):
     data[name] = rng.normal(scale=0.3, size=shape)
@@ -158,6 +165,8 @@ class IpPrimalDualSystemTest(parameterized.TestCase):
         (T, ng),
         (ngf,),
         (ngf,),
+        (T, ng),
+        (ngf,),
     )
     for name, shape in zip(_STEP_FIELDS, shapes):
       with self.subTest(field=name):
@@ -167,7 +176,6 @@ class IpPrimalDualSystemTest(parameterized.TestCase):
 
     mv = lambda a, b: np.einsum('tij,tj->ti', a, b)
     mtv = lambda a, b: np.einsum('tji,tj->ti', a, b)
-    dz = p.dz_l - p.dz_u
     state_dual = np.concatenate((
         (p.E0.T @ p.dlmbda[0])[None],
         -p.dlmbda[1:-1],
@@ -175,13 +183,15 @@ class IpPrimalDualSystemTest(parameterized.TestCase):
     residuals = {
         'initial': p.E0 @ p.dx[0] + p.r0,
         'dynamics': mv(p.A, p.dx[:-1]) + mv(p.B, p.du) - p.dx[1:] + p.r_f,
-        'equalities': mv(p.Ex, p.dx[:-1]) + mv(p.Eu, p.du) + p.r_e,
+        'equalities': (
+            mv(p.Ex, p.dx[:-1]) + mv(p.Eu, p.du) + p.r_e - p.delta_c * p.dbeta
+        ),
         'state_stationarity': (
             mv(p.Hxx[:-1], p.dx[:-1])
             + mv(p.Hxu, p.du)
             + mtv(p.A, p.dlmbda[1:])
             + mtv(p.Ex, p.dbeta)
-            - mtv(p.Gx, dz)
+            + mtv(p.Gx, p.dy)
             + state_dual
             + p.r_x[:-1]
         ),
@@ -190,15 +200,14 @@ class IpPrimalDualSystemTest(parameterized.TestCase):
             + mv(p.Huu, p.du)
             + mtv(p.B, p.dlmbda[1:])
             + mtv(p.Eu, p.dbeta)
-            - mtv(p.Gu, dz)
+            + mtv(p.Gu, p.dy)
             + p.r_u
         ),
         'terminal_stationarity': (
-            p.Hxx[-1] @ p.dx[-1]
-            - p.Gf.T @ (p.dzf_l - p.dzf_u)
-            - p.dlmbda[-1]
-            + p.r_x[-1]
+            p.Hxx[-1] @ p.dx[-1] + p.Gf.T @ p.dyf - p.dlmbda[-1] + p.r_x[-1]
         ),
+        'slack_stationarity': p.r_s - p.dy - p.dz_l + p.dz_u,
+        'terminal_slack_stationarity': p.r_sf - p.dyf - p.dzf_l + p.dzf_u,
         'stage_slack': mv(p.Gx, p.dx[:-1]) + mv(p.Gu, p.du) - p.ds + p.r_g,
         'terminal_slack': p.Gf @ p.dx[-1] - p.dsf + p.r_gf,
     }
@@ -301,6 +310,65 @@ class IpPrimalDualSystemTest(parameterized.TestCase):
             rtol=1e-8,
             atol=1e-8,
         )
+
+  def test_dual_regularization_and_cached_rhs(self):
+    data = _random_problem_data(9, 3, 2, 1, 1, 2, 1, 'mixed', 'pd')
+    # Two identical control-equality rows exceed the number of controls.
+    for name in ('Ex', 'Eu', 'r_e'):
+      data[name] = jp.concatenate((data[name], data[name]), axis=1)
+    data['delta_c'] = jp.array(1e-3)
+    solved, accurate = jax.jit(
+        lambda p: pd.iterative_refinement_solve(p, 1e-10, 3)
+    )(pd.IpPrimalDualSystem.create(**data))
+    self.assertTrue(bool(accurate))
+    self._assert_kkt(solved)
+    rhs = solved.replace_rhs(r_e=solved.r_e + 0.1, r_x=solved.r_x - 0.2)
+    with mock.patch.object(
+        lqr, '_build_matrix_cache', side_effect=AssertionError('Cache rebuilt')
+    ):
+      cached, accurate = jax.jit(
+          lambda p: pd.iterative_refinement_solve(p, 1e-10, 0)
+      )(rhs)
+    self.assertTrue(bool(accurate))
+    self._assert_kkt(cached)
+    self.assertEqual(float(cached.delta_c), 1e-3)
+
+    # Refinement must retain the dual shift and reuse the same factors,
+    # as SOC does.
+    perturbed = replace(solved, dx=solved.dx + 0.01, dbeta=solved.dbeta - 0.1)
+    with mock.patch.object(
+        lqr, '_build_matrix_cache', side_effect=AssertionError('Cache rebuilt')
+    ):
+      improved, accurate = jax.jit(
+          lambda p: pd.iterative_refinement_solve(p, 1e-10, 3)
+      )(perturbed)
+    self.assertTrue(bool(accurate))
+    for name, residual in pd.system_defect(improved).items():
+      self.assertLess(
+          float(jp.max(jp.abs(residual), initial=0.0)), 1e-9, msg=name
+      )
+
+  def test_refinement_recovers_perturbed_step_without_refactorization(self):
+    data = _random_problem_data(23, 5, 3, 2, 1, 3, 2, 'mixed', 'pd')
+    exact = _solve_jit(pd.IpPrimalDualSystem.create(**data))
+    perturbed = replace(
+        exact,
+        dx=exact.dx + 0.03,
+        dz_l=exact.dz_l + jp.where(jp.isfinite(exact.g_l), 0.1, 0.0),
+    )
+    with mock.patch.object(pd, 'solve', wraps=pd.solve) as solve:
+      improved, good = jax.jit(
+          lambda p: pd.iterative_refinement_solve(p, 1e-10, 3)
+      )(perturbed)
+    self.assertTrue(bool(good))
+    self.assertTrue(solve.called)
+    self.assertIsNotNone(solve.call_args.args[0]._cache)
+    for name in _STEP_FIELDS:
+      np.testing.assert_allclose(
+          getattr(improved, name), getattr(exact, name), atol=1e-8
+      )
+    for name, residual in pd.system_defect(improved).items():
+      np.testing.assert_allclose(residual, 0, atol=1e-8, err_msg=name)
 
   def test_omitted_sides_ignore_nonfinite_values(self):
     data = _random_problem_data(6, 7, 4, 3, 1, 4, 5, 'mixed', 'pd')

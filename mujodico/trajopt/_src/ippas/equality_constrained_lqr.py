@@ -25,6 +25,12 @@ The KKT conditions are
   Aₖxₖ + Bₖuₖ − xₖ₊₁ = -cₖ                         for k = 0,…,T−1
   Eˣₖ xₖ + Eᵘₖ uₖ = -eₖ                            for k = 0,…,T−1
   x₀ = x̂₀
+
+With delta_c > 0, the stage-equality equation becomes
+Eˣₖ xₖ + Eᵘₖ uₖ - delta_c βₖ = -eₖ. Initial and dynamics equations
+remain exact. The parallel elimination uses the local saddle block
+[[Rₖ, (Eᵘₖ)ᵀ], [Eᵘₖ, -delta_c I]]. Matrix changes, including delta_c,
+require clearing _cache; replace_rhs() preserves factors for fixed matrices.
 """
 
 from dataclasses import dataclass, replace
@@ -72,10 +78,16 @@ def _apply_affine_scan(cache, rhs):
   if cache is None:
     return rhs
   n = rhs.shape[0]
-  pairs = _matvec(cache.reduction, rhs[: 2*(n//2) : 2]) + rhs[1::2]  # D₂ⱼ₊₁ d₂ⱼ + d₂ⱼ₊₁
-  odd = _apply_affine_scan(cache.child, pairs)  # x₂ⱼ₊₁ = (D₂ⱼ₊₁ D₂ⱼ) x₂ⱼ₋₁ + (D₂ⱼ₊₁ d₂ⱼ + d₂ⱼ₊₁)
+  pairs = (
+      _matvec(cache.reduction, rhs[: 2*(n//2) : 2]) + rhs[1::2]
+  )  # D₂ⱼ₊₁ d₂ⱼ + d₂ⱼ₊₁
+  odd = _apply_affine_scan(
+      cache.child, pairs
+  )  # x₂ⱼ₊₁ = (D₂ⱼ₊₁ D₂ⱼ) x₂ⱼ₋₁ + (D₂ⱼ₊₁ d₂ⱼ + d₂ⱼ₊₁)
   odd_padded = jp.concatenate([jp.zeros_like(rhs[:1]), odd])  # prepend x₋₁ = 0
-  even = _matvec(cache.expansion, odd_padded[:cache.expansion.shape[0]]) + rhs[::2]  # x₂ⱼ = D₂ⱼ x₂ⱼ₋₁ + d₂ⱼ
+  even = (
+      _matvec(cache.expansion, odd_padded[: cache.expansion.shape[0]]) + rhs[::2]
+  )  # x₂ⱼ = D₂ⱼ x₂ⱼ₋₁ + d₂ⱼ
   return jp.empty_like(rhs).at[1::2].set(odd).at[::2].set(even)
 
 
@@ -113,6 +125,7 @@ class EqualityConstrainedLQR:
   u: jax.Array | None = None
   lmbda: jax.Array | None = None
   beta: jax.Array | None = None
+  delta_c: float | jax.Array = 0.0
   _cache: _MatrixCache | None = None
 
   @staticmethod
@@ -129,7 +142,9 @@ class EqualityConstrainedLQR:
       Eu: jax.Array,
       e: jax.Array,
       x0: jax.Array,
+      delta_c: float | jax.Array = 0.0,
   ) -> 'EqualityConstrainedLQR':
+    assert jp.shape(delta_c) == ()
     T, nx, nu = N.shape
     assert Q.shape == (T + 1, nx, nx)
     assert N.shape == (T, nx, nu)
@@ -158,6 +173,7 @@ class EqualityConstrainedLQR:
         Eu=Eu,
         e=e,
         x0=x0,
+        delta_c=jp.asarray(delta_c, Q.dtype),
     )
 
   def replace_rhs(
@@ -190,7 +206,7 @@ def _build_matrix_cache(prob: EqualityConstrainedLQR) -> _MatrixCache:
   def boundary_map(Qk, Nk, Rk, Ak, Bk, Exk, Euk):
     Mk = jp.block([
         [Rk, Euk.T],
-        [Euk, jp.zeros((nc, nc), dtype=Rk.dtype)],
+        [Euk, -prob.delta_c * jp.eye(nc, dtype=Rk.dtype)],
     ])
     Kk = jp.vstack([
         Nk.T,
@@ -318,6 +334,7 @@ def _solve_rhs(prob: EqualityConstrainedLQR) -> EqualityConstrainedLQR:
       lmbda=lmbda,
       beta=beta,
   )
+
 
 def solve(prob: EqualityConstrainedLQR) -> EqualityConstrainedLQR:
   assert isinstance(prob, EqualityConstrainedLQR)

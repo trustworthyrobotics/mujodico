@@ -74,8 +74,9 @@ class StagewiseOcpModel:
     self.N, self.nx, self.nu = int(N), int(nx), int(nu)
     self.nx_tangent = self.nx - len(quaternion_positions)
     self.quaternion_positions = quaternion_positions
-    self.x_bounds = self._bounds(x_bounds, nx, 'x_bounds')
-    self.u_bounds = self._bounds(u_bounds, nu, 'u_bounds')
+
+    self._x_bounds = self._bounds(x_bounds, nx, 'x_bounds')
+    self._u_bounds = self._bounds(u_bounds, nu, 'u_bounds')
 
     self._user_initial_state_fn = initial_state
     self._user_dynamics_fn = dynamics
@@ -252,20 +253,20 @@ class StagewiseOcpModel:
     )
 
     xi = np.flatnonzero(
-        np.isfinite(self.x_bounds[0]) | np.isfinite(self.x_bounds[1])
+        np.isfinite(self._x_bounds[0]) | np.isfinite(self._x_bounds[1])
     )
     ui = np.flatnonzero(
-        np.isfinite(self.u_bounds[0]) | np.isfinite(self.u_bounds[1])
+        np.isfinite(self._u_bounds[0]) | np.isfinite(self._u_bounds[1])
     )
 
     stage_bounds = tuple(
         np.concatenate(
-            [self.x_bounds[i][xi], self.u_bounds[i][ui], user_stage_bounds[i]]
+            [self._x_bounds[i][xi], self._u_bounds[i][ui], user_stage_bounds[i]]
         )
         for i in (0, 1)
     )
     terminal_bounds = tuple(
-        np.concatenate([self.x_bounds[i][xi], user_terminal_bounds[i]])
+        np.concatenate([self._x_bounds[i][xi], user_terminal_bounds[i]])
         for i in (0, 1)
     )
     nh, nh_terminal = stage_bounds[0].size, terminal_bounds[0].size
