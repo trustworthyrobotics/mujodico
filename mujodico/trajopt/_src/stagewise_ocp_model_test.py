@@ -280,7 +280,7 @@ def _case(quaternion=False, **overrides):
       u_bounds=(np.array([-0.6, -np.inf]), np.array([0.7, 1.2])),
       stage_inequality_bounds=(np.array([-0.4, -np.inf]), np.array([1.8, 3.0])),
       terminal_inequality_bounds=(np.array([-1.0]), np.array([2.0])),
-      quaternion_positions=positions,
+      quaternion_addrs=positions,
   )
   options.update(overrides)
   return _Case(
@@ -737,10 +737,10 @@ class StagewiseOcpModelTest(parameterized.TestCase):
         dynamics=lambda x, u, k, p: x,
         stage_cost=lambda x, u, k, p: jp.sum(x * x),
         terminal_cost=lambda x, p: jp.sum(x * x),
-        quaternion_positions=positions,
+        quaternion_addrs=positions,
     )
     positions = tuple(sorted(positions))
-    self.assertEqual(m.quaternion_positions, positions)
+    self.assertEqual(m.quaternion_addrs, positions)
     self.assertEqual(m.nx_tangent, nx - len(positions))
     dx, u, du = (
         np.linspace(-0.2, 0.3, m.nx_tangent),
@@ -789,7 +789,7 @@ class StagewiseOcpModelTest(parameterized.TestCase):
         dynamics=lambda x, u, k, p: x,
         stage_cost=lambda x, u, k, p: jp.dot(x, x),
         terminal_cost=lambda x, p: jp.dot(x, x),
-        quaternion_positions=positions,
+        quaternion_addrs=positions,
         gauss_newton=False,
     )
     xs, us, tx = np.tile(x, (N + 1, 1)), np.zeros((N, 0)), m.nx_tangent
@@ -929,9 +929,9 @@ class StagewiseOcpModelTest(parameterized.TestCase):
       ('fractional', (1.5,)),
       ('boolean', (True,)),
   )
-  def test_invalid_quaternion_positions(self, positions):
-    with self.assertRaisesRegex(ValueError, 'quaternion_positions'):
-      _case(quaternion_positions=positions)
+  def test_invalid_quaternion_addrs(self, positions):
+    with self.assertRaisesRegex(ValueError, 'quaternion_addrs'):
+      _case(quaternion_addrs=positions)
 
 
 if __name__ == '__main__':

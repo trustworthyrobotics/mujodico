@@ -467,7 +467,7 @@ def find_acceptable_trial_point(
     evaluation = evaluate_trial(model, trial_iterate, params)
     phi, theta = merit(trial_iterate, evaluation, mu, bounds, options)
     iterate_valid = ip_iterate.valid(
-        trial_iterate, bounds, model.quaternion_positions
+        trial_iterate, bounds, model.quaternion_addrs
     )
     accepted, rejected_by_filter = acceptable(
         phi=phi,

@@ -25,7 +25,7 @@ class IppasMultipleShooting:
         terminal_cost=trans.terminal_cost,
         x_bounds=trans.x_bounds,
         u_bounds=trans.u_bounds,
-        quaternion_positions=task.quaternion_w_idxs,
+        quaternion_addrs=task.quaternion_addrs,
         gauss_newton=gauss_newton,
         params_trace=trans.params,
     )

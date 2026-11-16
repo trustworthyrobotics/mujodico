@@ -21,7 +21,7 @@ def state_cost(
     Q: jax.Array | np.ndarray,
     x_goal: jax.Array | np.ndarray,
     x: jax.Array | np.ndarray,
-    quaternion_w_idxs: list[int],
+    quaternion_addrs: list[int],
 ):
   """Quadratic state error with squared shortest-rotation quaternion errors.
 
@@ -32,7 +32,7 @@ def state_cost(
 
   e = x - x_goal
 
-  for i in quaternion_w_idxs:
+  for i in quaternion_addrs:
     if backend == 'jax':
       e = e.at[i : i+4].set(0.0)
     else:
@@ -40,7 +40,7 @@ def state_cost(
 
   cost = e.T @ Q @ e
 
-  for i in quaternion_w_idxs:
+  for i in quaternion_addrs:
     q = x[i : i + 4]
     q_goal = x_goal[i : i + 4]
 

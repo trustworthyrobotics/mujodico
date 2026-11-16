@@ -35,7 +35,7 @@ class FatropTrajOpt:
       terminal_inequality_bounds: Bounds | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
-      quaternion_positions: tuple[int, ...] = (),
+      quaternion_addrs: tuple[int, ...] = (),
       gauss_newton: bool = True,
       full_dynamics_jacobian: bool = False,
       params_trace: Params | None = None,
@@ -66,7 +66,7 @@ class FatropTrajOpt:
         terminal_inequality_bounds=terminal_inequality_bounds,
         x_bounds=x_bounds,
         u_bounds=u_bounds,
-        quaternion_positions=quaternion_positions,
+        quaternion_addrs=quaternion_addrs,
         gauss_newton=gauss_newton,
         full_dynamics_jacobian=full_dynamics_jacobian,
     )
@@ -141,7 +141,7 @@ class _FatropProblem:
       raise ValueError(f'xs_init must have shape ({m.N + 1}, {m.nx}).')
     if us.shape != (m.N, m.nu):
       raise ValueError(f'us_init must have shape ({m.N}, {m.nu}).')
-    for i in m.quaternion_positions:
+    for i in m.quaternion_addrs:
       quaternions = xs[:, i:i+4]
       if (
         not np.all(np.isfinite(quaternions)) or
@@ -263,7 +263,7 @@ class _FatropProblem:
 
     dtype = m.evaluation_dtype
     x, u = jp.zeros((N + 1, nx), dtype), jp.zeros((N, nu), dtype)
-    for i in m.quaternion_positions:
+    for i in m.quaternion_addrs:
       x = x.at[:, i].set(1.0)
     scale = jp.asarray(1.0, dtype=dtype)
 

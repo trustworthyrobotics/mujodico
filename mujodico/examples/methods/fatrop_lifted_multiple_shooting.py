@@ -38,7 +38,7 @@ class FatropLiftedMultipleShooting:
         ),
         x_bounds=trans.x_bounds,
         u_bounds=trans.w_bounds,
-        quaternion_positions=task.quaternion_w_idxs,
+        quaternion_addrs=task.quaternion_addrs,
         params_trace=trans.params,
         update_params=update_params,
     )

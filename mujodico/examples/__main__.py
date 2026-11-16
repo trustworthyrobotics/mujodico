@@ -77,7 +77,7 @@ def _main(argv) -> None:
       solve_time = time.perf_counter() - tic
 
       goal_error = util.state_cost(
-          task.Q, task.x_goal, traj['xs'][-1], task.quaternion_w_idxs
+          task.Q, task.x_goal, traj['xs'][-1], task.quaternion_addrs
       )
 
       writer.writerow([seed, goal_error, solve_time, iters])
