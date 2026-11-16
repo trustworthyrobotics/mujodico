@@ -28,6 +28,10 @@ class FatropMultipleShooting:
         dynamics=lambda x, u, k, params: trans.dynamics(x, u),
         stage_cost=lambda x, u, k, params: trans.stage_cost(x, u, params),
         terminal_cost=trans.terminal_cost,
+        stage_inequality_constraint=(
+            (lambda x, u, k, params: trans.stage_inequality(x, u))
+            if trans.stage_inequality is not None else None
+        ),
         x_bounds=trans.x_bounds,
         u_bounds=trans.u_bounds,
         quaternion_addrs=task.quaternion_addrs,

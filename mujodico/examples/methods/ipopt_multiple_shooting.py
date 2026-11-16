@@ -30,6 +30,10 @@ class IpoptMultipleShooting:
         local_equality_constraint=lambda x, u, xnext, k, params: (
             xnext - trans.dynamics(x, u)
         ),
+        local_inequality_constraint=(
+            (lambda x, u, xnext, k, params: trans.stage_inequality(x, u))
+            if trans.stage_inequality is not None else None
+        ),
         x_bounds=trans.x_bounds,
         u_bounds=trans.u_bounds,
         params_trace=self.transcription.params,
