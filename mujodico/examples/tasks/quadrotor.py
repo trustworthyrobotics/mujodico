@@ -54,7 +54,7 @@ class Quadrotor(Task):
 
     x0 = np.r_[model.qpos0, np.zeros(model.nv)]
     x0[:3] = rng.uniform([-5.0, -5.0, 0.1], [5.0, 5.0, 0.1])
-    angles = rng.uniform([-0.1, -0.1, -0.2], [0.1, 0.1, 0.2])
+    angles = rng.uniform([-0.1, -0.1, -np.pi], [0.1, 0.1, np.pi])
     x0[3:7] = np.roll(Rotation.from_euler("xyz", angles).as_quat(), 1)
 
     goal = np.r_[0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, np.zeros(6)]
@@ -64,7 +64,7 @@ class Quadrotor(Task):
 
     super().__init__(
         model=model,
-        horizon=100,
+        horizon=200,
         x_0=x0,
         x_goal=goal,
         Q=Q,
