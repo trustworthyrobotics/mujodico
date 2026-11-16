@@ -1,4 +1,4 @@
-import jax
+import numpy as np
 import jax.numpy as jp
 from mujodico import trajopt
 from mujodico.examples.methods import util
@@ -7,12 +7,33 @@ from mujodico.examples.tasks import Task
 
 class MultipleShootingTranscription:
 
-  def __init__(self, task: Task):
-    dynamics = trajopt.shooting_transcription(
-        mjmodel=task.model,
-        contact_approximation=task.contact_approx,
-        contact_smoothing=task.contact_smoothing,
-    )
+  def __init__(self, task: Task, *, have_contact_force_inequality: bool = False):
+
+    self.stage_inequality = None
+    if have_contact_force_inequality:
+      lifted_dynamics, force_equality, _, bounds = trajopt.lifted_shooting_transcription(
+          mjmodel=task.model,
+          contact_approximation=task.contact_approx,
+          contact_smoothing=task.contact_smoothing * 0.001,
+          u_bounds=task.u_bounds,
+      )
+      ncf = len(bounds[0]) - task.nu
+      positive = jp.asarray(np.flatnonzero(np.isfinite(bounds[0][task.nu:])))
+
+      def predicted_force(x, u):
+        return -force_equality(x, jp.concatenate([u, jp.zeros(ncf)]))
+
+      def dynamics(x, u):
+        return lifted_dynamics(x, jp.concatenate([u, predicted_force(x, u)]))
+
+      self.stage_inequality = lambda x, u: predicted_force(x, u)[positive]
+
+    else:
+      dynamics = trajopt.shooting_transcription(
+          mjmodel=task.model,
+          contact_approximation=task.contact_approx,
+          contact_smoothing=task.contact_smoothing,
+      )
 
     def stage_cost(x, u, params):
       return (
