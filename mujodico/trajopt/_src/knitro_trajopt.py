@@ -79,6 +79,7 @@ class KnitroTrajOpt:
     for key, value in kwargs.items():
       problem.add_option(key, value)
 
+    nlp.reset_stats()
     tic = time.perf_counter()
     vars_opt, info = problem.solve(vars_init)
     total_time = time.perf_counter() - tic
@@ -86,6 +87,7 @@ class KnitroTrajOpt:
     info.pop('x', None)
     info['total_time'] = total_time
     info.update(nlp.stats)
+    info['solve_time'] = total_time - info['conversion_time']
 
     xs_opt, us_opt = nlp._unpack(vars_opt)
     return np.asarray(xs_opt), np.asarray(us_opt), info

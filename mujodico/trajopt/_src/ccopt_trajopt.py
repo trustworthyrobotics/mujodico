@@ -105,6 +105,7 @@ class CCOptTrajOpt:
 
     if not self._has_complementarity_constraint:
       self._ensure_jl_packages(('MadNLP',))
+      nlp.reset_stats()
       tic = time.perf_counter()
       stats = jl.MadNLP.madnlp(jl_nlp, **kwargs)
     else:
@@ -113,10 +114,12 @@ class CCOptTrajOpt:
 
       if method == self.Method.RELAXATION:
         solver = jl.CCOpt.RelaxationSolver(mpcc, **kwargs)
+        nlp.reset_stats()
         tic = time.perf_counter()
         stats = getattr(jl.CCOpt, 'solve_homotopy!')(solver)
       elif method == self.Method.PENALTY:
         solver = jl.CCOpt.PenaltySolver(mpcc, **kwargs)
+        nlp.reset_stats()
         tic = time.perf_counter()
         stats = getattr(jl.CCOpt, 'solve_homotopy!')(solver)
       elif method == self.Method.CROSSOVER:
@@ -125,12 +128,14 @@ class CCOptTrajOpt:
             lpcc_solver_kwargs=jl_kwargs,
             bnlp_solver_kwargs=jl_kwargs,
         )
+        nlp.reset_stats()
         tic = time.perf_counter()
         stats = jl.CCOpt.crossover(mpcc, jl.MPCCModels.get_x0(mpcc), options)
 
     total_time = time.perf_counter() - tic
     info = {'total_time': total_time}
     info.update(nlp.stats)
+    info['solve_time'] = total_time - info['conversion_time']
     for name in ['objective', 'status', 'iter', 'primal_feas', 'dual_feas']:
       try:
         info[name] = getattr(stats, name)

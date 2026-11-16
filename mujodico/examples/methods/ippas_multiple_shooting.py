@@ -1,7 +1,6 @@
 import time
 
 import jax
-import jax.numpy as jp
 import numpy as np
 
 from mujodico import trajopt
@@ -35,29 +34,41 @@ class IppasMultipleShooting:
   def update(self, task: Task):
     self.transcription.update(task)
 
-  def solve(self, traj_init: dict, *, iterations: int = 500, verbose: bool = True):
+  def solve(
+      self, traj_init: dict, *, iterations: int = 500, verbose: bool = True
+  ):
     trans = self.transcription
     xs = traj_init['xs']
     us = traj_init['us']
 
+    args = jax.device_put((trans.params, xs, us))
     key = (iterations,)
     if key not in self._solver_cache:
-      self._solver_cache[key] = jax.jit(
-          lambda p, x, u: self.solver.solve(p, x, u, max_iter=iterations)
+      compiled = (
+          jax.jit(
+              lambda p, x, u: self.solver.solve(p, x, u, max_iter=iterations)
+          )
+          .lower(*args)
+          .compile()
       )
+      # Exclude compilation and first-use setup from the measured solve.
+      jax.block_until_ready(compiled(*args))
+      self._solver_cache[key] = compiled
 
+    jax.block_until_ready(args)
     started = time.perf_counter()
-    xs, us, info = self._solver_cache[key](trans.params, xs, us)
-    jax.block_until_ready((xs, us, info))
+    xs, us, info = jax.block_until_ready(self._solver_cache[key](*args))
+    solve_time = time.perf_counter() - started
 
     if verbose:
       print(
           f'Method: {self.__class__.__name__}\n'
-          f'  total time: {time.perf_counter() - started:.6f} sec\n'
+          f'  solve time: {solve_time:.6f} sec\n'
           f'  solver status: {int(info["status"])}\n'
           f'  iterations: {int(info["iter_count"])}\n'
       )
     return {
         'xs': np.asarray(xs),
         'us': np.asarray(us),
+        'solve_time': solve_time,
     }

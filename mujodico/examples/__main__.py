@@ -64,8 +64,6 @@ def _main(argv) -> None:
 
       iters = _ITERATIONS.value
 
-      tic = time.perf_counter()
-
       traj = method.solve(
         traj_init={
             'xs': task.xs_init,
@@ -74,7 +72,7 @@ def _main(argv) -> None:
         iterations=iters,
       )
 
-      solve_time = time.perf_counter() - tic
+      solve_time = traj['solve_time']
 
       goal_error = util.state_cost(
           task.Q, task.x_goal, traj['xs'][-1], task.quaternion_addrs

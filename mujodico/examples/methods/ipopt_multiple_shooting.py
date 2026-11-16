@@ -57,6 +57,7 @@ class IpoptMultipleShooting:
     component_time['ipopt'] = total_time - sum(component_time.values())
     print(
         f'Method: {self.__class__.__name__}\n'
+        f'  solve time: {info["solve_time"]:.6f} sec\n'
         f'  total time: {total_time:.6f} sec\n'
         + '\n'.join([
             f'    {name} time: {time:.6f} sec / {time/total_time*100:.2f}%'
@@ -64,4 +65,9 @@ class IpoptMultipleShooting:
         ])
     )
 
-    return {'xs': xs_opt, 'us': us_opt, 'history': self._history}
+    return {
+        'xs': xs_opt,
+        'us': us_opt,
+        'history': self._history,
+        'solve_time': info['solve_time'],
+    }
