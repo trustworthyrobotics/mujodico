@@ -13,12 +13,19 @@ Search sequence:
      corrections (SOC). A failed SOC does not replace the original Newton
      direction used for backtracking.
   4. If still rejected, geometrically reduce the original primal step by
-     α_red_factor. Keep its bound-dual step fixed. Stop at max_ls trials
-     or when the next primal step would be at or below minimum_step().
+     α_red_factor. Keep its bound-dual step fixed. Stop when the next primal
+     step would be at or below minimum_step(), or cannot decrease further.
 
 Every accepted trial must be finite, keep slacks strictly interior and finite-
-side bound duals positive, satisfy quaternion validity, and have θ ≤ θₘₐₓ.
-It must also pass every stored filter corner: θ ≤ θᵢ ∨ φ ≤ φᵢ, ∀i.
+side bound duals positive, and satisfy quaternion validity. A tiny primal
+direction with θ₀ ≤ 10⁻⁴ permits a valid finite maximum-step trial without
+progress/filter tests or filter augmentation [IPOPT, sec. 3.9]. Repeated tiny
+steps with small equality-dual changes trigger barrier reduction, then
+unsuccessful TINY_STEP termination if μ cannot decrease further.
+
+Other trials require θ ≤ θₘₐₓ and must pass every stored filter corner:
+
+  θ ≤ θᵢ ∨ φ ≤ φᵢ, ∀i.
 
 For progress relative to the current point (θ₀, φ₀), use the f-type switch
 
@@ -50,10 +57,10 @@ import jax.numpy as jp
 from mujodico.trajopt._src.ippas import ip_filter, ip_iterate
 from mujodico.trajopt._src.ippas import ip_primal_dual_system as pd
 from mujodico.trajopt._src.ippas.ip_iterate import (
-  Iterate,
-  IterateData,
-  damping,
-  distances,
+    Iterate,
+    IterateData,
+    damping,
+    distances,
 )
 from mujodico.trajopt._src.ippas.options import Options
 from mujodico.trajopt._src.stagewise_ocp_model import StagewiseOcpModel
@@ -84,6 +91,38 @@ class Search(NamedTuple):
   iterate: Iterate
   evaluation: dict[str, jax.Array]
   accepted: jax.Array
+
+
+def detect_tiny_step(
+    it: Iterate,
+    direction: pd.IpPrimalDualSystem,
+    theta: jax.Array,
+    options: Options,
+) -> jax.Array:
+  """Detect an insignificant primal direction [IPOPT, sec. 3.9].
+
+  Require max |Δv|/(1 + |v|) ≤ tiny_step_tol for states, controls, and stage
+  and terminal slacks, with θ ≤ 10⁻⁴. For manifold states with different
+  tangent and storage dimensions, use unscaled ‖Δx‖∞ instead. Zero tolerance
+  disables detection. Multiplier increments are checked by the algorithm's
+  repeated-tiny-step policy, separately from this primal test.
+  """
+  scaled_x = (
+      direction.dx / (1 + jp.abs(it.x))
+      if direction.dx.shape[-1] == it.x.shape[-1]
+      else direction.dx
+  )
+  size = ip_iterate.max_abs(
+      scaled_x,
+      direction.du / (1 + jp.abs(it.u)),
+      direction.ds / (1 + jp.abs(it.s)),
+      direction.dsf / (1 + jp.abs(it.sf)),
+  )
+  return (
+      (options.tiny_step_tol > 0)
+      & (size <= options.tiny_step_tol)
+      & (theta <= 1e-4)
+  )
 
 
 def _le(left: jax.Array, right: jax.Array, reference: jax.Array) -> jax.Array:
@@ -378,10 +417,16 @@ def find_acceptable_trial_point(
     bounds: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
     state: LineSearchState,
     options: Options,
-) -> tuple[Search, LineSearchState, jax.Array]:
+) -> tuple[Search, LineSearchState, jax.Array, jax.Array]:
+  """Return the selected trial, filter state, rejection history, and tiny flag.
+
+  A valid finite maximum-step tiny trial bypasses progress/filter tests and
+  filter augmentation. An invalid tiny trial falls back to normal globalization.
+  """
   max_alpha_primal, max_alpha_dual = maximum_step_lengths(it, direction, mu, bounds, options)
 
   phi0, theta0 = merit(it, vars(data), mu, bounds, options)
+  tiny_direction = detect_tiny_step(it, direction, theta0, options)
 
   dphi = (
       jp.sum(data.objective_gradx * direction.dx)
@@ -405,9 +450,19 @@ def find_acceptable_trial_point(
       alpha_primal: jax.Array,
       alpha_dual: jax.Array,
       alpha_test: jax.Array,
-  ) -> tuple[Search, jax.Array, jax.Array]:
+      *,
+      allow_tiny: bool = False,
+  ) -> tuple[Search, jax.Array, jax.Array, jax.Array]:
     trial_iterate = candidate(
-        model, it, direction, alpha_primal, alpha_dual, mu, params, bounds, options
+        model,
+        it,
+        direction,
+        alpha_primal,
+        alpha_dual,
+        mu,
+        params,
+        bounds,
+        options,
     )
     evaluation = evaluate_trial(model, trial_iterate, params)
     phi, theta = merit(trial_iterate, evaluation, mu, bounds, options)
@@ -424,19 +479,31 @@ def find_acceptable_trial_point(
         state=state,
         options=options,
     )
+    tiny_taken = (
+        allow_tiny
+        & tiny_direction
+        & iterate_valid
+        & jp.isfinite(phi)
+        & jp.isfinite(theta)
+    )
     return (
         Search(
             alpha=alpha_primal,
             iterate=trial_iterate,
             evaluation=evaluation,
-            accepted=iterate_valid & accepted,
+            accepted=iterate_valid & (accepted | tiny_taken),
         ),
         theta,
-        iterate_valid & rejected_by_filter,
+        iterate_valid & rejected_by_filter & ~tiny_taken,
+        tiny_taken,
     )
 
-  first, theta_first, first_filter_rejected = trial(
-      direction, max_alpha_primal, max_alpha_dual, max_alpha_primal
+  first, theta_first, first_filter_rejected, tiny_step_taken = trial(
+      direction,
+      max_alpha_primal,
+      max_alpha_dual,
+      max_alpha_primal,
+      allow_tiny=True,
   )
 
   # SOC modifies only constraint RHSs and reuses the Newton factors. A failed
@@ -471,11 +538,11 @@ def find_acceptable_trial_point(
     }
     corrected, accurate = pd.iterative_refinement_solve(
         direction.replace_rhs(**acc),
-        linear_tol=options.linear_tol,
+        linear_ref_tol=options.linear_ref_tol,
         max_refinement=options.max_refinement,
     )
     ap_soc, ad_soc = maximum_step_lengths(it, corrected, mu, bounds, options)
-    candidate, new_theta, rejected_by_filter = trial(
+    candidate, new_theta, rejected_by_filter, _ = trial(
         corrected, ap_soc, ad_soc, max_alpha_primal
     )
     candidate = candidate._replace(accepted=candidate.accepted & accurate)
@@ -495,30 +562,31 @@ def find_acceptable_trial_point(
   alpha_min = minimum_step(theta0, dphi, state, options)
 
   def backtrack_cond(carry) -> jax.Array:
-    candidate, count, _ = carry
+    candidate, _ = carry
+    next_alpha = candidate.alpha * options.alpha_red_factor
     return (
         ~candidate.accepted
-        & (count < options.max_ls - 1)
-        & (candidate.alpha * options.alpha_red_factor > alpha_min)
+        & jp.isfinite(next_alpha)
+        & (next_alpha < candidate.alpha)
+        & (next_alpha > alpha_min)
     )
 
   def backtrack_body(carry):
-    previous, count, any_filter_rejection = carry
+    previous, any_filter_rejection = carry
     alpha = previous.alpha * options.alpha_red_factor
-    candidate, _, rejected_by_filter = trial(direction, alpha, max_alpha_dual, alpha)
+    candidate, _, rejected_by_filter, _ = trial(direction, alpha, max_alpha_dual, alpha)
     return (
         candidate,
-        count + 1,
         any_filter_rejection | rejected_by_filter,
     )
 
-  found, _, any_filter_rejection = jax.lax.cond(
+  found, any_filter_rejection = jax.lax.cond(
       corrected.accepted,
-      lambda _: (corrected, 0, any_filter_rejection),
+      lambda _: (corrected, any_filter_rejection),
       lambda _: jax.lax.while_loop(
           backtrack_cond,
           backtrack_body,
-          (first, 0, any_filter_rejection),
+          (first, any_filter_rejection),
       ),
       None,
   )
@@ -526,9 +594,13 @@ def find_acceptable_trial_point(
   phi, _ = merit(found.iterate, found.evaluation, mu, bounds, options)
 
   alpha_test = jp.where(corrected.accepted, max_alpha_primal, found.alpha)
-  augment = found.accepted & (
-      ~f_type(alpha_test, theta0, dphi, options)
-      | ~armijo(phi, phi0, alpha_test, dphi, options)
+  augment = (
+      found.accepted
+      & ~tiny_step_taken
+      & (
+          ~f_type(alpha_test, theta0, dphi, options)
+          | ~armijo(phi, phi0, alpha_test, dphi, options)
+      )
   )
 
   updated_filter = jax.lax.cond(
@@ -538,7 +610,12 @@ def find_acceptable_trial_point(
       state.filter,
   )
 
-  return found, state._replace(filter=updated_filter), any_filter_rejection
+  return (
+      found,
+      state._replace(filter=updated_filter),
+      any_filter_rejection,
+      tiny_step_taken,
+  )
 
 
 def update_filter_rejections(

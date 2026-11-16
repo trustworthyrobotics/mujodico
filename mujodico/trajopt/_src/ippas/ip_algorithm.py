@@ -1,9 +1,3 @@
-# Policies adapted from FATROP's Ipopt-derived interior-point algorithm.
-# Copyright (c) Lander Vanroye, KU Leuven.
-# Ipopt: Copyright (C) 2004, 2010 International Business Machines and others.
-# SPDX-License-Identifier: EPL-2.0
-"""Public solver and compiled interior-point iteration controller."""
-
 from dataclasses import dataclass
 from dataclasses import replace
 from enum import IntEnum
@@ -13,7 +7,6 @@ import jax
 import jax.numpy as jp
 import numpy as np
 
-from mujodico.trajopt._src.ippas import ip_convergence_check
 from mujodico.trajopt._src.ippas import ip_initializer
 from mujodico.trajopt._src.ippas import ip_iterate
 from mujodico.trajopt._src.ippas import ip_linesearch
@@ -23,7 +16,7 @@ from mujodico.trajopt._src.ippas import ip_search_dir
 from mujodico.trajopt._src.ippas.ip_iterate import Iterate
 from mujodico.trajopt._src.ippas.ip_iterate import IterateData
 from mujodico.trajopt._src.ippas.ip_iterate import Metrics
-from mujodico.trajopt._src.ippas.ip_iterate import all_finite
+from mujodico.trajopt._src.ippas.ip_iterate import all_finite, max_abs
 from mujodico.trajopt._src.ippas.options import Options
 from mujodico.trajopt._src.stagewise_ocp_model import StagewiseOcpModel
 from mujodico.trajopt._src.types import Params
@@ -37,6 +30,7 @@ class Status(IntEnum):
   NUMERICAL_ERROR = 4
   LINE_SEARCH_FAILED = 5
   INVALID_INITIAL_GUESS = 6
+  TINY_STEP = 7
 
 
 @jax.tree_util.register_dataclass
@@ -87,6 +81,8 @@ class State(NamedTuple):
   last_delta: jax.Array
   filter_rejections: jax.Array
   filter_resets: jax.Array
+  tiny_step_last_iteration: jax.Array
+  tiny_step_flag: jax.Array
 
 
 class Solver:
@@ -126,7 +122,7 @@ class Solver:
     original_bounds = ip_initializer.get_bounds(m, o, original=True)
 
     it = ip_initializer.initialize(m, params, initial_guess, bounds, o)
-    if o.initialize_duals and initial_guess.primal_dual is None:
+    if initial_guess.primal_dual is None:
       projection, _ = pd.evaluate(m, it, params, jp.asarray(0.0), bounds, o)
       lmbda, beta = ip_initializer.initialize_multipliers(projection, o)
       it = replace(it, lmbda=lmbda, beta=beta)
@@ -162,22 +158,11 @@ class Solver:
         last_delta=jp.asarray(0.0),
         filter_rejections=zero,
         filter_resets=zero,
+        tiny_step_last_iteration=jp.asarray(False),
+        tiny_step_flag=jp.asarray(False),
     )
 
-    def body(state: State):
-      new_mu = ip_mu_update.update(
-          state.mu,
-          lambda mu: ip_iterate.metrics(
-              state.iterate,
-              state.data,
-              mu,
-              bounds,
-              original_bounds,
-              o,
-          ).barrier_error,
-          o,
-      )
-
+    def step(state: State, new_mu: jax.Array) -> State:
       line_search = jax.lax.cond(
           new_mu != state.mu,
           lambda _: ip_linesearch.LineSearchState.create(
@@ -195,7 +180,7 @@ class Solver:
           system, new_mu, state.last_delta, o
       )
 
-      found, line_search, any_filter_rejected = (
+      found, line_search, any_filter_rejected, tiny_step_taken = (
           ip_linesearch.find_acceptable_trial_point(
               m,
               state.iterate,
@@ -253,22 +238,51 @@ class Solver:
             r=delta,
         )
 
+      tiny = accepted & tiny_step_taken
+      small_dual = (
+          max_abs(direction.dlmbda, direction.dbeta, direction.dy, direction.dyf)
+          < o.tiny_step_y_tol
+      )
       return State(
-          it,
-          system,
-          data,
-          mm,
-          iteration,
-          status,
-          count,
-          new_mu,
-          line_search,
-          jp.where(delta > 0, delta, state.last_delta),
-          rejections,
-          resets,
+          iterate=it,
+          system=system,
+          data=data,
+          metrics=mm,
+          iteration=iteration,
+          status=status,
+          acceptable_count=count,
+          mu=new_mu,
+          line_search=line_search,
+          last_delta=jp.where(delta > 0, delta, state.last_delta),
+          filter_rejections=rejections,
+          filter_resets=resets,
+          tiny_step_last_iteration=tiny & small_dual,
+          tiny_step_flag=tiny & state.tiny_step_last_iteration,
       )
 
-    final = jax.lax.while_loop(lambda st: st.status == Status.RUNNING, body, state)
+    def body(state: State) -> State:
+      new_mu = ip_mu_update.update(
+          state.mu,
+          lambda mu: ip_iterate.metrics(
+              state.iterate, state.data, mu, bounds, original_bounds, o
+          ).barrier_error,
+          o,
+          tiny_step_flag=state.tiny_step_flag,
+          first_update=state.iteration == 0,
+      )
+      # Repeated tiny steps force μ down. At its floor, retain the last accepted
+      # iterate and report stagnation.
+      stagnant = state.tiny_step_flag & (new_mu == state.mu)
+      return jax.lax.cond(
+          stagnant,
+          lambda _: state._replace(status=jp.asarray(Status.TINY_STEP, jp.int32)),
+          lambda _: step(state, new_mu),
+          None,
+      )
+
+    final = jax.lax.while_loop(
+        lambda state: state.status == Status.RUNNING, body, state
+    )
     mm = final.metrics
 
     return SolveResult(

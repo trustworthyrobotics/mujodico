@@ -46,7 +46,7 @@ def compute(
     )
     solved, accurate = pd.iterative_refinement_solve(
         shifted,
-        linear_tol=o.linear_tol,
+        linear_ref_tol=o.linear_ref_tol,
         max_refinement=o.max_refinement,
     )
     finite = all_finite((
@@ -79,32 +79,37 @@ def compute(
       jp.where(mineig < -tolerance, -mineig + margin, 0.0),
   )
   solved, good = attempt(delta_w)
-  initial = (solved, good, delta_w, 1)
+  initial = (solved, good, delta_w)
 
-  def cond(carry) -> jax.Array:
-    _, good, delta_w, count = carry
-    return (
-        dual_valid
-        & ~good
-        & (count < o.max_regularization)
-        & (delta_w < o.delta_w_max)
-    )
-
-  def body(carry):
-    _, _, delta_w, count = carry
+  def next_delta(current: jax.Array) -> jax.Array:
     first = jp.where(
         last_delta > 0,
-        jp.maximum(o.delta_wmin, o.kappa_wmin * last_delta),
+        jp.maximum(o.delta_w_min, o.kappa_wmin * last_delta),
         o.delta_w0,
     )
     growth = jp.where(last_delta > 0, o.kappa_wplus, o.kappa_wplusem)
-    delta_w = jp.minimum(
-        o.delta_w_max, jp.where(delta_w == 0, first, delta_w * growth)
+    return jp.minimum(
+        o.delta_w_max, jp.where(current == 0, first, current * growth)
     )
-    solved, good = attempt(delta_w)
-    return solved, good, delta_w, count + 1
 
-  solved, good, delta_w, _ = jax.lax.while_loop(cond, body, initial)
+  def cond(carry) -> jax.Array:
+    _, good, delta_w = carry
+    following = next_delta(delta_w)
+    return (
+        dual_valid
+        & ~good
+        & (delta_w < o.delta_w_max)
+        & jp.isfinite(following)
+        & (following > delta_w)
+    )
+
+  def body(carry):
+    _, _, delta_w = carry
+    delta_w = next_delta(delta_w)
+    solved, good = attempt(delta_w)
+    return solved, good, delta_w
+
+  solved, good, delta_w = jax.lax.while_loop(cond, body, initial)
   return solved, good, delta_w
 
 

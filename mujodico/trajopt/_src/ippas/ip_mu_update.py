@@ -25,15 +25,34 @@ def update(
     mu: jax.Array,
     error_at_mu: Callable[[jax.Array], jax.Array],
     options: Options,
+    *,
+    tiny_step_flag: bool | jax.Array = False,
+    first_update: bool | jax.Array = False,
 ) -> jax.Array:
-  """Reduce mu while its current barrier subproblem is sufficiently solved."""
+  """Reduce μ after solving its barrier problem or detecting repeated tiny steps.
 
-  def reduce_cond(current: jax.Array) -> jax.Array:
+  tiny_step_flag forces at most the first reduction past the usual error test.
+  Further reductions require freshly evaluated errors. Disabled fast decrease
+  permits one reduction per call, except for first_update (IPOPT's first-call
+  exception). A forced update that returns μ unchanged signals stagnation to
+  the caller; the solver reports TINY_STEP in that case.
+  """
+
+  def reduce_cond(carry) -> jax.Array:
+    current, count = carry
+    forced = tiny_step_flag & (count == 0)
+    may_repeat = (count == 0) | options.mu_allow_fast_monotone_decrease | first_update
     return (
-        (error_at_mu(current) < options.barrier_tol_factor * current)
+        ((error_at_mu(current) < options.barrier_tol_factor * current) | forced)
         & (_barrier_candidate(current, options) < current)
+        & may_repeat
     )
 
-  return jax.lax.while_loop(
-      reduce_cond, lambda current: _barrier_candidate(current, options), mu
+  def reduce_body(carry):
+    current, count = carry
+    return _barrier_candidate(current, options), count + 1
+
+  updated, _ = jax.lax.while_loop(
+      reduce_cond, reduce_body, (mu, jp.asarray(0, jp.int32))
   )
+  return updated
