@@ -40,28 +40,32 @@ class IpoptSingleShooting:
     objective = jax.jit(objective).lower(vars_trace, params_trace).compile()
 
     self._eval_time = [0] * 2
+    self._conversion_time = 0.0
 
-    def timed(index):
-      def decorate(fn):
-        def wrapped(*args, **kwargs):
-          tic = time.perf_counter()
-          out = fn(*args, **kwargs)
-          self._eval_time[index] += time.perf_counter() - tic
-          return out
-        return wrapped
-      return decorate
+    def evaluate(index, fn, vars, params):
+      tic = time.perf_counter()
+      vars = jp.asarray(vars, dtype=vars_trace.dtype)
+      jax.block_until_ready(vars)
+      self._conversion_time += time.perf_counter() - tic
+
+      tic = time.perf_counter()
+      out = jax.block_until_ready(fn(vars, params))
+      self._eval_time[index] += time.perf_counter() - tic
+
+      tic = time.perf_counter()
+      out = float(out) if index == 0 else np.asarray(out)
+      self._conversion_time += time.perf_counter() - tic
+      return out
 
     class NLP:
       def __init__(self, params):
         self.params = params
 
-      @timed(index=0)
       def objective(self, vars):
-        return float(objective(jp.asarray(vars), self.params))
+        return evaluate(0, objective, vars, self.params)
 
-      @timed(index=1)
       def gradient(self, vars):
-        return np.asarray(objective_grad(jp.asarray(vars), self.params))
+        return evaluate(1, objective_grad, vars, self.params)
 
     self._NLP = NLP
     self.update(task)
@@ -99,25 +103,29 @@ class IpoptSingleShooting:
     N, nu = self.transcription.N, self.transcription.nu
     assert us_init.shape == (N, nu)
 
-    vars_init = us_init.ravel()
+    vars_init = np.asarray(us_init).ravel()
 
     self.problem.add_option('max_iter', iterations)
     if not verbose:
       self.problem.add_option('print_level', 0)
 
     self._eval_time = [0] * 2
+    self._conversion_time = 0.0
     tic = time.perf_counter()
 
     us_opt, info = self.problem.solve(vars_init)
 
     total_time = time.perf_counter() - tic
+    solve_time = total_time - self._conversion_time
 
     print(f'''
 Method: {self.__class__.__name__}
+  solve time: {solve_time:.6f} sec
   total time: {total_time:.6f} sec
     dynamics time: {self._eval_time[0]:.6f} sec / {self._eval_time[0]/total_time*100:.2f}%
     gradient time: {self._eval_time[1]:.6f} sec / {self._eval_time[1]/total_time*100:.2f}%
-    ipopt time:    {total_time-sum(self._eval_time):.6f} sec / {(1-sum(self._eval_time)/total_time)*100:.2f}%
+    conversion time: {self._conversion_time:.6f} sec / {self._conversion_time/total_time*100:.2f}%
+    ipopt time:    {solve_time-sum(self._eval_time):.6f} sec / {(solve_time-sum(self._eval_time))/total_time*100:.2f}%
 ''')
 
     us_opt = jp.array(us_opt).reshape(N, nu)
@@ -129,4 +137,5 @@ Method: {self.__class__.__name__}
     return {
         'us': us_opt,
         'xs': xs_rollout,
+        'solve_time': solve_time,
     }

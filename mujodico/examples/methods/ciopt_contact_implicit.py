@@ -85,12 +85,14 @@ class CIOptTrajOpt(CCOptTrajOpt):
 
     if method == self.Method.IMPACT:
       solver = jl.CIOpt.ImpactSolver(mpcc, **kwargs)
+      nlp.reset_stats()
       tic = time.perf_counter()
       stats = getattr(jl.CIOpt, 'solve!')(solver)
 
     total_time = time.perf_counter() - tic
     info = {'total_time': total_time}
     info.update(nlp.stats)
+    info['solve_time'] = total_time - info['conversion_time']
     for name in ['objective', 'status', 'iter']:
       try:
         info[name] = getattr(stats, name)
@@ -166,6 +168,7 @@ class _CioptContactImplicit(ABC):
     print(
         f'Method: {self.__class__.__name__}\n'
         f'  status: {info['status']}\n'
+        f'  solve time: {info["solve_time"]:.6f} sec\n'
         f'  total time: {total_time:.6f} sec\n'
         + '\n'.join([
             f'    {name} time: {time:.6f} sec / {time/total_time*100:.2f}%'
@@ -177,7 +180,7 @@ class _CioptContactImplicit(ABC):
         'xs': xs_opt,
         'us': ws_opt[:, :nu],
         'cfs': ws_opt[:, nu:],
-        'info': info,
+        'solve_time': info['solve_time'],
     }
 
   @abstractmethod

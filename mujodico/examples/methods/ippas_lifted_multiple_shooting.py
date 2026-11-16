@@ -46,20 +46,29 @@ class IppasLiftedMultipleShooting:
     cfs = traj_init.get('cfs', np.zeros((trans.N, trans.nw - nu)))
     ws = jp.concatenate((us, cfs), axis=1)
 
+    args = jax.device_put((trans.params, xs, ws))
     key = (iterations,)
     if key not in self._solver_cache:
-      self._solver_cache[key] = jax.jit(
-          lambda p, x, w: self.solver.solve(p, x, w, max_iter=iterations)
+      compiled = (
+          jax.jit(
+              lambda p, x, w: self.solver.solve(p, x, w, max_iter=iterations)
+          )
+          .lower(*args)
+          .compile()
       )
+      # Exclude compilation and first-use setup from the measured solve.
+      jax.block_until_ready(compiled(*args))
+      self._solver_cache[key] = compiled
 
+    jax.block_until_ready(args)
     started = time.perf_counter()
-    xs, ws, info = self._solver_cache[key](trans.params, xs, ws)
-    jax.block_until_ready((xs, ws, info))
+    xs, ws, info = jax.block_until_ready(self._solver_cache[key](*args))
+    solve_time = time.perf_counter() - started
 
     if verbose:
       print(
           f'Method: {self.__class__.__name__}\n'
-          f'  total time: {time.perf_counter() - started:.6f} sec\n'
+          f'  solve time: {solve_time:.6f} sec\n'
           f'  solver status: {int(info["status"])}\n'
           f'  iterations: {int(info["iter_count"])}\n'
       )
@@ -67,4 +76,5 @@ class IppasLiftedMultipleShooting:
         'xs': np.asarray(xs),
         'us': np.asarray(ws[:, :nu]),
         'cfs': np.asarray(ws[:, nu:]),
+        'solve_time': solve_time,
     }

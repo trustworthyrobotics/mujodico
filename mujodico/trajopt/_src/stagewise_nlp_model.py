@@ -220,13 +220,14 @@ class StagewiseNLPModel(AbstractNLPModel):
 
   @property
   def stats(self):
-    r = {
+    return {
         'callback_time': self._callback_time,
         'conversion_time': self._conversion_time,
     }
+
+  def reset_stats(self):
     self._callback_time = 0.0
     self._conversion_time = 0.0
-    return r
 
   @staticmethod
   def _get_params_signature(params: Params) -> tuple:

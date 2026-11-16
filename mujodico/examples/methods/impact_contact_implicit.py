@@ -164,5 +164,5 @@ class ImpactContactImplicit:
         'xs': xs_opt,
         'us': ws_opt[:, :nu],
         'cfs': ws_opt[:, nu:],
-        'info': solution,
+        'solve_time': solution.solve_time,
     }

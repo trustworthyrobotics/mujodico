@@ -67,6 +67,7 @@ class _CcoptContactImplicit:
     print(
         f'Method: {self.__class__.__name__}\n'
         f'  status: {info['status']}\n'
+        f'  solve time: {info["solve_time"]:.6f} sec\n'
         f'  total time: {total_time:.6f} sec\n'
         + '\n'.join([
             f'    {name} time: {time:.6f} sec / {time/total_time*100:.2f}%'
@@ -78,7 +79,7 @@ class _CcoptContactImplicit:
         'xs': xs_opt,
         'us': ws_opt[:, :nu],
         'cfs': ws_opt[:, nu:],
-        'info': info,
+        'solve_time': info['solve_time'],
     }
 
 

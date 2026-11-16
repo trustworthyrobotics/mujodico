@@ -86,10 +86,10 @@ class FatropTrajOpt:
       **options,
   ) -> tuple[np.ndarray, np.ndarray, dict]:
     self._problem.prepare(xs_init, us_init, params)
-    self._problem.reset_stats()
 
     solver = self._cyfatrop.Solver(self._problem, options=options)
 
+    self._problem.reset_stats()
     tic = time.perf_counter()
     result = solver.solve()
     total_time = time.perf_counter() - tic
@@ -102,6 +102,7 @@ class FatropTrajOpt:
         total_time=total_time,
         **self._problem.stats,
     )
+    info['solve_time'] = total_time - info['conversion_time']
     return np.asarray(result.x), np.asarray(result.u), info
 
 
