@@ -30,7 +30,7 @@ class IppasLiftedMultipleShooting:
         ),
         x_bounds=trans.x_bounds,
         u_bounds=trans.w_bounds,
-        quaternion_positions=task.quaternion_w_idxs,
+        quaternion_addrs=task.quaternion_addrs,
         params_trace=trans.params,
     )
     self._solver_cache = {}

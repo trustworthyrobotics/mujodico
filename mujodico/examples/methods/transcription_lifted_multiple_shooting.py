@@ -18,12 +18,12 @@ class LiftedMultipleShootingTranscription:
     def stage_cost(x, w, params):
       u = w[:task.nu]
       return (
-          util.state_cost(params.Q, params.x_goal, x, task.quaternion_w_idxs)
+          util.state_cost(params.Q, params.x_goal, x, task.quaternion_addrs)
           + util.control_cost(params.R, params.u_ref, u)
       )
 
     def terminal_cost(x, params):
-      return util.state_cost(params.Qf, params.x_goal, x, task.quaternion_w_idxs)
+      return util.state_cost(params.Qf, params.x_goal, x, task.quaternion_addrs)
 
     x_bounds = task.x_bounds
 

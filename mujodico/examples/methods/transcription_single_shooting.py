@@ -30,12 +30,12 @@ class SingleShootingTranscription:
 
       stage_cost = jax.vmap(
           lambda x, u: (
-            util.state_cost(params.Q, params.x_goal, x, task.quaternion_w_idxs)
+            util.state_cost(params.Q, params.x_goal, x, task.quaternion_addrs)
             + util.control_cost(params.R, params.u_ref, u)
           )
       )(xs[:-1], us)
 
-      terminal_cost = util.state_cost(params.Qf, params.x_goal, xs[-1], task.quaternion_w_idxs)
+      terminal_cost = util.state_cost(params.Qf, params.x_goal, xs[-1], task.quaternion_addrs)
 
       return jp.sum(stage_cost) + terminal_cost
 

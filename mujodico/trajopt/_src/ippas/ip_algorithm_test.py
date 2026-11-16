@@ -137,7 +137,7 @@ class IpAlgorithmTest(absltest.TestCase):
         ),
         stage_cost=lambda x, u, k, p: 0.5 * jp.sum(u * u),
         terminal_cost=lambda x, p: 5 * jp.sum((manifold.quat_log(x) - p) ** 2),
-        quaternion_positions=(0,),
+        quaternion_addrs=(0,),
         full_dynamics_jacobian=True,
     )
     xs = jp.tile(jp.array([1.0, 0.0, 0.0, 0.0]), (3, 1))

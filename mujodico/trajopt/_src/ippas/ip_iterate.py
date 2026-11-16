@@ -134,14 +134,14 @@ def metrics(
 def valid(
     it: Iterate,
     bounds: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
-    quaternion_positions: tuple[int, ...],
+    quaternion_addrs: tuple[int, ...],
 ) -> jax.Array:
   """Return a scalar JAX boolean checking the iterate's numerical domain.
 
   Require every iterate array to be finite. For stage and terminal slacks,
   require s > lower and s < upper on finite-bound sides. Bound multipliers
   must be strictly positive on finite sides and exactly zero on unbounded
-  sides. quaternion_positions gives the start index of each four-component
+  sides. quaternion_addrs gives the start index of each four-component
   quaternion block q in it.x. At every state, require |‖q‖₂² − 1| ≤ 10⁻⁶;
   an empty tuple skips quaternion checks.
   """
@@ -155,7 +155,7 @@ def valid(
     valid &= jp.all(jp.where(jp.isfinite(l), z_l > 0, z_l == 0))
     valid &= jp.all(jp.where(jp.isfinite(u), z_u > 0, z_u == 0))
 
-  for i in quaternion_positions:
+  for i in quaternion_addrs:
     valid &= jp.all(jp.abs(jp.sum(it.x[:, i : i + 4] ** 2, axis=1) - 1) <= 1e-6)
 
   return valid

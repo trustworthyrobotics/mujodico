@@ -22,12 +22,12 @@ def _make_stage(trans, task):
   Q = _cost_factor(task.Q)
   Qf = _cost_factor(task.Qf)
   R = _cost_factor(task.R)
-  quaternion_w_idxs = task.quaternion_w_idxs
+  quaternion_addrs = task.quaternion_addrs
 
   def state_residual(x, goal, factor, weight):
     error = x - goal
     rotations = []
-    for i in quaternion_w_idxs:
+    for i in quaternion_addrs:
       error = error.at[i : i + 4].set(0.0)
       q = mjx._src.math.normalize(x[i : i + 4])
       q_goal = mjx._src.math.normalize(goal[i : i + 4])
@@ -57,7 +57,7 @@ def _make_stage(trans, task):
         )
     )
     time_step = property(lambda self: float(task.model.opt.timestep))
-    cost_is_linear = property(lambda self: not quaternion_w_idxs)
+    cost_is_linear = property(lambda self: not quaternion_addrs)
 
     def step(self, x, w, p):
       return trans.dynamics(x, w)

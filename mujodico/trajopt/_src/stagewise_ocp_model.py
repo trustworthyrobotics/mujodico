@@ -41,7 +41,7 @@ class StagewiseOcpModel:
       terminal_inequality_bounds: Bounds | None = None,
       x_bounds: Bounds | None = None,
       u_bounds: Bounds | None = None,
-      quaternion_positions: tuple[int, ...] = (),
+      quaternion_addrs: tuple[int, ...] = (),
       gauss_newton: bool = True,
       full_dynamics_jacobian: bool = False,
       params_trace: Params | None = None,
@@ -59,21 +59,21 @@ class StagewiseOcpModel:
         or isinstance(i, bool)
         or i < 0
         or i + 4 > nx
-        for i in quaternion_positions
+        for i in quaternion_addrs
     ):
       raise ValueError(
-          'quaternion_positions must contain valid quaternion start indices.'
+          'quaternion_addrs must contain valid quaternion start indices.'
       )
 
-    quaternion_positions = tuple(sorted(int(i) for i in quaternion_positions))
-    if any(b < a + 4 for a, b in zip(quaternion_positions, quaternion_positions[1:])):
+    quaternion_addrs = tuple(sorted(int(i) for i in quaternion_addrs))
+    if any(b < a + 4 for a, b in zip(quaternion_addrs, quaternion_addrs[1:])):
       raise ValueError(
-          'quaternion_positions must not contain duplicate or overlapping blocks.'
+          'quaternion_addrs must not contain duplicate or overlapping blocks.'
       )
 
     self.N, self.nx, self.nu = int(N), int(nx), int(nu)
-    self.nx_tangent = self.nx - len(quaternion_positions)
-    self.quaternion_positions = quaternion_positions
+    self.nx_tangent = self.nx - len(quaternion_addrs)
+    self.quaternion_addrs = quaternion_addrs
 
     self._x_bounds = self._bounds(x_bounds, nx, 'x_bounds')
     self._u_bounds = self._bounds(u_bounds, nu, 'u_bounds')
@@ -157,7 +157,7 @@ class StagewiseOcpModel:
     N, nx, nu, tx = self.N, self.nx, self.nu, self.nx_tangent
 
     x, u, k = jp.zeros(nx), jp.zeros(nu), jp.array(0)
-    for i in self.quaternion_positions:
+    for i in self.quaternion_addrs:
       x = x.at[i].set(1.0)
 
     def stage_derivative(fn, differentiate):
@@ -338,7 +338,7 @@ class StagewiseOcpModel:
             jp.zeros(tx, dtype=xnext.dtype),
         )
         ab = jp.concatenate([jx, ju], axis=1)
-        for count, i in enumerate(self.quaternion_positions):
+        for count, i in enumerate(self.quaternion_addrs):
           rows = slice(i - count, i - count + 3)
           ab = ab.at[rows].set(-jp.linalg.solve(jnext[rows, rows], ab[rows]))
         return ab[:, :tx], ab[:, tx:]
@@ -581,7 +581,7 @@ class StagewiseOcpModel:
       )
 
     blocks, previous = [], 0
-    for count, i in enumerate(self.quaternion_positions):
+    for count, i in enumerate(self.quaternion_addrs):
       blocks.append(x[previous:i] + alpha * dx[previous - count : i - count])
       blocks.append(
           manifold.quat_multiply(
@@ -590,12 +590,12 @@ class StagewiseOcpModel:
           )
       )
       previous = i + 4
-    blocks.append(x[previous:] + alpha * dx[previous-len(self.quaternion_positions):])
+    blocks.append(x[previous:] + alpha * dx[previous-len(self.quaternion_addrs):])
     return jp.concatenate(blocks)
 
   def _state_difference(self, xnext_pred, xnext):
     blocks, previous = [], 0
-    for i in self.quaternion_positions:
+    for i in self.quaternion_addrs:
       blocks.append(xnext_pred[previous:i] - xnext[previous:i])
       blocks.append(
           manifold.quat_log(

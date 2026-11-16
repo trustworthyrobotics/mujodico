@@ -107,7 +107,7 @@ class Task:
     mask = np.diag(self.Q) > 0
     xs[:, ~mask] = self.x_0[~mask]
 
-    for i in self.quaternion_w_idxs:
+    for i in self.quaternion_addrs:
       if np.any(mask[i : i + 4]):
         # SciPy uses [x, y, z, w]; interpolate the complete quaternion block.
         endpoints = np.stack([self.x_0[i : i + 4], self.x_goal[i : i + 4]])
@@ -126,7 +126,7 @@ class Task:
     return np.tile(self.u_ref, (self.horizon, 1))
 
   @property
-  def quaternion_w_idxs(self) -> tuple[int, ...]:
+  def quaternion_addrs(self) -> tuple[int, ...]:
     idxs = []
     for j in range(self.model.njnt):
       typ = self.model.jnt_type[j]
@@ -140,13 +140,13 @@ class Task:
   def print_summary(self):
     x_lb, x_ub = self.x_bounds
     u_lb, u_ub = self.u_bounds
-    qw_idxs = self.quaternion_w_idxs
+    qw_idxs = self.quaternion_addrs
     print(f"""
 Task: {self.__class__.__name__}
   horizon = {self.horizon}
   nx = {self.nx} (nq={self.model.nq}, nv={self.model.nv}, na={self.model.na})
   nu = {self.nu}
-  quaternion_w_idxs={qw_idxs} ({len(qw_idxs) if qw_idxs else 'no'} quaternion{'s' if len(qw_idxs) > 1 else ''} in state)
+  quaternion_addrs={qw_idxs} ({len(qw_idxs) if qw_idxs else 'no'} quaternion{'s' if len(qw_idxs) > 1 else ''} in state)
   x_0 = {self.x_0}
   x_goal = {self.x_goal}
   diag(Q) = {np.diag(self.Q)}

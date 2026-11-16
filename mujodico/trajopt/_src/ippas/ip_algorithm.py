@@ -134,7 +134,7 @@ class Solver:
     zero = jp.asarray(0, jp.int32)
     status = check_convergence(m, it, system, data, metrics, zero, zero, bounds, o)
     status = jp.where(
-        ip_iterate.valid(it, bounds, m.quaternion_positions),
+        ip_iterate.valid(it, bounds, m.quaternion_addrs),
         status,
         Status.INVALID_INITIAL_GUESS,
     ).astype(jp.int32)
@@ -319,7 +319,7 @@ def check_convergence(
   )
   status = jp.where((metrics.error <= o.tol) & feasible, Status.SUCCESS, status)
   status = jp.where(
-      ip_iterate.valid(it, bounds, model.quaternion_positions)
+      ip_iterate.valid(it, bounds, model.quaternion_addrs)
       & all_finite((
           system.A,
           system.B,
