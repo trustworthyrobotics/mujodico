@@ -97,7 +97,7 @@ class IpSearchDirTest(absltest.TestCase):
     model, guess = point_mass_model()
     # Remove optional one-sided barrier damping when checking original-NLP
     # stationarity, as in the native test's zero dual-infeasibility assertions.
-    options = IppasOptions(kappa_d=0.0, initialize_duals=False)
+    options = IppasOptions(kappa_d=0.0)
     bounds = ip_initializer.get_bounds(model, options)
     it = ip_initializer.initialize(model, None, guess, bounds, options)
     system, _ = pd.evaluate(model, it, None, jp.array(1.0), bounds, options)

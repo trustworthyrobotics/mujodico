@@ -1,5 +1,3 @@
-"""Compiled solves checked against analytical solutions and independent NLPs."""
-
 from dataclasses import replace
 
 from absl.testing import absltest
@@ -194,7 +192,7 @@ class IpAlgorithmTest(absltest.TestCase):
   def test_dual_shift_failure_preserves_iterate(self):
     solver = IppasSolver(
         simple_model(stage_equality_constraint=lambda x, u, k, p: x),
-        IppasOptions(kappa_c=1e4, max_regularization=1, max_ls=1, max_soc=0),
+        IppasOptions(kappa_c=1e4, max_soc=0),
     )
     guess = IppasInitialGuess(jp.zeros((4, 1)), jp.zeros((3, 1)))
     result = jax.jit(solver.solve)(jp.array([0.0, 2.0]), guess)
@@ -252,11 +250,11 @@ class IpAlgorithmTest(absltest.TestCase):
     m = simple_model(
         N=1,
         stage_cost=lambda x, u, k, p: jp.where(
-            u[0] < 0.01, (u[0] - 1) ** 2, jp.nan
+            u[0] == 0.0, (u[0] - 1) ** 2, jp.nan
         ),
         terminal_cost=lambda x, p: jp.array(0.0),
     )
-    s = IppasSolver(m, IppasOptions(max_ls=1, max_soc=0))
+    s = IppasSolver(m, IppasOptions(max_soc=0))
     result = jax.jit(s.solve)(
         jp.array([0.0, 0.0]),
         IppasInitialGuess(jp.zeros((2, 1)), jp.zeros((1, 1))),

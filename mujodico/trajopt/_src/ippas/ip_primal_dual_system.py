@@ -752,7 +752,7 @@ def system_defect(p: IpPrimalDualSystem) -> dict[str, jax.Array]:
 
 def iterative_refinement_solve(
     system: IpPrimalDualSystem,
-    linear_tol: float,
+    linear_ref_tol: float,
     max_refinement: int,
 ) -> tuple[IpPrimalDualSystem, jax.Array]:
   """Solve and refine a Newton system, returning (system, accurate).
@@ -762,13 +762,13 @@ def iterative_refinement_solve(
   Solve correction equations using the full Newton defects as RHS, reusing
   those factors and preserving the original RHS and regularization.
   Stop after max_refinement corrections or when the largest absolute defect
-  is ≤ linear_tol × (1 + ‖RHS‖∞). The returned flag reports this criterion.
+  is ≤ linear_ref_tol × (1 + ‖RHS‖∞). The returned flag reports this criterion.
   """
   if system._cache is None or any(getattr(system, name) is None for name in _STEPS):
     system = solve(system)
 
   defect = system_defect(system)
-  threshold = linear_tol * (1 + max_abs(*(getattr(system, name) for name in defect)))
+  threshold = linear_ref_tol * (1 + max_abs(*(getattr(system, name) for name in defect)))
 
   def cond(carry) -> jax.Array:
     _, residual, count = carry
