@@ -3,8 +3,9 @@ import csv
 from pathlib import Path
 from absl import app
 from absl import flags
-from mujodico.examples.methods import get_method_names, parse_method_name, util
+from mujodico.examples.methods import get_method_names, parse_method_name
 from mujodico.examples.tasks import get_task_names, parse_task_name
+from mujodico.examples.tasks.task import state_cost
 from mujodico.examples.tasks.task_playback import TaskPlayback
 from mujodico.examples.visualizer import Visualizer
 
@@ -74,7 +75,7 @@ def _main(argv) -> None:
 
       solve_time = traj['solve_time']
 
-      goal_error = util.state_cost(
+      goal_error = state_cost(
           task.Q, task.x_goal, traj['xs'][-1], task.quaternion_addrs
       )
 

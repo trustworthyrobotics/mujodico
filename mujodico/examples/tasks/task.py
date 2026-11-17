@@ -1,7 +1,10 @@
 import dataclasses
+import jax
+import jax.numpy as jp
 import mujoco
 from mujodico.examples.tasks.task_playback import TaskPlayback
 from mujodico.mjx import ContactApproxType
+from mujodico.trajopt._src import manifold
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
@@ -24,6 +27,10 @@ class Task:
     return self.model.nq + self.model.nv + self.model.na
 
   @property
+  def ndx(self) -> int:
+    return 2 * self.model.nv + self.model.na
+
+  @property
   def nu(self) -> int:
     return self.model.nu
 
@@ -31,8 +38,8 @@ class Task:
     nx, nu = self.nx, self.nu
     assert self.x_0.shape == (nx,)
     assert self.x_goal.shape == (nx,)
-    assert self.Q.shape == (nx, nx)
-    assert self.Qf.shape == (nx, nx)
+    assert self.Q.shape == (self.ndx, self.ndx)
+    assert self.Qf.shape == (self.ndx, self.ndx)
     assert self.u_ref.shape == (nu,)
     assert self.R.shape == (nu, nu)
 
@@ -105,6 +112,11 @@ class Task:
     xs = np.linspace(self.x_0, self.x_goal, self.horizon + 1)
 
     mask = np.diag(self.Q) > 0
+    for i in self.quaternion_addrs:
+      # Expand each three-dimensional tangent mask to a full quaternion block.
+      mask = np.concatenate(
+          [mask[:i], np.full(4, np.any(mask[i : i + 3])), mask[i + 3 :]]
+      )
     xs[:, ~mask] = self.x_0[~mask]
 
     for i in self.quaternion_addrs:
@@ -145,6 +157,7 @@ class Task:
 Task: {self.__class__.__name__}
   horizon = {self.horizon}
   nx = {self.nx} (nq={self.model.nq}, nv={self.model.nv}, na={self.model.na})
+  ndx = {self.ndx}
   nu = {self.nu}
   quaternion_addrs={qw_idxs} ({len(qw_idxs) if qw_idxs else 'no'} quaternion{'s' if len(qw_idxs) > 1 else ''} in state)
   x_0 = {self.x_0}
@@ -164,3 +177,65 @@ Task: {self.__class__.__name__}
     model = self.model
     visualizer.update_scene(traj['xs'][k, :model.nq])
     visualizer.set_text(str(traj.get('info', '')))
+
+
+def quat_error(
+    q_target: jax.Array | np.ndarray,
+    q: jax.Array | np.ndarray,
+) -> jax.Array:
+  """Return Log(q_target**-1 * q), a shortest rotation vector in radians.
+
+  Quaternions use scalar-first [w, x, y, z] order. Inputs have shape (..., 4)
+  with broadcastable batch dimensions; the result has shape (..., 3).
+  """
+  q_target, q = jp.broadcast_arrays(jp.asarray(q_target), jp.asarray(q))
+  assert q.shape[-1] == 4, f'Expected quaternion shape (..., 4), got {q.shape}.'
+
+  def error(target, current):
+    return manifold.quat_log(
+        manifold.quat_multiply(manifold.quat_inverse(target), current)
+    )
+
+  if q.ndim == 1:
+    return error(q_target, q)
+  return jax.vmap(error)(q_target.reshape(-1, 4), q.reshape(-1, 4)).reshape(
+      q.shape[:-1] + (3,)
+  )
+
+
+def state_error(
+    x_goal: jax.Array | np.ndarray,
+    x: jax.Array | np.ndarray,
+    quaternion_addrs: tuple[int, ...],
+) -> jax.Array:
+  """Return x - x_goal with each quaternion block replaced by quat_error.
+
+  The tangent error retains state order, with three rotation coordinates per
+  quaternion followed by the remaining position, velocity and activation errors.
+  """
+  error = jp.asarray(x) - jp.asarray(x_goal)
+  parts = []
+  start = 0
+  for i in sorted(quaternion_addrs):
+    parts.extend((error[start:i], quat_error(x_goal[i : i + 4], x[i : i + 4])))
+    start = i + 4
+  parts.append(error[start:])
+  return jp.concatenate(parts)
+
+
+def state_cost(
+    Q: jax.Array | np.ndarray,
+    x_goal: jax.Array | np.ndarray,
+    x: jax.Array | np.ndarray,
+    quaternion_addrs: tuple[int, ...],
+):
+  error = state_error(x_goal, x, quaternion_addrs)
+  return error.T @ Q @ error
+
+
+def control_cost(
+    R: jax.Array | np.ndarray,
+    u_ref: jax.Array | np.ndarray,
+    u: jax.Array | np.ndarray,
+):
+  return (u - u_ref).T @ R @ (u - u_ref)

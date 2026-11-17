@@ -3,6 +3,7 @@ import jax.numpy as jp
 from mujodico import trajopt
 from mujodico.examples.methods import util
 from mujodico.examples.tasks import Task
+from mujodico.examples.tasks.task import control_cost, state_cost
 
 
 class SingleShootingTranscription:
@@ -30,12 +31,14 @@ class SingleShootingTranscription:
 
       stage_cost = jax.vmap(
           lambda x, u: (
-            util.state_cost(params.Q, params.x_goal, x, task.quaternion_addrs)
-            + util.control_cost(params.R, params.u_ref, u)
+              state_cost(params.Q, params.x_goal, x, task.quaternion_addrs)
+              + control_cost(params.R, params.u_ref, u)
           )
       )(xs[:-1], us)
 
-      terminal_cost = util.state_cost(params.Qf, params.x_goal, xs[-1], task.quaternion_addrs)
+      terminal_cost = state_cost(
+          params.Qf, params.x_goal, xs[-1], task.quaternion_addrs
+      )
 
       return jp.sum(stage_cost) + terminal_cost
 

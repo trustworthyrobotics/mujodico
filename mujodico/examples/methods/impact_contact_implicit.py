@@ -1,8 +1,8 @@
 import jax
 import jax.numpy as jp
-from mujodico import mjx
 from mujodico.examples import methods
 from mujodico.examples.tasks import Task
+from mujodico.examples.tasks.task import state_error
 import numpy as np
 
 
@@ -24,18 +24,8 @@ def _make_stage(trans, task):
   R = _cost_factor(task.R)
   quaternion_addrs = task.quaternion_addrs
 
-  def state_residual(x, goal, factor, weight):
-    error = x - goal
-    rotations = []
-    for i in quaternion_addrs:
-      error = error.at[i : i + 4].set(0.0)
-      q = mjx._src.math.normalize(x[i : i + 4])
-      q_goal = mjx._src.math.normalize(goal[i : i + 4])
-      scale = jp.sqrt(jp.mean(jp.diag(weight[i : i + 4, i : i + 4])))
-      # Squared norm is weight * (1 - (q.T @ q_goal)**2), as in
-      # util.state_cost, with finite derivatives even at the goal.
-      rotations.append(scale * (q - jp.dot(q, q_goal) * q_goal))
-    return jp.concatenate([factor @ error, *rotations])
+  def state_residual(x, goal, factor):
+    return factor @ state_error(goal, x, quaternion_addrs)
 
   x_lb, x_ub = (jp.asarray(bound) for bound in trans.x_bounds)
   w_lb, w_ub = (jp.asarray(bound) for bound in trans.w_bounds)
@@ -82,10 +72,10 @@ def _make_stage(trans, task):
     def cost_residual(self, X, W, p):
       params = trans.params
       states = jax.vmap(
-          lambda x: state_residual(x, params.x_goal, Q, params.Q)
+          lambda x: state_residual(x, params.x_goal, Q)
       )(X[:-1])
       controls = (W[:, : task.nu] - params.u_ref) @ R.T
-      terminal = state_residual(X[-1], params.x_goal, Qf, params.Qf)
+      terminal = state_residual(X[-1], params.x_goal, Qf)
       return jp.concatenate(
           (states.reshape(-1), controls.reshape(-1), terminal)
       )

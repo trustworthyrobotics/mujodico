@@ -3,7 +3,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from mujodico.examples.tasks import util_uplot
-from mujodico.examples.tasks.task import Task
+from mujodico.examples.tasks.task import Task, quat_error
 from mujodico.examples.tasks.task_playback import TaskPlayback
 
 
@@ -100,7 +100,7 @@ class RocketLanding(Task):
     goal = np.r_[model.qpos0, np.zeros(model.nv)]
     Q = np.diag(
         [5.0, 5.0, 10.0]
-        + [5.0] * 4
+        + [5.0] * 3
         + [0.05] * 2
         + [1.0] * 3
         + [0.5] * 3
@@ -133,10 +133,8 @@ class RocketLanding(Task):
 
     xs = np.asarray(traj['xs'])
     ts = np.arange(len(xs)) * self.model.opt.timestep
-    rotations = Rotation.from_quat(np.roll(xs[:, 3:7], -1, axis=1))
-    goal_rotation = Rotation.from_quat(np.roll(self.x_goal[3:7], -1))
     attitude_error = np.rad2deg(
-        np.linalg.norm((goal_rotation.inv() * rotations).as_rotvec(), axis=1)
+        np.linalg.norm(quat_error(self.x_goal[3:7], xs[:, 3:7]), axis=1)
     )
     values = np.column_stack(
         [xs[:, :3], xs[:, self.model.nq + 2], attitude_error]

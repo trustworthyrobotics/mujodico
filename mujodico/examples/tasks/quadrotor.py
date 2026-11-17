@@ -3,7 +3,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from mujodico.examples.tasks import util_uplot
-from mujodico.examples.tasks.task import Task
+from mujodico.examples.tasks.task import Task, quat_error
 from mujodico.examples.tasks.task_playback import TaskPlayback
 
 
@@ -59,7 +59,7 @@ class Quadrotor(Task):
 
     goal = np.r_[0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, np.zeros(6)]
 
-    Q = np.diag([10.0, 10.0, 20.0] + [2.0] * 4 + [0.5] * 3 + [1.0] * 3)
+    Q = np.diag([10.0, 10.0, 20.0] + [2.0] * 3 + [0.5] * 3 + [1.0] * 3)
     hover_thrust = model.body_mass.sum() * abs(model.opt.gravity[2]) / model.nu
 
     super().__init__(
@@ -80,10 +80,8 @@ class Quadrotor(Task):
     xs = np.asarray(traj['xs'])
     ts = np.arange(len(xs)) * self.model.opt.timestep
 
-    rotations = Rotation.from_quat(np.roll(xs[:, 3:7], -1, axis=1))
-    goal_rotation = Rotation.from_quat(np.roll(self.x_goal[3:7], -1))
     attitude_error = np.rad2deg(
-        np.linalg.norm((goal_rotation.inv() * rotations).as_rotvec(), axis=1)
+        np.linalg.norm(quat_error(self.x_goal[3:7], xs[:, 3:7]), axis=1)
     )
 
     values = np.column_stack([xs[:, :3], attitude_error])
