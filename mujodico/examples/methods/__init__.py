@@ -12,10 +12,10 @@ from mujodico.examples.methods.ipopt_single_shooting import IpoptSingleShooting
 from mujodico.examples.methods.ippas_lifted_multiple_shooting import IppasLiftedMultipleShooting
 from mujodico.examples.methods.ippas_multiple_shooting import IppasMultipleShooting
 from mujodico.examples.methods.knitro_lifted_multiple_shooting import KnitroLiftedMultipleShooting
-from mujodico.examples.methods.transcription_contact_implicit import ContactImplicitTranscription
-from mujodico.examples.methods.transcription_lifted_multiple_shooting import LiftedMultipleShootingTranscription
-from mujodico.examples.methods.transcription_multiple_shooting import MultipleShootingTranscription
-from mujodico.examples.methods.transcription_single_shooting import SingleShootingTranscription
+from mujodico.examples.methods.transcriptions import SingleShootingTranscription
+from mujodico.examples.methods.transcriptions import MultipleShootingTranscription
+from mujodico.examples.methods.transcriptions import LiftedMultipleShootingTranscription
+from mujodico.examples.methods.transcriptions import ContactImplicitTranscription
 
 
 __all__ = [
