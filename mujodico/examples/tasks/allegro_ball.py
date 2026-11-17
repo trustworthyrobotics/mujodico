@@ -1,7 +1,7 @@
 from pathlib import Path
 import tempfile
 import mujoco
-from mujodico.examples.tasks.task import Task
+from mujodico.examples.tasks.task import Task, quat_error
 from mujodico.examples.tasks.task_playback import TaskPlayback
 from mujodico.examples.tasks import util_uplot
 import numpy as np
@@ -65,7 +65,7 @@ class AllegroBall(Task):
     x_goal[16:19] += goal_pos
     x_goal[19:23] = np.array([np.cos(goal_angle/2), 0.0, 0.0, np.sin(goal_angle/2)])
 
-    Q = np.diag([0.0] * 16 + [100] * 3 + [0.1] * 4 + [0.0] * 22)
+    Q = np.diag([0.0] * 16 + [100] * 3 + [0.1] * 3 + [0.0] * 22)
     Qf = Q * 40.0
 
     u_ref = x_0[:16]
@@ -93,7 +93,7 @@ class AllegroBall(Task):
         'X Position (m)',
         'Y Position (m)',
         'Z Position (m)',
-        'Quaternion error',
+        'Attitude error (deg)',
     )
     panels = []
     for object_dof, label in enumerate(labels):
@@ -102,7 +102,12 @@ class AllegroBall(Task):
         values = xs[:, dof]
         goal = self.x_goal[dof]
       else:
-        values = 1.0 - (xs[:, dof : dof + 4] @ self.x_goal[dof : dof + 4]) ** 2
+        values = np.rad2deg(
+            np.linalg.norm(
+                quat_error(self.x_goal[dof : dof+4], xs[:, dof : dof+4]),
+                axis=1,
+            )
+        )
         goal = 0.0
       panels.append(
           util_uplot.time_series_panel(
