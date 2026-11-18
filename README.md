@@ -40,7 +40,7 @@ model = mujoco.MjModel.from_xml_string(XML)
 mjx_model = mjx.put_model(
     model,
     contact_approximation='Hunt-Crossley',
-    contact_smoothing=0.0,
+    contact_smoothing=1e-5,
 )
 
 def f(x, u):

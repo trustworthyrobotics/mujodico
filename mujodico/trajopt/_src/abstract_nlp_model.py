@@ -315,8 +315,8 @@ def _to_cyipopt(nlp: AbstractNLPModel):
     logging.getLogger('cyipopt').setLevel(logging.WARNING)
   except ImportError as e:
     raise ImportError(
-        'Optional solver dependency not installed. Install it with:\n\n'
-        '    pip install cyipopt'
+        'Optional solver dependency not installed. Install cyipopt with:\n\n'
+        '    conda install -c conda-forge cyipopt'
     ) from e
 
   if cyipopt.IPOPT_VERSION < (3, 14, 0):
