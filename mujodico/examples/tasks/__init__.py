@@ -5,13 +5,13 @@ from mujodico.examples.tasks.double_cart_pole import DoubleCartPole
 from mujodico.examples.tasks.finger_circular_knob import FingerCircularKnob
 from mujodico.examples.tasks.fingers_sphere_2d import FingersSphere2d
 from mujodico.examples.tasks.push_box_2d import PushBox2d
-from mujodico.examples.tasks.push_circular_knob import PushCircularKnob
-from mujodico.examples.tasks.push_cube_knob import PushCubeKnob
+from mujodico.examples.tasks.push_knob_circular import PushKnobCircular
+from mujodico.examples.tasks.push_knob_cube import PushKnobCube
+from mujodico.examples.tasks.push_knob_sphere import PushKnobSphere
+from mujodico.examples.tasks.push_knob_square import PushKnobSquare
 from mujodico.examples.tasks.push_multisphere_2d import PushMultiSphere2d
 from mujodico.examples.tasks.push_sphere_1d import PushSphere1d
 from mujodico.examples.tasks.push_sphere_2d import PushSphere2d
-from mujodico.examples.tasks.push_sphere_knob import PushSphereKnob
-from mujodico.examples.tasks.push_square_knob import PushSquareKnob
 from mujodico.examples.tasks.quadrotor import Quadrotor
 from mujodico.examples.tasks.rocket_landing import RocketLanding
 from mujodico.examples.tasks.task import Task
@@ -25,13 +25,13 @@ __all__ = [
     'FingerCircularKnob',
     'FingersSphere2d',
     'PushBox2d',
-    'PushCircularKnob',
-    'PushCubeKnob',
+    'PushKnobCircular',
+    'PushKnobCube',
+    'PushKnobSphere',
+    'PushKnobSquare',
     'PushMultiSphere2d',
     'PushSphere1d',
     'PushSphere2d',
-    'PushSphereKnob',
-    'PushSquareKnob',
     'Quadrotor',
     'RocketLanding',
     'Task',
@@ -43,10 +43,10 @@ _TASKS = [
     PushSphere2d,
     PushBox2d,
     PushMultiSphere2d,
-    PushCircularKnob,
-    PushSphereKnob,
-    PushCubeKnob,
-    PushSquareKnob,
+    PushKnobCircular,
+    PushKnobSphere,
+    PushKnobCube,
+    PushKnobSquare,
     DoubleCartPole,
     Quadrotor,
     RocketLanding,

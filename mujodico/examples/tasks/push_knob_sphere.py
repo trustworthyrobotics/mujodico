@@ -7,7 +7,7 @@ from scipy.spatial.transform import Rotation
 
 
 _XML = """
-<mujoco model="push_sphere_knob">
+<mujoco model="push_knob_sphere">
 
   <option timestep="0.02" gravity="0 0 0" />
   <option integrator="implicitfast" />
@@ -59,7 +59,7 @@ _XML = """
 """
 
 
-class PushSphereKnob(Task):
+class PushKnobSphere(Task):
 
   def __init__(self, seed=0):
     model = mujoco.MjModel.from_xml_string(_XML)
@@ -109,4 +109,4 @@ class PushSphereKnob(Task):
 
 
 if __name__ == '__main__':
-  PushSphereKnob().print_summary()
+  PushKnobSphere().print_summary()
