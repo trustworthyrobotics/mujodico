@@ -155,4 +155,5 @@ class ImpactContactImplicit:
         'us': ws_opt[:, :nu],
         'cfs': ws_opt[:, nu:],
         'solve_time': solution.solve_time,
+        'status': str(solution.status_message),
     }

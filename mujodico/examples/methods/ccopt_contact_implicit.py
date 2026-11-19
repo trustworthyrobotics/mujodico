@@ -80,6 +80,7 @@ class _CcoptContactImplicit:
         'us': ws_opt[:, :nu],
         'cfs': ws_opt[:, nu:],
         'solve_time': info['solve_time'],
+        'status': str(info['status']),
     }
 
 

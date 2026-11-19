@@ -138,4 +138,5 @@ Method: {self.__class__.__name__}
         'us': us_opt,
         'xs': xs_rollout,
         'solve_time': solve_time,
+        'status': info['status_msg'].decode(),
     }

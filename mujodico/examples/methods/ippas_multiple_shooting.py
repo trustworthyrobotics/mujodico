@@ -64,16 +64,17 @@ class IppasMultipleShooting:
     xs, us, info = jax.block_until_ready(self._solver_cache[key](*args))
     solve_time = time.perf_counter() - started
 
+    status = trajopt.IppasStatus(int(info['status'])).name
     if verbose:
-      status = trajopt.IppasStatus(info['status'])
       print(
           f'Method: {self.__class__.__name__}\n'
           f'  solve time: {solve_time:.6f} sec\n'
-          f'  solver status: {status.name}\n'
+          f'  solver status: {status}\n'
           f'  iterations: {int(info["iter_count"])}\n'
       )
     return {
         'xs': np.asarray(xs),
         'us': np.asarray(us),
         'solve_time': solve_time,
+        'status': status,
     }

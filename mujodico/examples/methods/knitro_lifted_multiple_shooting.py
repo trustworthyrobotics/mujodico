@@ -101,4 +101,5 @@ class KnitroLiftedMultipleShooting:
         'cfs': ws_opt[:, nu:],
         'history': self._history,
         'solve_time': info['solve_time'],
+        'status': str(info['status']),
     }
