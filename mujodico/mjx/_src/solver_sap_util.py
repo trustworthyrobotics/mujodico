@@ -119,7 +119,7 @@ def hunt_crossley_normal_impulse(
   x2 = 1 / d - vn
   eps2 = bounce_speed_tol
 
-  return dt * k * d * reciprocal_approx_relu(x1, eps1) * local_smooth_relu(x2, eps2)
+  return dt * k * d * reciprocal_approx_relu(x1, eps1) * reciprocal_approx_relu(x2, eps2)
 
 
 def hunt_crossley_normal_impulse_grad(
@@ -135,9 +135,9 @@ def hunt_crossley_normal_impulse_grad(
   eps2 = bounce_speed_tol
 
   g1 = reciprocal_approx_relu(x1, eps1)
-  g2 = local_smooth_relu(x2, eps2)
+  g2 = reciprocal_approx_relu(x2, eps2)
 
   dg1_dvn = reciprocal_approx_relu_grad(x1, eps1) * -time_scale
-  dg2_dvn = local_smooth_relu_grad(x2, eps2) * -1
+  dg2_dvn = reciprocal_approx_relu_grad(x2, eps2) * -1
 
   return dt * k * d * (dg1_dvn * g2 + g1 * dg2_dvn)
