@@ -401,10 +401,27 @@ def orthogonals(a: jax.Array) -> Tuple[jax.Array, jax.Array]:
 
 
 def make_frame(a: jax.Array) -> jax.Array:
-  """Makes a right-handed 3D frame given a direction."""
-  a = normalize(a)
-  b, c = orthogonals(a)
-  return jp.array([a, b, c])
+  """Makes a right-handed orthonormal frame with normalized `a` as row 0.
+
+  The frame is smooth for nonzero directions except the negative z-axis.
+  A globally continuous tangent frame on the sphere is impossible (hairy
+  ball theorem, and at that singular direction we choose x and -y as
+  tangent axes. A zero input returns a zero frame.
+  """
+  nonzero = jp.any(a != 0)
+  a = a / jp.sqrt(jp.where(nonzero, jp.dot(a, a), 1.0))
+  x, y, z = a
+
+  # Rotate the +z frame onto `a` via the shortest rotation.  The tangent is
+  # [1 - x*x/(1+z), -x*y/(1+z), -x].  For z < 0, use 1/(1+z) = (1-z)/(x*x+y*y)
+  # to avoid cancellation near the south pole.
+  # Factor the quotient into bounded terms rather than forming 1/(1+z).
+  denom = jp.where(z < 0, x * x + y * y, 1 + z)
+  v = a[:2] / jp.sqrt(jp.where(denom == 0, 1.0, denom))
+  weight = jp.where(z < 0, 1 - z, 1.0)
+  b = jp.array([1 - weight * v[0] ** 2, -weight * v[0] * v[1], -x])
+  c = jp.cross(a, b)
+  return jp.where(nonzero, jp.array([a, b, c]), jp.zeros((3, 3), a.dtype))
 
 
 # Geometry.

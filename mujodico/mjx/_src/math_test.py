@@ -62,6 +62,95 @@ class OrthoganalsTest(parameterized.TestCase):
     self.assertAlmostEqual(np.abs(a.dot(c)), 0, 6)
 
 
+class MakeFrameTest(parameterized.TestCase):
+
+  @parameterized.parameters(False, True)
+  def test_orthonormal(self, x64):
+    directions = np.concatenate([
+        np.random.default_rng(0).normal(size=(30, 3)),
+        np.eye(3),
+        -np.eye(3),
+        [[1e-6, 2e-6, -1.0], [1e-10, -2e-10, -1.0]],
+    ])
+    with jax.enable_x64(x64):
+      dtype = jp.float64 if x64 else jp.float32
+      frames = jax.jit(jax.vmap(math.make_frame))(
+          jp.array(directions, dtype=dtype)
+      )
+      self.assertEqual(frames.dtype, dtype)
+
+    frames = np.asarray(frames)
+    tol = 1e-12 if x64 else 1e-6
+    expected = directions / np.linalg.norm(directions, axis=1, keepdims=True)
+    np.testing.assert_allclose(frames[:, 0], expected, atol=tol, rtol=tol)
+    np.testing.assert_allclose(
+        frames @ frames.transpose(0, 2, 1),
+        np.broadcast_to(np.eye(3), frames.shape),
+        atol=tol,
+        rtol=tol,
+    )
+    np.testing.assert_allclose(np.linalg.det(frames), 1.0, atol=tol)
+
+  @parameterized.parameters(-0.5, 0.0, 0.5, 1.0)
+  def test_derivatives(self, z):
+    with jax.enable_x64(True):
+      a = jp.array([
+          np.sqrt(1 - z * z) * 0.6,
+          np.sqrt(1 - z * z) * 0.8,
+          z,
+      ])
+      jacobian = jax.jit(jax.jacfwd(math.make_frame))
+      derivative = jacobian(a)
+      np.testing.assert_allclose(
+          jax.jit(jax.jacrev(math.make_frame))(a), derivative, atol=1e-12
+      )
+      second = jax.jacfwd(jax.jacfwd(math.make_frame))(a)
+      # Check the full Jacobian and its continuity through both the old axis
+      # switches and the two algebraically equivalent numerical formulas.
+      eps = 1e-5
+      for axis in np.eye(3):
+        plus, minus = a + eps * axis, a - eps * axis
+        difference = (math.make_frame(plus) - math.make_frame(minus)) / (2 * eps)
+        np.testing.assert_allclose(
+            difference, derivative @ axis, atol=1e-8, rtol=1e-8
+        )
+        np.testing.assert_allclose(
+            jacobian(plus), jacobian(minus), atol=1e-4, rtol=1e-4
+        )
+        np.testing.assert_allclose(
+            (jacobian(plus) - jacobian(minus)) / (2 * eps),
+            second @ axis,
+            atol=1e-8,
+            rtol=1e-8,
+        )
+
+  def test_small_direction(self):
+    a = jp.array([0.3, -0.4, 0.5])
+    np.testing.assert_allclose(
+        math.make_frame(a * 1e-10), math.make_frame(a), atol=1e-6
+    )
+
+  @parameterized.parameters(
+      dict(direction=[0.0, 0.0, 0.0]),
+      dict(direction=[0.0, 0.0, -1.0]),
+  )
+  def test_fallback(self, direction):
+    a = jp.array(direction)
+    frame = jax.jit(math.make_frame)(a)
+    expected = (
+        np.zeros((3, 3))
+        if not np.any(direction)
+        else np.array([
+            [0.0, 0.0, -1.0],
+            [1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+        ])
+    )
+    np.testing.assert_array_equal(frame, expected)
+    self.assertTrue(np.isfinite(jax.jacfwd(math.make_frame)(a)).all())
+    self.assertTrue(np.isfinite(jax.jacrev(math.make_frame)(a)).all())
+
+
 def _minimize(fn, sample_fn, lb, ub, tol, max_iter=20, seed=42):
   """Minimize a function using the cross-entropy method."""
   assert lb.shape == ub.shape, "bounds need to have the same shape"
