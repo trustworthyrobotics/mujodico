@@ -7,7 +7,7 @@ import numpy as np
 
 
 _XML = """
-<mujoco model="push_circular_knob">
+<mujoco model="push_knob_square">
 
   <option timestep="0.02"  />
   <option integrator="implicitfast" />
@@ -33,9 +33,8 @@ _XML = """
       <joint name="knob_rotate" type="hinge" damping="0.05" />
 
       <geom name="knob_geom"
-            type="cylinder"
-            size="0.08"
-            fromto="0 0 -0.05 0 0 0.05"
+            type="box"
+            size="0.08 0.08 0.05"
             rgba="0 0 1 1" />
 
       <geom name="angle_indicator"
@@ -58,7 +57,7 @@ _XML = """
 """
 
 
-class PushCircularKnob(Task):
+class PushKnobSquare(Task):
 
   def __init__(self, seed=0):
     model = mujoco.MjModel.from_xml_string(_XML)
@@ -97,6 +96,7 @@ class PushCircularKnob(Task):
 
     xs = traj['xs']
     ts = np.arange(xs.shape[0]) * self.model.opt.timestep
+
     visualizer.set_plot(
         'trajectory',
         util_uplot.UplotFigure((
@@ -132,11 +132,13 @@ class PushCircularKnob(Task):
         r=0.02,
         color='red',
     )
-    util_plotly.add_circle(
+    util_plotly.add_rectangle(
         fig=fig,
         x=0.0,
         y=0.0,
-        r=0.08,
+        theta=xs[k, 2],
+        w=0.16,
+        h=0.16,
         name='Knob',
         color='blue',
     )
@@ -159,4 +161,4 @@ class PushCircularKnob(Task):
 
 
 if __name__ == '__main__':
-  PushCircularKnob().print_summary()
+  PushKnobSquare().print_summary()
