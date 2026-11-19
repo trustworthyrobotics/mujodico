@@ -84,5 +84,6 @@ class IppasTrajOpt:
         "error": result.error,
         "mu": result.mu,
         "warm_start": result.iterate,
+        "intermediates": result.intermediates,
     }
     return result.xs, result.us, info

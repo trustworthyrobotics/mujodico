@@ -54,6 +54,7 @@ class SolveResult:
   complementarity: jax.Array
   error: jax.Array
   mu: jax.Array
+  intermediates: Iterate | None = None
 
   @property
   def xs(self):
@@ -280,9 +281,32 @@ class Solver:
           None,
       )
 
-    final = jax.lax.while_loop(
-        lambda state: state.status == Status.RUNNING, body, state
-    )
+    intermediates = None
+    if o.record_intermediates:
+      intermediates = jax.tree.map(
+          lambda v: jp.zeros(
+              (o.max_iter + 1, *v.shape), dtype=v.dtype
+          ).at[0].set(v),
+          state.iterate,
+      )
+
+      def body_with_history(carry):
+        state, history = carry
+        state = body(state)
+        history = jax.tree.map(
+            lambda h, v: h.at[state.iteration].set(v), history, state.iterate
+        )
+        return state, history
+
+      final, intermediates = jax.lax.while_loop(
+          lambda carry: carry[0].status == Status.RUNNING,
+          body_with_history,
+          (state, intermediates),
+      )
+    else:
+      final = jax.lax.while_loop(
+          lambda state: state.status == Status.RUNNING, body, state
+      )
     mm = final.metrics
 
     return SolveResult(
@@ -295,6 +319,7 @@ class Solver:
         mm.complementarity,
         mm.error,
         final.mu,
+        intermediates,
     )
 
 
