@@ -6,11 +6,17 @@ import jax
 from mujodico.trajopt._src.ippas import IppasInitialGuess
 from mujodico.trajopt._src.ippas import IppasOptions
 from mujodico.trajopt._src.ippas import IppasSolver
+from mujodico.trajopt._src.ippas import IppasStatus
 from mujodico.trajopt._src.stagewise_ocp_model import StagewiseOcpModel
 from mujodico.trajopt._src.types import Bounds
 from mujodico.trajopt._src.types import Params
 from mujodico.trajopt._src.types import StageFunction
 from mujodico.trajopt._src.types import StateFunction
+
+__all__ = [
+    'IppasTrajOpt',
+    'IppasStatus',
+]
 
 
 class IppasTrajOpt:

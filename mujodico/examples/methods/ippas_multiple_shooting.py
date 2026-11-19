@@ -65,10 +65,11 @@ class IppasMultipleShooting:
     solve_time = time.perf_counter() - started
 
     if verbose:
+      status = trajopt.IppasStatus(info['status'])
       print(
           f'Method: {self.__class__.__name__}\n'
           f'  solve time: {solve_time:.6f} sec\n'
-          f'  solver status: {int(info["status"])}\n'
+          f'  solver status: {status.name}\n'
           f'  iterations: {int(info["iter_count"])}\n'
       )
     return {
