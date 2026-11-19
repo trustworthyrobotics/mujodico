@@ -129,6 +129,8 @@ class Options:
 
   # Output: zero is silent, positive prints iterations, > 1 adds Newton details.
   print_level: int = 0
+  # Save the initialized iterate and each subsequent iterate in the result.
+  record_intermediates: bool = False
 
   def __post_init__(self) -> None:
     positive_counts = ('filter_reset_trigger',)

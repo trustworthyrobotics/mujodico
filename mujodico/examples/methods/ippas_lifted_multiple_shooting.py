@@ -51,7 +51,9 @@ class IppasLiftedMultipleShooting:
     if key not in self._solver_cache:
       compiled = (
           jax.jit(
-              lambda p, x, w: self.solver.solve(p, x, w, max_iter=iterations)
+              lambda p, x, w: self.solver.solve(
+                  p, x, w, max_iter=iterations, record_intermediates=True
+              )
           )
           .lower(*args)
           .compile()
@@ -65,6 +67,14 @@ class IppasLiftedMultipleShooting:
     xs, ws, info = jax.block_until_ready(self._solver_cache[key](*args))
     solve_time = time.perf_counter() - started
 
+    count = int(info['iter_count']) + 1
+    xs_history = np.asarray(info['intermediates'].x[:count])
+    ws_history = np.asarray(info['intermediates'].u[:count])
+    history = [
+        {'iter': i, 'xs': x, 'us': w[:, :nu], 'cfs': w[:, nu:]}
+        for i, (x, w) in enumerate(zip(xs_history, ws_history))
+    ]
+
     status = trajopt.IppasStatus(int(info['status'])).name
     if verbose:
       print(
@@ -77,6 +87,7 @@ class IppasLiftedMultipleShooting:
         'xs': np.asarray(xs),
         'us': np.asarray(ws[:, :nu]),
         'cfs': np.asarray(ws[:, nu:]),
+        'history': history,
         'solve_time': solve_time,
         'status': status,
     }
