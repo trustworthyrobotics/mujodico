@@ -82,6 +82,7 @@ class PushBox2d(Task):
         u_ref=u_ref,
         R=R,
         contact_smoothing=contact_smoothing,
+        planar_normal=(0.0, 0.0, 1.0),
     )
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):

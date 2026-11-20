@@ -2,8 +2,10 @@ from dataclasses import dataclass
 from enum import Enum
 import jax
 import jax.numpy as jp
+from jax.typing import ArrayLike
 import mujoco
 from mujodico import mjx
+from mujodico.mjx._src import math
 from mujodico.trajopt._src.types import Bounds, LocalComplementarityConstraint
 import numpy as np
 
@@ -17,10 +19,63 @@ def _put_optimization_model(mjmodel: mujoco.MjModel, **kwargs) -> mjx.Model:
   })
 
 
+def _make_transcription_data(
+    model: mjx.Model,
+    planar_normal: ArrayLike | None,
+    reference_state: ArrayLike | None,
+) -> mjx.Data:
+  """Choose fixed world-space contact charts once, before tracing dynamics."""
+  data = mjx.make_data(model, impl=model.impl)
+  if not data._impl.ncon:
+    return data
+
+  if not ((planar_normal is None) ^ (reference_state is None)):
+    raise ValueError('Specify either planar_normal or reference_stat')
+
+  if reference_state is not None:
+    reference = np.asarray(reference_state)
+    if (
+        reference.shape != (model.nq + model.nv + model.na,)
+        or not np.isfinite(reference).all()
+    ):
+      raise ValueError('reference_state must be a finite [qpos, qvel, act] state.')
+    reference = jp.asarray(reference, dtype=data.qpos.dtype)
+    data = data.replace(
+        qpos=reference[:model.nq],
+        qvel=reference[model.nq:model.nq + model.nv],
+        act=reference[model.nq + model.nv:],
+    )
+
+  if planar_normal is not None:
+    normal = np.asarray(planar_normal, dtype=float)
+    if (
+        normal.shape != (3,)
+        or not np.isfinite(normal).all()
+        or not np.any(normal)
+    ):
+      raise ValueError('planar_normal must be a finite nonzero vector of shape (3,).')
+    normal = normal / np.max(np.abs(normal))
+    normal /= np.linalg.norm(normal)
+    normal = jp.asarray(normal, dtype=data.qpos.dtype)
+
+  data = jax.jit(mjx.fwd_position)(model, data)
+  contact = data._impl.contact
+  if planar_normal is not None:
+    rotation = math.make_frame(normal)[jp.array([1, 2, 0])].T
+    rotations = jp.broadcast_to(rotation, contact.frame.shape)
+  else:
+    rotations = contact.frame[:, jp.array([1, 2, 0]), :].swapaxes(-1, -2)
+
+  return data.tree_replace({'_impl.contact.frame_chart_rotation': rotations})
+
+
 def shooting_transcription(
     mjmodel: mujoco.MjModel,
     contact_approximation: mjx.ContactApproxType,
     contact_smoothing: float,
+    *,
+    planar_normal: ArrayLike | None = None,
+    reference_state: ArrayLike | None = None,
 ):
   """Builds a one-step shooting dynamics function with smoothed derivatives.
 
@@ -32,6 +87,13 @@ def shooting_transcription(
     mjmodel: MuJoCo model to transcribe.
     contact_approximation: contact approximation used by both models.
     contact_smoothing: smoothing parameter used to compute dynamics derivatives.
+    planar_normal: world-space normal to the plane of contact normals. Chooses
+      a shared chart with its pole perpendicular to that plane.
+    reference_state: finite [qpos, qvel, act] state used to center each contact
+      chart. Mutually exclusive with planar_normal. With neither option, use
+      the model's default state. Charts remain fixed for the returned dynamics.
+      Reference charts move singularities away from the reference normals;
+      they do not guarantee coverage of every future contact normal.
 
   Returns:
     dynamics: ``dynamics(x, u)`` returns the next state.
@@ -48,7 +110,7 @@ def shooting_transcription(
       contact_approximation=contact_approximation,
       contact_smoothing=contact_smoothing,
   )
-  data = mjx.make_data(model, impl=model.impl)
+  data = _make_transcription_data(model, planar_normal, reference_state)
 
   def dynamics(x: jax.Array, u: jax.Array) -> jax.Array:
     nq, nv = model.nq, model.nv
@@ -74,6 +136,9 @@ def lifted_shooting_transcription(
     contact_approximation: mjx.ContactApproxType,
     contact_smoothing: float,
     u_bounds: Bounds | None = None,
+    *,
+    planar_normal: ArrayLike | None = None,
+    reference_state: ArrayLike | None = None,
 ):
   """Builds dynamics and constraints with contact forces as lifted controls.
 
@@ -89,6 +154,13 @@ def lifted_shooting_transcription(
     contact_smoothing: contact smoothing parameter used by the dynamics.
     u_bounds: optional pair of lower and upper actuator control bounds.
               Defaults to unbounded controls.
+    planar_normal: world-space normal to the plane of contact normals. Chooses
+      a shared chart with its pole perpendicular to that plane.
+    reference_state: finite [qpos, qvel, act] state used to center each contact
+      chart. Mutually exclusive with planar_normal. With neither option, use
+      the model's default state. Charts remain fixed for the returned functions.
+      Reference charts move singularities away from the reference normals;
+      they do not guarantee coverage of every future contact normal.
 
   Returns:
     dynamics: ``dynamics(x, w)`` returns the next state.
@@ -102,9 +174,9 @@ def lifted_shooting_transcription(
       contact_approximation=contact_approximation,
       contact_smoothing=contact_smoothing,
   )
-  data = mjx.make_data(model, impl=model.impl)
+  data = _make_transcription_data(model, planar_normal, reference_state)
 
-  cf_addresses, contacts = _extract_contact_indices(model)
+  cf_addresses, contacts = _extract_contact_indices(model, data)
   elliptic_contacts = [c for c in contacts if c.type == _Contact.Type.ELLIPTIC]
 
   nu = model.nu
@@ -119,7 +191,7 @@ def lifted_shooting_transcription(
   def step2(x: jax.Array, u: jax.Array, cf: jax.Array) -> jax.Array:
     efc_force = jp.zeros(data._impl.nefc)
     efc_force = efc_force.at[cf_addresses].set(cf)
-    return _step_given_efc_force(model, x, u, efc_force)
+    return _step_given_efc_force(model, data, x, u, efc_force)
 
   def unpack_control(w):
     assert w.size == nu + ncf
@@ -157,6 +229,9 @@ def lifted_shooting_transcription(
 def contact_implicit_transcription(
     mjmodel: mujoco.MjModel,
     u_bounds: Bounds | None = None,
+    *,
+    planar_normal: ArrayLike | None = None,
+    reference_state: ArrayLike | None = None,
 ):
   """Builds a contact-implicit transcription.
 
@@ -169,6 +244,13 @@ def contact_implicit_transcription(
     mjmodel: MuJoCo model to transcribe.
     u_bounds: optional pair of lower and upper actuator control bounds.
               Defaults to unbounded controls.
+    planar_normal: world-space normal to the plane of contact normals. Chooses
+      a shared chart with its pole perpendicular to that plane.
+    reference_state: finite [qpos, qvel, act] state used to center each contact
+      chart. Mutually exclusive with planar_normal. With neither option, use
+      the model's default state. Charts remain fixed for the returned functions.
+      Reference charts move singularities away from the reference normals;
+      they do not guarantee coverage of every future contact normal.
 
   Returns:
     dynamics: ``dynamics(x, w)`` returns the next state.
@@ -183,9 +265,9 @@ def contact_implicit_transcription(
       # will not be masked out (see mjx/constraint.py).
       contact_approximation='conic',
   )
-  data = mjx.make_data(model, impl=model.impl)
+  data = _make_transcription_data(model, planar_normal, reference_state)
 
-  cf_addresses, contacts = _extract_contact_indices(model)
+  cf_addresses, contacts = _extract_contact_indices(model, data)
 
   def z_dim(contact: _Contact) -> int:
     if contact.type == _Contact.Type.FRICTIONLESS:
@@ -226,7 +308,7 @@ def contact_implicit_transcription(
 
     efc_force = jp.zeros(data._impl.nefc)
     efc_force = efc_force.at[cf_addresses].set(cf)
-    return _step_given_efc_force(model, x, u, efc_force)
+    return _step_given_efc_force(model, data, x, u, efc_force)
 
   def local_inequality(x: jax.Array, w: jax.Array, x_next: jax.Array) -> jax.Array:
     _, z = unpack_control(w)
@@ -292,7 +374,9 @@ class _Contact:
   friction: jax.Array
 
 
-def _extract_contact_indices(model: mjx.Model) -> tuple[np.ndarray, list[_Contact]]:
+def _extract_contact_indices(
+    model: mjx.Model, data: mjx.Data | None = None
+) -> tuple[np.ndarray, list[_Contact]]:
   """
   Returns
     cf_addresses: integer indices into ``efc_force`` for all contact force
@@ -304,8 +388,9 @@ def _extract_contact_indices(model: mjx.Model) -> tuple[np.ndarray, list[_Contac
       dim: the contact dimension; frictionless contacts always have dimension 1
       friction: friction coefficients (size equals dim-1)
   """
-  data = mjx.make_data(model, impl=model.impl)
-  data = jax.jit(mjx.fwd_position)(model, data)
+  if data is None:
+    data = mjx.make_data(model, impl=model.impl)
+    data = jax.jit(mjx.fwd_position)(model, data)
 
   efc_type = np.asarray(data._impl.efc_type)
   cf_addresses = np.nonzero(
@@ -347,21 +432,23 @@ def _extract_contact_indices(model: mjx.Model) -> tuple[np.ndarray, list[_Contac
 
 
 def _step_given_efc_force(
-    m: mjx.Model, x: jax.Array, u: jax.Array, efc_force: jax.Array
-  ) -> jax.Array:
+    m: mjx.Model,
+    data: mjx.Data,
+    x: jax.Array,
+    u: jax.Array,
+    efc_force: jax.Array,
+) -> jax.Array:
   """Computes the mapping (x, u, λ) ↦ x⁺ assuming that the constraint force λ is known.
   For implicit Euler integration, The mapping satisfies:
     M(q) (v⁺ - v) / δt + c(q⁺, v⁺) = τ(q⁺, v⁺, u) + J(q)ᵀ λ
     q⁺ = q ⊕ δt v⁺
   """
 
-  d = mjx.make_data(m, impl=m.impl)
-
   assert x.size == m.nq + m.nv + m.na
   assert u.size == m.nu
-  assert efc_force.size == d._impl.nefc
+  assert efc_force.size == data._impl.nefc
 
-  d = d.replace(
+  d = data.replace(
     qpos=x[:m.nq],
     qvel=x[m.nq:m.nq+m.nv],
     act=x[m.nq+m.nv:],

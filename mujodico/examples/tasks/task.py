@@ -21,6 +21,7 @@ class Task:
   R: np.ndarray
   contact_smoothing: float
   contact_approx: ContactApproxType = ContactApproxType.HUNT_CROSSLEY
+  planar_normal: tuple[float, float, float] | None = None
 
   @property
   def nx(self) -> int:
