@@ -125,7 +125,7 @@ def _build_cones(m: Model, d: Data):
   efc_type = constraint.make_efc_type(m)
   nefc = efc_type.size
 
-  complementarity = m.opt._impl.contact_smoothing
+  complementarity = support.contact_smoothing(m)
 
   cones = []
   comps = []
@@ -166,51 +166,3 @@ def _build_cones(m: Model, d: Data):
       raise RuntimeError(f'Unsupported constraint type {t}')
 
   return tuple(cones), jp.array(comps), friction_scale
-
-
-def constitutive_relations(m: Model, efc_contact_mask: jax.Array):
-  """Returns the constitutive relations including expression, lower bound, and upper bound."""
-
-  nq, nv, na = m.nq, m.nv, m.na
-  nx = nq + nv + na
-
-  nc = int(jp.count_nonzero(efc_contact_mask))
-
-  data = io.make_data(m, impl=m.impl)
-
-  def constitutive_fn(x: jax.Array, u: jax.Array, cf: jax.Array, x_next: jax.Array):
-    assert x.size == nx
-    assert u.size == m.nu
-    assert cf.size == nc
-    assert x_next.size == nx
-
-    d = data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
-
-    d = forward.fwd_position(m, d)
-
-    dt = m.opt.timestep
-    tau = d._impl.efc_b / jp.maximum(d._impl.efc_k, 1e-8)
-
-    qvel_next = x_next[nq : nq + nv]
-
-    cpos = d._impl.efc_J @ qvel_next + d._impl.efc_pos / (dt + tau)
-    cpos = cpos[efc_contact_mask]
-
-    return jp.concatenate([
-        cpos,
-        cpos * cf,
-    ])
-
-  mu_e = m.opt._impl.contact_smoothing * jp.ones(nc)
-
-  constitutive_lb = jp.concatenate([
-    jp.zeros(nc),
-    jp.zeros_like(mu_e),
-  ])
-
-  constitutive_ub = jp.concatenate([
-    jp.full(nc, jp.inf),
-    mu_e,
-  ])
-
-  return constitutive_fn, constitutive_lb, constitutive_ub

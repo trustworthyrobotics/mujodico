@@ -116,7 +116,6 @@ class RocketLanding(Task):
         Qf=50 * Q,
         u_ref=np.array([hover_thrust, 0.0, 0.0]),
         R=np.diag([0.002, 0.05, 0.05]),
-        contact_smoothing=0.0,
     )
 
   @property

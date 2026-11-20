@@ -221,6 +221,10 @@ class SolverSapTest(parameterized.TestCase):
 
     xml = f'''
 <mujoco model="1d_pusher">
+  <custom>
+    <text name="contact_approx" data="{contact_approximation}"/>
+    <numeric name="contact_smoothing" data="0.0001"/>
+  </custom>
 
     <option cone="{cone}" />
     <option integrator="implicitfast" />
@@ -275,8 +279,6 @@ class SolverSapTest(parameterized.TestCase):
     mjx_model = mjx.put_model(
       model,
       device=jax.devices()[0],
-      contact_approximation=contact_approximation,
-      contact_smoothing=1e-4,
     )
     mjx_data = mjx.make_data(mjx_model, impl=mjx_model.impl)
 

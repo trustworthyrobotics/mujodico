@@ -56,7 +56,6 @@ def benchmark(
     solver: str = 'newton',
     iterations: int = 1,
     ls_iterations: int = 4,
-    contact_approximation: str | None = None,
 ) -> Tuple[float, float, int]:
   """Benchmark a model."""
 
@@ -70,7 +69,7 @@ def benchmark(
   }[solver.lower()]
   m.opt.iterations = iterations
   m.opt.ls_iterations = ls_iterations
-  m = io.put_model(m, contact_approximation=contact_approximation)
+  m = io.put_model(m)
 
   @jax.pmap
   def init(key):

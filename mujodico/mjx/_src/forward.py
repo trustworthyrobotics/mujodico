@@ -34,7 +34,6 @@ from mujodico.mjx._src import solver_sap
 from mujodico.mjx._src import support
 # pylint: disable=g-importing-member
 from mujodico.mjx._src.types import BiasType
-from mujodico.mjx._src.types import ContactApproxType
 # pylint: disable=g-importing-member
 from mujodico.mjx._src.types import Data
 from mujodico.mjx._src.types import DataJAX
@@ -60,11 +59,11 @@ _RK4_B = np.array([1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0])
 
 # Constraint solvers
 _SOLVE_FUNC = {
-    ContactApproxType.MUJOCO: solver.solve,
-    ContactApproxType.CONIC: solver_conic.solve,
-    ContactApproxType.LOG_BARRIER: solver_sap.solve,
-    ContactApproxType.KELVIN_VOIGT: solver_sap.solve,
-    ContactApproxType.HUNT_CROSSLEY: solver_sap.solve,
+    support.ContactApproxType.MUJOCO: solver.solve,
+    support.ContactApproxType.CONIC: solver_conic.solve,
+    support.ContactApproxType.LOG_BARRIER: solver_sap.solve,
+    support.ContactApproxType.KELVIN_VOIGT: solver_sap.solve,
+    support.ContactApproxType.HUNT_CROSSLEY: solver_sap.solve,
 }
 
 
@@ -551,7 +550,8 @@ def implicit(m: Model, d: Data) -> Data:
   qderiv = derivative.deriv_smooth_vel(m, d)
 
   qacc = d.qacc
-  if (m.opt._impl.contact_approx == ContactApproxType.MUJOCO and qderiv is not None
+  if (support.contact_approx(m) == support.ContactApproxType.MUJOCO
+      and qderiv is not None
       or qacc is None):
     # TODO(robotics-simulation): use smooth.factor_m / solve_m here:
     qm = support.full_m(m, d) if support.is_sparse(m) else d._impl.M
@@ -584,12 +584,12 @@ def forward(m: Model, d: Data) -> Data:
     d = d.replace(qacc=d.qacc_smooth)
     return d
 
-  if m.opt._impl.contact_approx not in _SOLVE_FUNC:
+  if support.contact_approx(m) not in _SOLVE_FUNC:
     raise NotImplementedError(
-        f'solver for {m.opt._impl.contact_approx.value} contact '
+        f'solver for {support.contact_approx(m).value} contact '
         'approximation not implemented.'
     )
-  solve_func = _SOLVE_FUNC[m.opt._impl.contact_approx]
+  solve_func = _SOLVE_FUNC[support.contact_approx(m)]
   d = named_scope(solve_func)(m, d)
 
   d = sensor.sensor_acc(m, d)

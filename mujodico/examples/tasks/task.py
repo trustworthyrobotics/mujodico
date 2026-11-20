@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jp
 import mujoco
 from mujodico.examples.tasks.task_playback import TaskPlayback
-from mujodico.mjx import ContactApproxType
+from mujodico.mjx._src import support
 from mujodico.trajopt._src import manifold
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
@@ -19,9 +19,15 @@ class Task:
   Qf: np.ndarray
   u_ref: np.ndarray
   R: np.ndarray
-  contact_smoothing: float
-  contact_approx: ContactApproxType = ContactApproxType.HUNT_CROSSLEY
   planar_normal: tuple[float, float, float] | None = None
+
+  @property
+  def contact_smoothing(self) -> float:
+    return support.contact_smoothing(self.model)
+
+  @property
+  def contact_approx(self):
+    return support.contact_approx(self.model)
 
   @property
   def nx(self) -> int:
@@ -171,6 +177,7 @@ Task: {self.__class__.__name__}
   diag(R) = {np.diag(self.R)}
   u_lb = {u_lb}
   u_ub = {u_ub}
+  contact_approx = {self.contact_approx.value}
   contact_smoothing = {self.contact_smoothing}""")
 
     from mujodico import mjx

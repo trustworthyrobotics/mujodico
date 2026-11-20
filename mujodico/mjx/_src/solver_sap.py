@@ -39,7 +39,6 @@ from mujodico.mjx._src import support
 from mujodico.mjx._src.dataclasses import PyTreeNode
 from mujodico.mjx._src.types import ConeType
 from mujodico.mjx._src.types import ConstraintType
-from mujodico.mjx._src.types import ContactApproxType
 from mujodico.mjx._src.types import Data
 from mujodico.mjx._src.types import DisableBit
 from mujodico.mjx._src.types import IntegratorType
@@ -546,7 +545,7 @@ class Context(PyTreeNode):
       )
 
     # Normal contact constraint
-    contact_approx = m.opt._impl.contact_approx
+    contact_approx = support.contact_approx(m)
     mask = np.nonzero(
       (efc_type == ConstraintType.CONTACT_FRICTIONLESS) |
       (efc_type == ConstraintType.CONTACT_PYRAMIDAL)
@@ -554,35 +553,35 @@ class Context(PyTreeNode):
     if mask.size:
       efc_masks.append(mask)
 
-      if contact_approx == ContactApproxType.LOG_BARRIER:
+      if contact_approx == support.ContactApproxType.LOG_BARRIER:
         sap_constraints.append(
           SapLogbarrierNormalContactConstraint(
             phi0=d._impl.efc_pos[mask],
             tau=d._impl.efc_b[mask] / jp.maximum(d._impl.efc_k[mask], 1e-8),
             dt=dt,
-            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
+            contact_smoothing=jp.array(support.contact_smoothing(m)),
           )
         )
 
-      elif contact_approx == ContactApproxType.KELVIN_VOIGT:
+      elif contact_approx == support.ContactApproxType.KELVIN_VOIGT:
         sap_constraints.append(
           SapKelvinVoigtNormalContactConstraint(
             phi0=d._impl.efc_pos[mask],
             stiffness=d._impl.efc_k[mask] * _STIFFNESS_SCALE,
             dissipation_time_scale=d._impl.efc_b[mask] / jp.maximum(d._impl.efc_k[mask], 1e-8),
             dt=dt,
-            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
+            contact_smoothing=jp.array(support.contact_smoothing(m)),
           )
         )
 
-      elif contact_approx == ContactApproxType.HUNT_CROSSLEY:
+      elif contact_approx == support.ContactApproxType.HUNT_CROSSLEY:
         sap_constraints.append(
           SapHuntCrossleyNormalContactConstraint(
             phi0=d._impl.efc_pos[mask],
             stiffness=d._impl.efc_k[mask] * _STIFFNESS_SCALE,
             hunt_crossley_damping=d._impl.efc_b[mask] * _HUNT_CROSSLEY_DAMPING_SCALE,
             dt=dt,
-            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
+            contact_smoothing=jp.array(support.contact_smoothing(m)),
           )
         )
 
@@ -603,7 +602,7 @@ class Context(PyTreeNode):
       mask = np.arange(efc_address, efc_address + dim)
       efc_masks.append(mask)
 
-      if contact_approx == ContactApproxType.LOG_BARRIER:
+      if contact_approx == support.ContactApproxType.LOG_BARRIER:
         sap_constraints.append(
           SapLogbarrierFrictionalContactConstraint(
             phi0=d._impl.efc_pos[efc_address],
@@ -611,11 +610,11 @@ class Context(PyTreeNode):
             friction=d._impl.contact.friction[k][:dim-1],
             tau=d._impl.efc_b[efc_address] / jp.maximum(d._impl.efc_k[efc_address], 1e-8),
             dt=dt,
-            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
+            contact_smoothing=jp.array(support.contact_smoothing(m)),
           )
         )
 
-      elif contact_approx == ContactApproxType.KELVIN_VOIGT:
+      elif contact_approx == support.ContactApproxType.KELVIN_VOIGT:
         sap_constraints.append(
           SapKelvinVoigtFrictionalContactConstraint(
             phi0=d._impl.efc_pos[efc_address],
@@ -624,11 +623,11 @@ class Context(PyTreeNode):
             dissipation_time_scale=d._impl.efc_b[efc_address] / jp.maximum(d._impl.efc_k[efc_address], 1e-8),
             friction=d._impl.contact.friction[k][:dim-1],
             dt=dt,
-            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
+            contact_smoothing=jp.array(support.contact_smoothing(m)),
           )
         )
 
-      elif contact_approx == ContactApproxType.HUNT_CROSSLEY:
+      elif contact_approx == support.ContactApproxType.HUNT_CROSSLEY:
         sap_constraints.append(
           SapHuntCrossleyFrictionalContactConstraint(
             phi0=d._impl.efc_pos[efc_address],
@@ -637,7 +636,7 @@ class Context(PyTreeNode):
             hunt_crossley_damping=d._impl.efc_b[efc_address] * _HUNT_CROSSLEY_DAMPING_SCALE,
             friction=d._impl.contact.friction[k][:dim-1],
             dt=dt,
-            contact_smoothing=jp.array(m.opt._impl.contact_smoothing),
+            contact_smoothing=jp.array(support.contact_smoothing(m)),
           )
         )
 

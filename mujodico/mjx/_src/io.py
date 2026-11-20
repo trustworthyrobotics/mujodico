@@ -330,8 +330,6 @@ def _put_statistic(s: mujoco.MjStatistic) -> types.Statistic:
 def _put_model_jax(
     m: mujoco.MjModel,
     device: Optional[jax.Device] = None,
-    contact_approx: Optional[Union[str, types.ContactApproxType]] = None,
-    contact_smoothing: Optional[float] = None,
 ) -> types.Model:
   """Puts mujoco.MjModel onto a device, resulting in mjx.Model."""
   if m.nflex:
@@ -411,24 +409,16 @@ def _put_model_jax(
           f'{[mj_type(m) for m in missing]} not supported'
       )
 
-  # Contact approximation and contact smoothing
-  contact_approx = types.ContactApproxType._resolve(contact_approx)
-
-  contact_smoothing = contact_smoothing or 0
-  if isinstance(contact_smoothing, int):
-    contact_smoothing = float(contact_smoothing)
-  if not (isinstance(contact_smoothing, float) and contact_smoothing >= 0):
-    raise ValueError('contact_smoothing must be a nonnegative float')
-
-  opt_impl = {
-    'contact_approx': contact_approx,
-    'contact_smoothing': contact_smoothing,
-  }
+  support.contact_approx(m)
+  support.contact_smoothing(m)
 
   mj_field_names = {f.name for f in types.Model.fields() if f.name != '_impl'}
-  fields = {f: getattr(m, f) for f in mj_field_names}
+  fields = {
+      f: getattr(m, 'numeric_data' if f == 'numeric_data_jax' else f)
+      for f in mj_field_names
+  }
   fields['cam_mat0'] = fields['cam_mat0'].reshape((-1, 3, 3))
-  fields['opt'] = _put_option(m.opt, types.Impl.JAX, opt_impl)
+  fields['opt'] = _put_option(m.opt, types.Impl.JAX)
   fields['stat'] = _put_statistic(m.stat)
 
   fields_jax = {}
@@ -579,8 +569,6 @@ def put_model(
     device: Optional[jax.Device] = None,
     impl: Optional[Union[str, types.Impl]] = None,
     keepalive_refs: Optional[Dict[int, Any]] = None,
-    contact_approximation: Optional[Union[str, types.ContactApproxType]] = None,
-    contact_smoothing: Optional[float] = None,
     batch_sizes: Optional[Dict[str, int]] = None,
 ) -> types.Model:
   """Puts mujoco.MjModel onto a device, resulting in mjx.Model.
@@ -592,10 +580,6 @@ def put_model(
     keepalive_refs: optional dict to store references to underlying MuJoCo
       objects, preventing them from being garbage collected. Required for CPP
       impl to keep the model alive.
-    contact_approximation: contact approximation (for JAX only). Options are "mujoco",
-      "logbarrier". Defaults to original mujoco contact formulation.
-    contact_smoothing: amount of contact smoothing (for JAX only). Defaults to 0
-      effectively disabling contact smoothing.
     batch_sizes: optional per-field leading batch sizes for Warp model fields.
 
   Returns:
@@ -608,7 +592,7 @@ def put_model(
 
   impl, device = _resolve_impl_and_device(impl, device)
   if impl == types.Impl.JAX:
-    return _put_model_jax(m, device, contact_approximation, contact_smoothing)
+    return _put_model_jax(m, device)
   elif impl == types.Impl.WARP:
     _check_warp_installed()
     if graph_mode is None:
