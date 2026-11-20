@@ -37,11 +37,7 @@ from mujodico import mjx
 
 model = mujoco.MjModel.from_xml_string(XML)
 
-mjx_model = mjx.put_model(
-    model,
-    contact_approximation='Hunt-Crossley',
-    contact_smoothing=1e-5,
-)
+mjx_model = mjx.put_model(model)
 
 def f(x, u):
     nq, nv = mjx_model.nq, mjx_model.nv
@@ -58,20 +54,28 @@ A, B = jax.jacfwd(f, argnums=(0,1))(x, u)
 ```
 
 MuJoDiCo computes dynamics Jacobian using the implicit function theorem. Both forward-mode (`jax.jacfwd`) and reverse-mode (`jax.jacrev`) differentiation are supported.
+The differentiable contact models are configurable through XML custom fields. Add these to your model before loading it:
 
-### Contact Modeling
+```xml
+<custom>
+  <text name="contact_approx" data="hunt-crossley"/>
+  <numeric name="contact_smoothing" data="1e-5"/>
+</custom>
+```
 
-MuJoDiCo provides configurable contact models through two parameters:
+**`contact_approx`** specifies the contact model used for the dynamics. Supported options are `mujoco`, `conic`, `log-barrier`, `kelvin-voigt`, and `hunt-crossley` (defaults to `mujoco`).
+`hunt-crossley` is recommended for most applications.
 
-* **`contact_approximation`** — specifies the contact model used for the dynamics. `'Hunt-Crossley'` is recommended for most applications.
-* **`contact_smoothing`** — adds artificial smoothing to the contact model to make the resulting dynamics **C¹-continuous**.
-
-The `contact_smoothing=κ` parameter controls the amount of regularization. It can be interpreted as applying a force of κ newtons over a distance of 1 meter.
-
-For forward simulation, where differentiability is not required, use `contact_smoothing=0.0`.
-For trajectory optimization or other gradient-based methods that require C¹-continuous dynamics, `contact_smoothing=1e-5` is a good starting point, providing smooth dynamics while introducing relatively little unphysical behavior.
+**`contact_smoothing`** adds artificial smoothing to the contact model to make the resulting dynamics C¹-continuous (defaults to zero smoothing).
+A value of κ can be interpreted as applying a force of κ newtons over a distance of 1 meter. For forward simulation, where differentiability is not required, use a value of 0.0. For trajectory optimization or other gradient-based methods that require C¹-continuous dynamics, a value of 1e-5 is a good starting point, providing smooth dynamics while introducing relatively little unphysical behavior.
 
 ### Examples
+
+```sh
+JAX_ENABLE_X64=1 python -m mujodico.examples --method IppasLiftedMultipleShooting --task AllegroBall --tests 10
+```
+
+For more options, see
 
 ```sh
 python -m mujodico.examples --help

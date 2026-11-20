@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass
 import jax
 import jax.numpy as jp
@@ -18,6 +19,13 @@ class TranscriptionParams:
   R: jax.Array
 
 
+def _scaled_contact_model(task: Task, scale: float):
+  model = copy.copy(task.model)
+  if task.contact_smoothing != 0:
+    model.numeric('contact_smoothing').data[:] *= scale
+  return model
+
+
 def _contact_frame_options(task: Task) -> dict:
   if task.planar_normal is not None:
     return {'planar_normal': task.planar_normal}
@@ -32,8 +40,6 @@ class SingleShootingTranscription:
   ):
     step = trajopt.shooting_transcription(
         mjmodel=task.model,
-        contact_approximation=task.contact_approx,
-        contact_smoothing=task.contact_smoothing,
         **_contact_frame_options(task),
     )
 
@@ -94,17 +100,13 @@ class MultipleShootingTranscription:
     if not have_contact_force_inequality:
       dynamics = trajopt.shooting_transcription(
           mjmodel=task.model,
-          contact_approximation=task.contact_approx,
-          contact_smoothing=task.contact_smoothing,
           **_contact_frame_options(task),
       )
 
     else:
       lifted_dynamics, force_equality, _, bounds = (
           trajopt.lifted_shooting_transcription(
-              mjmodel=task.model,
-              contact_approximation=task.contact_approx,
-              contact_smoothing=task.contact_smoothing * 0.001,
+              mjmodel=_scaled_contact_model(task, 0.001),
               u_bounds=task.u_bounds,
               **_contact_frame_options(task),
           )
@@ -159,9 +161,7 @@ class LiftedMultipleShootingTranscription:
   def __init__(self, task: Task):
     dynamics, stage_equality, stage_inequality, w_bounds = (
         trajopt.lifted_shooting_transcription(
-            mjmodel=task.model,
-            contact_approximation=task.contact_approx,
-            contact_smoothing=task.contact_smoothing * 0.001,
+            mjmodel=_scaled_contact_model(task, 0.001),
             u_bounds=task.u_bounds,
             **_contact_frame_options(task),
         )

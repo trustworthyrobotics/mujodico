@@ -15,6 +15,7 @@
 """Engine support functions."""
 
 from collections.abc import Iterable, Sequence
+import enum
 from typing import Optional, Tuple, Union
 
 import jax
@@ -232,6 +233,7 @@ def _getnum(m: Union[Model, mujoco.MjModel], obj: mujoco._enums.mjtObj) -> int:
       mujoco.mjtObj.mjOBJ_TENDON: m.ntendon,
       mujoco.mjtObj.mjOBJ_ACTUATOR: m.nu,
       mujoco.mjtObj.mjOBJ_SENSOR: m.nsensor,
+      mujoco.mjtObj.mjOBJ_TEXT: m.ntext,
       mujoco.mjtObj.mjOBJ_NUMERIC: m.nnumeric,
       mujoco.mjtObj.mjOBJ_TUPLE: m.ntuple,
       mujoco.mjtObj.mjOBJ_KEY: m.nkey,
@@ -257,6 +259,7 @@ def _getadr(
       mujoco.mjtObj.mjOBJ_TENDON: m.name_tendonadr,
       mujoco.mjtObj.mjOBJ_ACTUATOR: m.name_actuatoradr,
       mujoco.mjtObj.mjOBJ_SENSOR: m.name_sensoradr,
+      mujoco.mjtObj.mjOBJ_TEXT: m.name_textadr,
       mujoco.mjtObj.mjOBJ_NUMERIC: m.name_numericadr,
       mujoco.mjtObj.mjOBJ_TUPLE: m.name_tupleadr,
       mujoco.mjtObj.mjOBJ_KEY: m.name_keyadr,
@@ -1162,3 +1165,97 @@ def muscle_dynamics(
 
   # filter output
   return dctrl / jp.maximum(mujoco.mjMINVAL, tau)
+
+
+class ContactApproxType(enum.Enum):
+  MUJOCO = 'mujoco'
+  CONIC = 'conic'
+  LOG_BARRIER = 'log-barrier'
+  KELVIN_VOIGT = 'kelvin-voigt'
+  HUNT_CROSSLEY = 'hunt-crossley'
+
+
+def contact_approx(m: Union[Model, mujoco.MjModel]) -> ContactApproxType:
+  """Read the static contact approximation from a custom text field."""
+  i = name2id(m, mujoco.mjtObj.mjOBJ_TEXT, 'contact_approx')
+  if i < 0:
+    return ContactApproxType.MUJOCO
+  data = bytes(m.text_data)
+  value = data[m.text_adr[i]:m.text_adr[i] + m.text_size[i]]
+  trans = str.maketrans('', '', ' -_')
+  name = value.rstrip(b'\x00').decode('utf-8').lower().translate(trans)
+  for member in ContactApproxType:
+    if member.value.translate(trans) == name:
+      return member
+  raise ValueError(
+      'unknown contact approximation: value should be one of '
+      f'<{"|".join(member.value for member in ContactApproxType)}>'
+  )
+
+
+def contact_smoothing(m: Union[Model, mujoco.MjModel]) -> Union[float, jax.Array]:
+  """Read the contact smoothing value from a custom numeric field."""
+  i = name2id(m, mujoco.mjtObj.mjOBJ_NUMERIC, 'contact_smoothing')
+  if i < 0:
+    return 0.0
+  if m.numeric_size[i] != 1:
+    raise ValueError('contact_smoothing must be one finite nonnegative scalar')
+  data = m.numeric_data if isinstance(m, mujoco.MjModel) else m.numeric_data_jax
+  value = data[m.numeric_adr[i]]
+  if isinstance(m, mujoco.MjModel):
+    value = float(value)
+    if not np.isfinite(value) or value < 0:
+      raise ValueError('contact_smoothing must be one finite nonnegative scalar')
+  return value
+
+
+def _with_contact_config(
+    m: Model, *, approximation: str | None = None, smoothing: float | None = None
+) -> Model:
+  """Return a private MJX model with updated custom data, before tracing."""
+
+  if approximation is not None:
+    value = approximation.encode('utf-8') + b'\x00'
+    i = name2id(m, mujoco.mjtObj.mjOBJ_TEXT, 'contact_approx')
+    names, adrs = m.names, m.name_textadr.copy()
+    text_adr, text_size = m.text_adr.copy(), m.text_size.copy()
+    if i < 0:
+      i = m.ntext
+      adrs = np.append(adrs, len(names)).astype(adrs.dtype)
+      names += b'contact_approx\x00'
+      text_adr = np.append(text_adr, len(m.text_data)).astype(text_adr.dtype)
+      text_size = np.append(text_size, len(value)).astype(text_size.dtype)
+    else:
+      text_adr[i], text_size[i] = len(m.text_data), len(value)
+    m = m.replace(ntext=len(adrs), names=names, name_textadr=adrs,
+                  text_adr=text_adr, text_size=text_size,
+                  text_data=bytes(m.text_data) + value)
+
+  if smoothing is not None:
+    if not np.isfinite(smoothing) or smoothing < 0:
+      raise ValueError('contact_smoothing must be one finite nonnegative scalar')
+    i = name2id(m, mujoco.mjtObj.mjOBJ_NUMERIC, 'contact_smoothing')
+    names, adrs = m.names, m.name_numericadr.copy()
+    numeric_adr, numeric_size = m.numeric_adr.copy(), m.numeric_size.copy()
+    data = m.numeric_data.copy()
+    data_jax = m.numeric_data_jax
+    if i < 0:
+      i = m.nnumeric
+      adrs = np.append(adrs, len(names)).astype(adrs.dtype)
+      names += b'contact_smoothing\x00'
+      numeric_adr = np.append(numeric_adr, len(data)).astype(numeric_adr.dtype)
+      numeric_size = np.append(numeric_size, 1).astype(numeric_size.dtype)
+      data = np.append(data, smoothing).astype(data.dtype)
+      data_jax = jp.append(data_jax, smoothing).astype(data_jax.dtype)
+    else:
+      if numeric_size[i] != 1:
+        raise ValueError('contact_smoothing must be one finite nonnegative scalar')
+      data[numeric_adr[i]] = smoothing
+      data_jax = data_jax.at[numeric_adr[i]].set(smoothing)
+    m = m.replace(nnumeric=len(adrs), names=names, name_numericadr=adrs,
+                  numeric_adr=numeric_adr, numeric_size=numeric_size,
+                  numeric_data=data, numeric_data_jax=data_jax)
+
+  contact_approx(m)
+  contact_smoothing(m)
+  return m

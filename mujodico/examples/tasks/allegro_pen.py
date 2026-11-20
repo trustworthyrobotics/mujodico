@@ -10,6 +10,10 @@ import viser
 
 _XML = """
 <mujoco model="right_allegro_hand scene">
+  <custom>
+    <text name="contact_approx" data="hunt-crossley"/>
+    <numeric name="contact_smoothing" data="0.002"/>
+  </custom>
 
   <option timestep="0.02"  />
   <option integrator="implicitfast" />
@@ -70,7 +74,6 @@ class AllegroPen(Task):
     u_ref = x_0[:16]
     R = np.eye(16) * 0.01
 
-    contact_smoothing = 0.002
 
     super().__init__(
         model=model,
@@ -81,7 +84,6 @@ class AllegroPen(Task):
         Qf=Qf,
         u_ref=u_ref,
         R=R,
-        contact_smoothing=contact_smoothing,
     )
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):

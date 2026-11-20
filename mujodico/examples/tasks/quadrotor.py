@@ -71,7 +71,6 @@ class Quadrotor(Task):
         Qf=20 * Q,
         u_ref=np.full(4, hover_thrust),
         R=np.eye(4),
-        contact_smoothing=0.0,
     )
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):

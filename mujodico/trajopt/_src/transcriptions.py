@@ -6,6 +6,7 @@ from jax.typing import ArrayLike
 import mujoco
 from mujodico import mjx
 from mujodico.mjx._src import math
+from mujodico.mjx._src import support
 from mujodico.trajopt._src.types import Bounds, LocalComplementarityConstraint
 import numpy as np
 
@@ -71,8 +72,6 @@ def _make_transcription_data(
 
 def shooting_transcription(
     mjmodel: mujoco.MjModel,
-    contact_approximation: mjx.ContactApproxType,
-    contact_smoothing: float,
     *,
     planar_normal: ArrayLike | None = None,
     reference_state: ArrayLike | None = None,
@@ -81,12 +80,10 @@ def shooting_transcription(
 
   The returned function takes a state ``x`` and control ``u``, and returns
   the next state ``x⁺``. Its value comes from a step with zero contact smoothing;
-  its derivatives come from a step using ``contact_smoothing``.
+  its derivatives use the XML custom ``contact_smoothing`` value.
 
   Args:
     mjmodel: MuJoCo model to transcribe.
-    contact_approximation: contact approximation used by both models.
-    contact_smoothing: smoothing parameter used to compute dynamics derivatives.
     planar_normal: world-space normal to the plane of contact normals. Chooses
       a shared chart with its pole perpendicular to that plane.
     reference_state: finite [qpos, qvel, act] state used to center each contact
@@ -98,18 +95,8 @@ def shooting_transcription(
   Returns:
     dynamics: ``dynamics(x, u)`` returns the next state.
   """
-  model = _put_optimization_model(
-      mjmodel,
-      impl='jax',
-      contact_approximation=contact_approximation,
-      contact_smoothing=0.0,
-  )
-  smooth_model = _put_optimization_model(
-      mjmodel,
-      impl=model.impl,
-      contact_approximation=contact_approximation,
-      contact_smoothing=contact_smoothing,
-  )
+  smooth_model = _put_optimization_model(mjmodel, impl='jax')
+  model = support._with_contact_config(smooth_model, smoothing=0.0)
   data = _make_transcription_data(model, planar_normal, reference_state)
 
   def dynamics(x: jax.Array, u: jax.Array) -> jax.Array:
@@ -133,8 +120,6 @@ def shooting_transcription(
 
 def lifted_shooting_transcription(
     mjmodel: mujoco.MjModel,
-    contact_approximation: mjx.ContactApproxType,
-    contact_smoothing: float,
     u_bounds: Bounds | None = None,
     *,
     planar_normal: ArrayLike | None = None,
@@ -150,8 +135,6 @@ def lifted_shooting_transcription(
 
   Args:
     mjmodel: MuJoCo model to transcribe.
-    contact_approximation: contact approximation used by the dynamics.
-    contact_smoothing: contact smoothing parameter used by the dynamics.
     u_bounds: optional pair of lower and upper actuator control bounds.
               Defaults to unbounded controls.
     planar_normal: world-space normal to the plane of contact normals. Chooses
@@ -168,12 +151,7 @@ def lifted_shooting_transcription(
     stage_inequality: constraint ``stage_inequality(x, w) ≥ 0``.
     w_bounds: pair of lower and upper bounds for ``w``.
   """
-  model = _put_optimization_model(
-      mjmodel,
-      impl='jax',
-      contact_approximation=contact_approximation,
-      contact_smoothing=contact_smoothing,
-  )
+  model = _put_optimization_model(mjmodel, impl='jax')
   data = _make_transcription_data(model, planar_normal, reference_state)
 
   cf_addresses, contacts = _extract_contact_indices(model, data)
@@ -258,12 +236,11 @@ def contact_implicit_transcription(
     local_complementarity: local complementarity constraints.
     w_bounds: pair of lower and upper bounds for ``w``.
   """
-  model = _put_optimization_model(
-      mjmodel,
-      impl='jax',
+  model = support._with_contact_config(
+      _put_optimization_model(mjmodel, impl='jax'),
       # As long as contact_approximation is not 'mujoco', efc_J and efc_pos
       # will not be masked out (see mjx/constraint.py).
-      contact_approximation='conic',
+      approximation='conic',
   )
   data = _make_transcription_data(model, planar_normal, reference_state)
 

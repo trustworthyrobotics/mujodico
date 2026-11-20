@@ -7,6 +7,10 @@ import numpy as np
 
 _XML = """
 <mujoco model="push_shpere_1d">
+  <custom>
+    <text name="contact_approx" data="hunt-crossley"/>
+    <numeric name="contact_smoothing" data="0.01"/>
+  </custom>
 
   <option timestep="0.02"  />
   <option integrator="implicitfast" />
@@ -54,7 +58,6 @@ class PushSphere1d(Task):
     u_ref = np.array([0.0])
     R = np.eye(1) * 0.01
 
-    contact_smoothing = 0.01
 
     super().__init__(
         model=model,
@@ -65,7 +68,6 @@ class PushSphere1d(Task):
         Qf=Qf,
         u_ref=u_ref,
         R=R,
-        contact_smoothing=contact_smoothing,
         planar_normal=(0.0, 0.0, 1.0),
     )
 

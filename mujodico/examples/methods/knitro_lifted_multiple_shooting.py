@@ -1,14 +1,17 @@
+import copy
 import numpy as np
 import jax.numpy as jp
 from mujodico import trajopt
 from mujodico.examples import methods
 from mujodico.examples.tasks import Task
+from mujodico.examples.methods.transcriptions import _scaled_contact_model
 
 
 class KnitroLiftedMultipleShooting:
 
   def __init__(self, task: Task):
-    object.__setattr__(task, "contact_smoothing", task.contact_smoothing * 10)
+    task = copy.copy(task)
+    object.__setattr__(task, "model", _scaled_contact_model(task, 10))
     self.transcription = methods.LiftedMultipleShootingTranscription(task)
 
     trans = self.transcription

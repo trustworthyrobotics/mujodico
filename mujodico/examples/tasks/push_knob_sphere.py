@@ -8,6 +8,10 @@ from scipy.spatial.transform import Rotation
 
 _XML = """
 <mujoco model="push_knob_sphere">
+  <custom>
+    <text name="contact_approx" data="hunt-crossley"/>
+    <numeric name="contact_smoothing" data="0.01"/>
+  </custom>
 
   <option timestep="0.02" gravity="0 0 0" />
   <option integrator="implicitfast" />
@@ -82,7 +86,6 @@ class PushKnobSphere(Task):
         Qf=Q * 400,
         u_ref=np.zeros(3),
         R=np.eye(3) * 0.01,
-        contact_smoothing=0.01,
     )
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):

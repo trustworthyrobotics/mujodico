@@ -67,6 +67,7 @@ from mujodico.mjx._src.smooth import tendon_armature
 from mujodico.mjx._src.smooth import tendon_bias
 from mujodico.mjx._src.smooth import transmission
 from mujodico.mjx._src.solver import solve
+from mujodico.mjx._src.support import ContactApproxType
 from mujodico.mjx._src.support import apply_ft
 from mujodico.mjx._src.support import full_m
 from mujodico.mjx._src.support import id2name

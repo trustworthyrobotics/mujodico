@@ -45,36 +45,6 @@ class Impl(enum.Enum):
     return None
 
 
-class ContactApproxType(enum.Enum):
-  """Type of contact approximation.
-  """
-
-  MUJOCO = 'mujoco'
-  CONIC = 'conic'
-  LOG_BARRIER = 'log-barrier'
-  KELVIN_VOIGT = 'kelvin-voigt'
-  HUNT_CROSSLEY = 'hunt-crossley'
-
-  @classmethod
-  def _resolve(cls, value: str | None):
-    if isinstance(value, cls):
-      return value
-
-    if value is None:
-      return cls.MUJOCO
-
-    trans = str.maketrans('', '', ' -_')
-    name = value.lower().translate(trans)
-    for member in cls:
-      if member.value.lower().translate(trans) == name:
-        return member
-
-    raise ValueError(
-        'unknown contact approximation: value should be one of '
-        f'<{"|".join([member.value for member in cls])}>'
-    )
-
-
 class DisableBit(enum.IntFlag):
   """Disable default feature bitflags.
 
@@ -526,8 +496,6 @@ class OptionJAX(PyTreeNode):
   disableactuator: int
   sdf_initpoints: int
   has_fluid_params: bool
-  contact_approx: ContactApproxType
-  contact_smoothing: float
 
 
 
@@ -621,6 +589,7 @@ class Model(PyTreeNode):
     nwrap: number of wrap objects in all tendon paths
     nsensor: number of sensors
     nnumeric: number of numeric custom fields
+    ntext: number of text custom fields
     ntuple: number of tuple custom fields
     nkey: number of keyframes
     nmocap: number of mocap bodies
@@ -674,6 +643,7 @@ class Model(PyTreeNode):
   nwrap: int
   nsensor: int
   nnumeric: int
+  ntext: int
   ntuple: int
   nkey: int
   nmocap: int
@@ -929,8 +899,13 @@ class Model(PyTreeNode):
   sensor_dim: np.ndarray
   sensor_adr: np.ndarray
   sensor_cutoff: np.ndarray
+  text_adr: np.ndarray
+  text_size: np.ndarray
+  text_data: bytes
+  numeric_size: np.ndarray
   numeric_adr: np.ndarray
   numeric_data: np.ndarray
+  numeric_data_jax: jax.Array
   tuple_adr: np.ndarray
   tuple_size: np.ndarray
   tuple_objtype: np.ndarray
@@ -957,6 +932,7 @@ class Model(PyTreeNode):
   name_tendonadr: np.ndarray
   name_actuatoradr: np.ndarray
   name_sensoradr: np.ndarray
+  name_textadr: np.ndarray
   name_numericadr: np.ndarray
   name_tupleadr: np.ndarray
   name_keyadr: np.ndarray

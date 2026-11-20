@@ -25,7 +25,6 @@ from mujodico.mjx._src import support
 # pylint: disable=g-importing-member
 from mujodico.mjx._src.dataclasses import PyTreeNode
 from mujodico.mjx._src.types import ConeType
-from mujodico.mjx._src.types import ContactApproxType
 from mujodico.mjx._src.types import ConstraintType
 from mujodico.mjx._src.types import Contact
 from mujodico.mjx._src.types import Data
@@ -55,7 +54,7 @@ class _Efc(PyTreeNode):
 
 
 def _persistent_active(m: Model) -> bool:
-  return m.opt._impl.contact_approx != ContactApproxType.MUJOCO
+  return support.contact_approx(m) != support.ContactApproxType.MUJOCO
 
 
 def _kbi(
