@@ -17,6 +17,8 @@ _XML = """
   </default>
 
   <worldbody>
+    <geom name="grid" type="plane" size="0 0 1"
+          contype="0" conaffinity="0" rgba="0.8 0.8 0.8 1" />
 
     <body name="pusher" pos="0 0 0">
       <joint name="pusher_slide" type="slide" axis="1 0 0" range="-2 2" />

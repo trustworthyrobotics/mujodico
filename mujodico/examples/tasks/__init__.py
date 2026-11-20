@@ -1,5 +1,4 @@
 from mujodico.examples.tasks.allegro_ball import AllegroBall
-from mujodico.examples.tasks.allegro_cube import AllegroCube
 from mujodico.examples.tasks.allegro_pen import AllegroPen
 from mujodico.examples.tasks.double_cart_pole import DoubleCartPole
 from mujodico.examples.tasks.finger_circular_knob import FingerCircularKnob
@@ -19,7 +18,6 @@ from mujodico.examples.tasks.task import Task
 
 __all__ = [
     'AllegroBall',
-    'AllegroCube',
     'AllegroPen',
     'DoubleCartPole',
     'FingerCircularKnob',
@@ -53,7 +51,6 @@ _TASKS = [
     FingerCircularKnob,
     FingersSphere2d,
     AllegroBall,
-    AllegroCube,
     AllegroPen,
 ]
 

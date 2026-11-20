@@ -160,7 +160,7 @@ Task: {self.__class__.__name__}
   nx = {self.nx} (nq={self.model.nq}, nv={self.model.nv}, na={self.model.na})
   ndx = {self.ndx}
   nu = {self.nu}
-  quaternion_addrs={qw_idxs} ({len(qw_idxs) if qw_idxs else 'no'} quaternion{'s' if len(qw_idxs) > 1 else ''} in state)
+  quaternion_addrs={qw_idxs}  ({len(qw_idxs) if qw_idxs else 'no'} quaternion{'s' if len(qw_idxs) > 1 else ''} in state)
   x_0 = {self.x_0}
   x_goal = {self.x_goal}
   diag(Q) = {np.diag(self.Q)}
@@ -171,8 +171,12 @@ Task: {self.__class__.__name__}
   diag(R) = {np.diag(self.R)}
   u_lb = {u_lb}
   u_ub = {u_ub}
-  contact_smoothing = {self.contact_smoothing}
-""")
+  contact_smoothing = {self.contact_smoothing}""")
+
+    from mujodico import mjx
+    model = mjx.put_model(self.model, impl='jax')
+    data = mjx.make_data(model, impl=model.impl)
+    print(f"  num_contacts = {data.ncon}")
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
     model = self.model

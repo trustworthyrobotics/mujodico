@@ -97,7 +97,6 @@ class TaskPlayback(Playback):
       self._selected_iteration = -1
       self._frame = 0
       try:
-        server.scene.add_grid('/grid')
         model = self._task.model
         self._data = mujoco.MjData(model)
         self._mj_scene = mjviser.ViserMujocoScene(server, model, num_envs=1)

@@ -16,7 +16,7 @@ _XML = """
   </default>
   <worldbody>
     <light pos="0 0 4" />
-    <geom name="ground" type="plane" size="3 3 0.1" rgba="0.8 0.8 0.8 1" />
+    <geom name="ground" type="plane" size="0 0 1" rgba="0.8 0.8 0.8 1" />
     <site name="goal" pos="0.0 0.0 1.0" size="0.04" rgba="0 0.8 0 0.5" />
     <body name="quadrotor" pos="0 0 1">
       <freejoint name="root" />

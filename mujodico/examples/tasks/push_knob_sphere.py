@@ -18,6 +18,8 @@ _XML = """
   </default>
 
   <worldbody>
+    <geom name="grid" type="plane" size="0 0 1"
+          contype="0" conaffinity="0" rgba="0.8 0.8 0.8 1" />
 
     <body name="pusher" pos="0 0 0">
       <joint name="pusher_slide_x" type="slide" axis="1 0 0" range="-0.5 0.5" />
@@ -38,7 +40,6 @@ _XML = """
             size="0.08"
             rgba="0 1 1 1" />
 
-      <!-- Distinct markers show all three rotation axes without contact. -->
       <geom name="x_indicator" type="sphere" pos="0.076 0 0" size="0.008"
             rgba="1 0 0 1" mass="0" contype="0" conaffinity="0" />
       <geom name="y_indicator" type="sphere" pos="0 0.076 0" size="0.008"
