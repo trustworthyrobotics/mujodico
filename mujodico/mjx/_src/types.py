@@ -1002,6 +1002,7 @@ class Contact(PyTreeNode):
     dist: distance between nearest points; neg: penetration
     pos: position of contact point: midpoint between geoms            (3,)
     frame: normal is in [0-2]                                         (9,)
+    frame_chart_rotation: rotation from chart to world coordinates   (3, 3)
     includemargin: include if dist<includemargin=margin               (1,)
     friction: tangent1, 2, spin, roll1, 2                             (5,)
     solref: constraint solver reference, normal direction             (mjNREF,)
@@ -1016,6 +1017,7 @@ class Contact(PyTreeNode):
   dist: jax.Array
   pos: jax.Array
   frame: jax.Array
+  frame_chart_rotation: jax.Array
   includemargin: jax.Array
   friction: jax.Array
   solref: jax.Array
