@@ -18,6 +18,12 @@ class TranscriptionParams:
   R: jax.Array
 
 
+def _contact_frame_options(task: Task) -> dict:
+  if task.planar_normal is not None:
+    return {'planar_normal': task.planar_normal}
+  return {'reference_state': task.x_0}
+
+
 class SingleShootingTranscription:
 
   def __init__(
@@ -28,6 +34,7 @@ class SingleShootingTranscription:
         mjmodel=task.model,
         contact_approximation=task.contact_approx,
         contact_smoothing=task.contact_smoothing,
+        **_contact_frame_options(task),
     )
 
     def rollout(x_0, us):
@@ -89,6 +96,7 @@ class MultipleShootingTranscription:
           mjmodel=task.model,
           contact_approximation=task.contact_approx,
           contact_smoothing=task.contact_smoothing,
+          **_contact_frame_options(task),
       )
 
     else:
@@ -98,6 +106,7 @@ class MultipleShootingTranscription:
               contact_approximation=task.contact_approx,
               contact_smoothing=task.contact_smoothing * 0.001,
               u_bounds=task.u_bounds,
+              **_contact_frame_options(task),
           )
       )
       ncf = len(bounds[0]) - task.nu
@@ -154,6 +163,7 @@ class LiftedMultipleShootingTranscription:
             contact_approximation=task.contact_approx,
             contact_smoothing=task.contact_smoothing * 0.001,
             u_bounds=task.u_bounds,
+            **_contact_frame_options(task),
         )
     )
 
@@ -207,6 +217,7 @@ class ContactImplicitTranscription:
     ) = trajopt.contact_implicit_transcription(
         mjmodel=task.model,
         u_bounds=task.u_bounds,
+        **_contact_frame_options(task),
     )
 
     def stage_cost(x, w, params):

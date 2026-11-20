@@ -72,6 +72,7 @@ class DoubleCartPole(Task):
         u_ref=np.zeros(model.nu),
         R=np.eye(model.nu) * 0.005,
         contact_smoothing=0.0,
+        planar_normal=(0.0, 1.0, 0.0),
     )
 
   @property
