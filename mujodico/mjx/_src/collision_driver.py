@@ -43,6 +43,7 @@ from typing import Dict, Iterator, List, Tuple, Union
 import jax
 from jax import numpy as jp
 import mujoco
+from mujodico.mjx._src import math
 from mujodico.mjx._src import support
 # pylint: disable=g-importing-member
 from mujodico.mjx._src.collision_convex import box_box
@@ -324,6 +325,7 @@ def _contact_groups(m: Model, d: Data) -> Dict[FunctionKey, Contact]:
         dist=None,
         pos=None,
         frame=None,
+        frame_chart_rotation=None,  # Assigned to final contact slots below.
         includemargin=includemargin,
         friction=friction,
         solref=solref,
@@ -457,5 +459,15 @@ def collision(m: Model, d: Data) -> Data:
 
   contacts = sum([condim_groups[k] for k in sorted(condim_groups)], [])
   contact = jax.tree_util.tree_map(lambda *x: jp.concatenate(x), *contacts)
+
+  # modify contact frame tangent based on frame_chart_rotation
+  rotations = d._impl.contact.frame_chart_rotation
+  assert rotations.shape[0] == contact.frame.shape[0]
+  frame = jax.vmap(
+      lambda normal, rotation: (
+          math.make_frame(rotation.T @ normal) @ rotation.T
+      )
+  )(contact.frame[:, 0, :], rotations)
+  contact = contact.replace(frame=frame, frame_chart_rotation=rotations)
 
   return d.tree_replace({'_impl.contact': contact})  # pyrefly: ignore[bad-return]

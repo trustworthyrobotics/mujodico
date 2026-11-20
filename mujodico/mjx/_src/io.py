@@ -690,6 +690,7 @@ def _make_data_contact_jax(
       dist=np.zeros((ncon,), dtype=float_),
       pos=np.zeros((ncon, 3), dtype=float_),
       frame=np.zeros((ncon, 3, 3), dtype=float_),
+      frame_chart_rotation=np.tile(np.eye(3, dtype=float_), (ncon, 1, 1)),
       includemargin=np.zeros((ncon,), dtype=float_),
       friction=np.zeros((ncon, 5), dtype=float_),
       solref=np.zeros((ncon, mujoco.mjNREF), dtype=float_),
@@ -971,7 +972,11 @@ def _put_contact(
     efc_address: np.ndarray,
 ) -> Tuple[types.Contact, np.ndarray]:
   """Converts mujoco.structs._MjContactList into mjx.Contact."""
-  fields = {f.name: getattr(c, f.name) for f in types.Contact.fields()}
+  fields = {
+      f.name: getattr(c, f.name)
+      for f in types.Contact.fields()
+      if f.name != 'frame_chart_rotation'
+  }
   fields['frame'] = fields['frame'].reshape((-1, 3, 3))
   # reorder contacts so that their condims match those specified in dim.
   # if we have fewer Contacts for a condim range, pad the range with zeros
@@ -996,6 +1001,9 @@ def _put_contact(
 
   fields['dim'] = dim
   fields['efc_address'] = efc_address
+  fields['frame_chart_rotation'] = np.tile(
+      np.eye(3, dtype=fields['frame'].dtype), (dim.size, 1, 1)
+  )
 
   # elevate integer precision under x64
   int_ = jp.zeros(1, int).dtype
@@ -1342,6 +1350,8 @@ def _get_contact(c: mujoco._structs._MjContactList, cx: types.Contact):
   """Converts mjx.Contact to mujoco._structs._MjContactList."""
   con_id = np.nonzero(cx.dist <= 0)[0]
   for field in types.Contact.fields():
+    if field.name == 'frame_chart_rotation':
+      continue  # This chart is MJX-only metadata, not a MuJoCo contact field.
     value = getattr(cx, field.name)[con_id]
     if field.name == 'frame':
       value = value.reshape((-1, 9))
