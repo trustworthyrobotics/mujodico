@@ -16,7 +16,7 @@ _XML = """
   </default>
   <worldbody>
     <light pos="0 -3 5" />
-    <geom name="ground" type="plane" size="4 2 0.1"
+    <geom name="grid" type="plane" contype="0" conaffinity="0" size="4 2 0.1"
           rgba="0.8 0.8 0.8 1" />
     <geom name="rail" type="capsule" fromto="-2.6 0 1.05 2.6 0 1.05"
           size="0.025" rgba="0.3 0.3 0.3 1" />

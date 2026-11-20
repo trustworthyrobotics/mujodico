@@ -18,7 +18,7 @@ _XML = """
   </default>
   <worldbody>
     <light pos="0 -3 8" />
-    <geom name="ground" type="plane" size="5 5 0.1"
+    <geom name="ground" type="plane" size="0 0 1"
           rgba="0.8 0.8 0.8 1" />
     <site name="landing_pad" type="cylinder" pos="0 0 0.002"
           size="0.7 0.002" rgba="0 0.6 0 0.4" />

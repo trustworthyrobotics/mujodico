@@ -18,11 +18,18 @@ _XML = """
   <include file="right_hand.xml"/>
 
   <worldbody>
+    <geom name="grid" type="plane" size="0 0 1"
+          contype="0" conaffinity="0" rgba="0.8 0.8 0.8 1" />
     <body name="object" pos="-0.035 0 0.06">
       <freejoint/>
       <geom type="sphere" size="0.05" rgba="0.5 0.7 0.5 1" friction="0.7"/>
-      <geom name="angle_indicator" type="sphere" size="0.008" pos="0.03 0 0.03" rgba="0 0 0 1"
-            contype="0" conaffinity="0" />
+
+      <geom name="x_indicator" type="sphere" pos="0.044 0 0" size="0.008"
+            rgba="1 0 0 1" mass="0" contype="0" conaffinity="0" />
+      <geom name="y_indicator" type="sphere" pos="0 0.044 0" size="0.008"
+            rgba="0 1 0 1" mass="0" contype="0" conaffinity="0" />
+      <geom name="z_indicator" type="sphere" pos="0 0 0.044" size="0.008"
+            rgba="0 0 1 1" mass="0" contype="0" conaffinity="0" />
     </body>
   </worldbody>
 
@@ -87,39 +94,37 @@ class AllegroBall(Task):
 
   def update_visualization(self, visualizer: TaskPlayback, traj: dict, k: int):
     super().update_visualization(visualizer, traj, k)
-    xs = traj['xs']
-    ts = np.arange(xs.shape[0]) * self.model.opt.timestep
-    labels = (
+    xs = np.asarray(traj['xs'])
+    ts = np.arange(len(xs)) * self.model.opt.timestep
+
+    attitude_error = np.rad2deg(
+        np.linalg.norm(quat_error(self.x_goal[19:23], xs[:, 19:23]), axis=1)
+    )
+
+    values = np.column_stack([xs[:, 16:18], attitude_error])
+    goals = np.r_[self.x_goal[16:18], 0.0]
+
+    labels = [
         'X Position (m)',
         'Y Position (m)',
-        'Z Position (m)',
         'Attitude error (deg)',
-    )
-    panels = []
-    for object_dof, label in enumerate(labels):
-      dof = 16 + object_dof
-      if object_dof < 3:
-        values = xs[:, dof]
-        goal = self.x_goal[dof]
-      else:
-        values = np.rad2deg(
-            np.linalg.norm(
-                quat_error(self.x_goal[dof : dof+4], xs[:, dof : dof+4]),
-                axis=1,
+    ]
+    visualizer.set_plot(
+        'trajectory',
+        util_uplot.UplotFigure(
+            tuple(
+                util_uplot.time_series_panel(
+                    ts,
+                    values[:, i],
+                    k + 1,
+                    ylabel=label,
+                    references=(util_uplot.ReferenceLine(goals[i]),),
+                    xlabel='Time (sec)' if i == len(labels) - 1 else '',
+                )
+                for i, label in enumerate(labels)
             )
-        )
-        goal = 0.0
-      panels.append(
-          util_uplot.time_series_panel(
-              ts,
-              values,
-              k + 1,
-              ylabel=label,
-              references=(util_uplot.ReferenceLine(goal),),
-              xlabel='Time (sec)' if object_dof == 3 else '',
-          )
-      )
-    visualizer.set_plot('trajectory', util_uplot.UplotFigure(tuple(panels)))
+        ),
+    )
 
 
 if __name__ == '__main__':
