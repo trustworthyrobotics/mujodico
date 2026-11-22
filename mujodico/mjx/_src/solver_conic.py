@@ -1,6 +1,6 @@
 """
-Solves next step contact force and velocity/acceleration for a log-barrier
-contact approximation. Under the contact approximaiton, the dynamcis are
+Solves next step contact force and velocity/acceleration for a conic
+contact approximation. Under this approximation, the dynamics are
     M(q) (v⁺ - v) + δt c(q⁺, v⁺) = δt τ(q⁺, v⁺, u) + J(q)ᵀ γ
     q⁺ = q ⊕ δt v⁺
     ν := J(q) v⁺ + ϕ(q) / (δt + τ) ∈ ℱ*

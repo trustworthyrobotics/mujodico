@@ -1170,7 +1170,6 @@ def muscle_dynamics(
 class ContactApproxType(enum.Enum):
   MUJOCO = 'mujoco'
   CONIC = 'conic'
-  LOG_BARRIER = 'log-barrier'
   KELVIN_VOIGT = 'kelvin-voigt'
   HUNT_CROSSLEY = 'hunt-crossley'
   LINEAR_ELASTIC = 'linear-elastic'

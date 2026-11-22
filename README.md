@@ -63,7 +63,7 @@ The differentiable contact models are configurable through XML custom fields. Ad
 </custom>
 ```
 
-**`contact_approx`** specifies the contact model used for the dynamics. Supported options are `mujoco`, `conic`, `log-barrier`, `kelvin-voigt`, `hunt-crossley`, and `linear-elastic` (defaults to `mujoco`).
+**`contact_approx`** specifies the contact model used for the dynamics. Supported options are `mujoco`, `conic`, `kelvin-voigt`, `hunt-crossley`, and `linear-elastic` (defaults to `mujoco`).
 `hunt-crossley` is recommended for most applications.
 
 **`contact_smoothing`** adds artificial smoothing to the contact model to make the resulting dynamics C¹-continuous (defaults to zero smoothing).
