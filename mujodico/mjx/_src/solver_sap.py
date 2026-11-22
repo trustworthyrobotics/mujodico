@@ -141,73 +141,6 @@ class SapDryFrictionConstraint(SapConstraint):
     )
 
 
-class SapLogbarrierNormalContactConstraint(SapConstraint):
-  phi0: jax.Array
-  tau: jax.Array
-  contact_smoothing: jax.Array
-
-  def __post_init__(self):
-    super().__post_init__()
-    assert self.phi0.shape == self.tau.shape
-    assert self.contact_smoothing.ndim == 0
-
-  @property
-  def _delta(self):
-    return self.contact_smoothing
-
-  def calc_impulse(self, vc: jax.Array) -> jax.Array:
-    assert vc.shape == self.phi0.shape
-
-    x = vc + self.phi0 / (self.dt + self.tau)
-    eps = self.contact_smoothing
-    delta = self._delta
-    k = eps / delta / delta
-
-    return jp.where(
-      x >= delta,
-      eps / x,
-      eps / delta - k * (x - delta),
-    )
-
-  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
-    assert vc.shape == self.phi0.shape
-
-    x = vc + self.phi0 / (self.dt + self.tau)
-    eps = self.contact_smoothing
-    delta = self._delta
-    k = eps / delta / delta
-
-    return jp.where(
-      x >= delta,
-      -eps / x**2,
-      -k,
-    )
-
-
-class SapLogbarrierFrictionalContactConstraint(SapConstraint):
-  phi0: jax.Array
-  vn0: jax.Array
-  friction: jax.Array
-  tau: jax.Array
-  contact_smoothing: jax.Array
-
-  def __post_init__(self):
-    super().__post_init__()
-    assert self.phi0.ndim == 0
-    assert self.vn0.ndim == 0
-    assert self.friction.ndim == 1
-    assert self.tau.ndim == 0
-    assert self.contact_smoothing.ndim == 0
-
-  def calc_impulse(self, vc: jax.Array) -> jax.Array:
-    assert vc.size == self.friction.size + 1
-    raise NotImplementedError()
-
-  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
-    assert vc.size == self.friction.size + 1
-    raise NotImplementedError()
-
-
 class SapKelvinVoigtNormalContactConstraint(SapConstraint):
   phi0: jax.Array
   stiffness: jax.Array
@@ -613,17 +546,7 @@ class Context(PyTreeNode):
     if mask.size:
       efc_masks.append(mask)
 
-      if contact_approx == support.ContactApproxType.LOG_BARRIER:
-        sap_constraints.append(
-          SapLogbarrierNormalContactConstraint(
-            phi0=d._impl.efc_pos[mask],
-            tau=d._impl.efc_b[mask] / jp.maximum(d._impl.efc_k[mask], 1e-8),
-            dt=dt,
-            contact_smoothing=jp.array(support.contact_smoothing(m)),
-          )
-        )
-
-      elif contact_approx == support.ContactApproxType.KELVIN_VOIGT:
+      if contact_approx == support.ContactApproxType.KELVIN_VOIGT:
         sap_constraints.append(
           SapKelvinVoigtNormalContactConstraint(
             phi0=d._impl.efc_pos[mask],
@@ -672,19 +595,7 @@ class Context(PyTreeNode):
       mask = np.arange(efc_address, efc_address + dim)
       efc_masks.append(mask)
 
-      if contact_approx == support.ContactApproxType.LOG_BARRIER:
-        sap_constraints.append(
-          SapLogbarrierFrictionalContactConstraint(
-            phi0=d._impl.efc_pos[efc_address],
-            vn0=d._impl.efc_J[efc_address] @ d.qvel,
-            friction=d._impl.contact.friction[k][:dim-1],
-            tau=d._impl.efc_b[efc_address] / jp.maximum(d._impl.efc_k[efc_address], 1e-8),
-            dt=dt,
-            contact_smoothing=jp.array(support.contact_smoothing(m)),
-          )
-        )
-
-      elif contact_approx == support.ContactApproxType.KELVIN_VOIGT:
+      if contact_approx == support.ContactApproxType.KELVIN_VOIGT:
         sap_constraints.append(
           SapKelvinVoigtFrictionalContactConstraint(
             phi0=d._impl.efc_pos[efc_address],
