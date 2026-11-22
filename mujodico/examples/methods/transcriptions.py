@@ -1,8 +1,10 @@
-import copy
 from dataclasses import dataclass
+import warnings
 import jax
 import jax.numpy as jp
+from mujodico import mjx
 from mujodico import trajopt
+from mujodico.mjx._src import support
 from mujodico.examples.tasks import Task
 from mujodico.examples.tasks.task import control_cost, state_cost
 import numpy as np
@@ -19,13 +21,6 @@ class TranscriptionParams:
   R: jax.Array
 
 
-def _scaled_contact_model(task: Task, scale: float):
-  model = copy.copy(task.model)
-  if task.contact_smoothing != 0:
-    model.numeric('contact_smoothing').data[:] *= scale
-  return model
-
-
 def _contact_frame_options(task: Task) -> dict:
   if task.planar_normal is not None:
     return {'planar_normal': task.planar_normal}
@@ -39,7 +34,7 @@ class SingleShootingTranscription:
       task: Task,
   ):
     step = trajopt.shooting_transcription(
-        mjmodel=task.model,
+        model=mjx.put_model(task.model, impl='jax'),
         **_contact_frame_options(task),
     )
 
@@ -99,14 +94,16 @@ class MultipleShootingTranscription:
     self.stage_inequality = None
     if not have_contact_force_inequality:
       dynamics = trajopt.shooting_transcription(
-          mjmodel=task.model,
+          model=mjx.put_model(task.model, impl='jax'),
           **_contact_frame_options(task),
       )
 
     else:
+      model = mjx.put_model(task.model, impl='jax')
+      model = support._with_contact_config(model, smoothing=task.contact_smoothing * 0.001)
       lifted_dynamics, force_equality, _, bounds = (
           trajopt.lifted_shooting_transcription(
-              mjmodel=_scaled_contact_model(task, 0.001),
+              model=model,
               u_bounds=task.u_bounds,
               **_contact_frame_options(task),
           )
@@ -159,9 +156,11 @@ class MultipleShootingTranscription:
 class LiftedMultipleShootingTranscription:
 
   def __init__(self, task: Task):
+    model = mjx.put_model(task.model, impl='jax')
+    model = support._with_contact_config(model, smoothing=task.contact_smoothing * 0.001)
     dynamics, stage_equality, stage_inequality, w_bounds = (
         trajopt.lifted_shooting_transcription(
-            mjmodel=_scaled_contact_model(task, 0.001),
+            model=model,
             u_bounds=task.u_bounds,
             **_contact_frame_options(task),
         )
@@ -209,13 +208,27 @@ class LiftedMultipleShootingTranscription:
 class ContactImplicitTranscription:
 
   def __init__(self, task: Task, *, independent_next_state: bool = True):
+    model = mjx.put_model(task.model, impl='jax')
+    contact_approx = support.contact_approx(model)
+    if contact_approx not in (
+        support.ContactApproxType.CONIC,
+        support.ContactApproxType.LINEAR_ELASTIC,
+      ):
+      warnings.warn(
+          f'ContactImplicitTranscription does not support {contact_approx.value} '
+          f'contact approximation; switching to conic.',
+          UserWarning,
+          stacklevel=2,
+      )
+      model = support._with_contact_config(model, approximation='conic')
+
     (
         dynamics,
         local_inequality,
         local_complementarity,
         w_bounds,
     ) = trajopt.contact_implicit_transcription(
-        mjmodel=task.model,
+        model=model,
         u_bounds=task.u_bounds,
         **_contact_frame_options(task),
     )
