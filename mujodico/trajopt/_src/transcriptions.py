@@ -3,18 +3,17 @@ from enum import Enum
 import jax
 import jax.numpy as jp
 from jax.typing import ArrayLike
-import mujoco
 from mujodico import mjx
 from mujodico.mjx._src import math
+from mujodico.mjx._src import solver_sap
 from mujodico.mjx._src import support
 from mujodico.trajopt._src.types import Bounds, LocalComplementarityConstraint
 import numpy as np
 
 
-def _put_optimization_model(mjmodel: mujoco.MjModel, **kwargs) -> mjx.Model:
+def _disable_control_clipping(model: mjx.Model) -> mjx.Model:
   """Control clipping is disabled to avoid the plant saturating controls.
   It is up to the optimizer to enforce control bounds explicitly."""
-  model = mjx.put_model(mjmodel, **kwargs)
   return model.tree_replace({
       'opt.disableflags': model.opt.disableflags | mjx.DisableBit.CLAMPCTRL
   })
@@ -71,7 +70,7 @@ def _make_transcription_data(
 
 
 def shooting_transcription(
-    mjmodel: mujoco.MjModel,
+    model: mjx.Model,
     *,
     planar_normal: ArrayLike | None = None,
     reference_state: ArrayLike | None = None,
@@ -83,7 +82,7 @@ def shooting_transcription(
   its derivatives use the XML custom ``contact_smoothing`` value.
 
   Args:
-    mjmodel: MuJoCo model to transcribe.
+    model: MJX model to transcribe.
     planar_normal: world-space normal to the plane of contact normals. Chooses
       a shared chart with its pole perpendicular to that plane.
     reference_state: finite [qpos, qvel, act] state used to center each contact
@@ -95,7 +94,7 @@ def shooting_transcription(
   Returns:
     dynamics: ``dynamics(x, u)`` returns the next state.
   """
-  smooth_model = _put_optimization_model(mjmodel, impl='jax')
+  smooth_model = _disable_control_clipping(model)
   model = support._with_contact_config(smooth_model, smoothing=0.0)
   data = _make_transcription_data(model, planar_normal, reference_state)
 
@@ -119,7 +118,7 @@ def shooting_transcription(
 
 
 def lifted_shooting_transcription(
-    mjmodel: mujoco.MjModel,
+    model: mjx.Model,
     u_bounds: Bounds | None = None,
     *,
     planar_normal: ArrayLike | None = None,
@@ -134,7 +133,7 @@ def lifted_shooting_transcription(
   contact.
 
   Args:
-    mjmodel: MuJoCo model to transcribe.
+    model: MJX model to transcribe.
     u_bounds: optional pair of lower and upper actuator control bounds.
               Defaults to unbounded controls.
     planar_normal: world-space normal to the plane of contact normals. Chooses
@@ -151,7 +150,7 @@ def lifted_shooting_transcription(
     stage_inequality: constraint ``stage_inequality(x, w) ≥ 0``.
     w_bounds: pair of lower and upper bounds for ``w``.
   """
-  model = _put_optimization_model(mjmodel, impl='jax')
+  model = _disable_control_clipping(model)
   data = _make_transcription_data(model, planar_normal, reference_state)
 
   cf_addresses, contacts = _extract_contact_indices(model, data)
@@ -205,7 +204,7 @@ def lifted_shooting_transcription(
 
 
 def contact_implicit_transcription(
-    mjmodel: mujoco.MjModel,
+    model: mjx.Model,
     u_bounds: Bounds | None = None,
     *,
     planar_normal: ArrayLike | None = None,
@@ -217,9 +216,13 @@ def contact_implicit_transcription(
   control; ``z`` contains nonnegative contact force variables.
   Uses Anitescu convex formulation for pyramidal contact.
   Uses Stewart-Trinkle formulation for elliptic contact.
+  Only ``conic`` and ``linear-elastic`` contact approximations are supported.
+  With g = ϕ(q) + δt J(q) v⁺, the force complementarity is λ ⊥ g for
+  conic contact and λ ⊥ λ + k g for linear-elastic contact. The latter
+  is equivalent to the unilateral spring law λ = k max(-g, 0).
 
   Args:
-    mjmodel: MuJoCo model to transcribe.
+    model: MJX model to transcribe.
     u_bounds: optional pair of lower and upper actuator control bounds.
               Defaults to unbounded controls.
     planar_normal: world-space normal to the plane of contact normals. Chooses
@@ -236,12 +239,16 @@ def contact_implicit_transcription(
     local_complementarity: local complementarity constraints.
     w_bounds: pair of lower and upper bounds for ``w``.
   """
-  model = support._with_contact_config(
-      _put_optimization_model(mjmodel, impl='jax'),
-      # As long as contact_approximation is not 'mujoco', efc_J and efc_pos
-      # will not be masked out (see mjx/constraint.py).
-      approximation='conic',
-  )
+  model = _disable_control_clipping(model)
+  contact_approx = support.contact_approx(model)
+  if contact_approx not in (
+      support.ContactApproxType.CONIC,
+      support.ContactApproxType.LINEAR_ELASTIC,
+  ):
+    raise ValueError(
+        'contact_implicit_transcription supports only conic or linear-elastic '
+        f'contact approximations; got {contact_approx.value}.'
+    )
   data = _make_transcription_data(model, planar_normal, reference_state)
 
   cf_addresses, contacts = _extract_contact_indices(model, data)
@@ -261,11 +268,10 @@ def contact_implicit_transcription(
     z_indexes.append(nz)
     nz += z_dim(contact)
 
-  def efc_J_phi(x: jax.Array) -> tuple[jax.Array, jax.Array]:
+  def contact_data(x: jax.Array) -> mjx.Data:
     nq, nv = model.nq, model.nv
     d = data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:])
-    d = mjx.fwd_position(model, d)
-    return d._impl.efc_J, d._impl.efc_pos
+    return mjx.fwd_position(model, d)
 
   def unpack_control(w):
     assert w.size == nu + nz
@@ -290,23 +296,32 @@ def contact_implicit_transcription(
   def local_inequality(x: jax.Array, w: jax.Array, x_next: jax.Array) -> jax.Array:
     _, z = unpack_control(w)
     v_next = x_next[model.nq:model.nq+model.nv]
-    efc_J, efc_phi = efc_J_phi(x)
-    _, efc_phi_next = efc_J_phi(x_next)
+
+    d = contact_data(x)
+    efc_J = d._impl.efc_J
+    predicted_gap = d._impl.efc_pos + model.opt.timestep * (efc_J @ v_next)
+    stiffness = d._impl.efc_k * solver_sap._STIFFNESS_SCALE
+
+    def contact_residual(indices, force):
+      gap = predicted_gap[indices]
+      if contact_approx == support.ContactApproxType.LINEAR_ELASTIC:
+        return force + stiffness[indices] * gap
+      return gap
 
     constraints = []
     for z_index, contact in zip(z_indexes, contacts):
       if contact.type == _Contact.Type.FRICTIONLESS:
-        # 0 ≤ λₙ ⊥ ϕ(q⁺) ≥ 0
-        constraints.append(efc_phi_next[contact.efc_index][None])
+        # 0 ≤ λₙ ⊥ gₙ (conic) or λₙ + kₙ gₙ (linear-elastic) ≥ 0
+        constraints.append(contact_residual(contact.efc_index, z[z_index])[None])
 
       elif contact.type == _Contact.Type.PYRAMIDAL:
-        # 0 ≤ λ ⊥ ϕ(q) + δt J(q) v⁺ ≥ 0
-        dt = model.opt.timestep
-        efc_indexs = jp.arange(contact.efc_index, contact.efc_index + z_dim(contact))
-        constraints.append(efc_phi[efc_indexs] + dt * efc_J[efc_indexs] @ v_next)
+        # 0 ≤ λₙ ⊥ gₙ (conic) or λₙ + kₙ gₙ (linear-elastic) ≥ 0
+        indices = jp.arange(contact.efc_index, contact.efc_index + z_dim(contact))
+        force = z[z_index:z_index + z_dim(contact)]
+        constraints.append(contact_residual(indices, force))
 
       elif contact.type == _Contact.Type.ELLIPTIC:
-        # 0 ≤ λₙ ⊥ ϕ(q⁺) ≥ 0
+        # 0 ≤ λₙ ⊥ gₙ (conic) or λₙ + kₙ gₙ (linear-elastic) ≥ 0
         # 0 ≤ λₜ₁ ⊥ Jₜ(q) v⁺ + ν / μ ≥ 0
         # 0 ≤ λₜ₂ ⊥ -Jₜ(q) v⁺ + ν / μ ≥ 0
         # 0 ≤ ν ⊥ λₙ - [λₜ₁ᵀ/μ  λₜ₂ᵀ/μ] 1 ≥ 0
@@ -316,7 +331,7 @@ def contact_implicit_transcription(
         lambdat = z_k[1:-1]
         nu = z_k[-1]
         friction = jp.tile(contact.friction, 2)
-        constraints.append(efc_phi_next[contact.efc_index][None])
+        constraints.append(contact_residual(contact.efc_index, lambdan)[None])
         constraints.append(jp.concatenate([vt_next, -vt_next]) + nu / friction)
         constraints.append((lambdan - jp.sum(lambdat / friction))[None])
 

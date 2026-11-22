@@ -1173,6 +1173,7 @@ class ContactApproxType(enum.Enum):
   LOG_BARRIER = 'log-barrier'
   KELVIN_VOIGT = 'kelvin-voigt'
   HUNT_CROSSLEY = 'hunt-crossley'
+  LINEAR_ELASTIC = 'linear-elastic'
 
 
 def contact_approx(m: Union[Model, mujoco.MjModel]) -> ContactApproxType:

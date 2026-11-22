@@ -9,9 +9,8 @@ import mujoco
 from mujodico import mjx
 from mujodico.mjx._src import solver_sap_util
 from mujodico.mjx._src import solver_sap
+from mujodico.mjx._src import support
 import numpy as np
-
-jax.config.update('jax_enable_x64', True)
 
 
 _TOLERANCE = 1e-5
@@ -22,6 +21,11 @@ def _assert_eq(a, b):
 
 
 class SolverSapTest(parameterized.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self.enterContext(jax.enable_x64())
+
 
   def test_soft_normalize(self):
     r = jp.linspace(0.0, 1.0, num=100)
@@ -209,7 +213,7 @@ class SolverSapTest(parameterized.TestCase):
 
   @parameterized.parameters(
       *product(
-        ['Kelvin-Voigt', 'Hunt-Crossley'],
+        ['Kelvin-Voigt', 'Hunt-Crossley', 'Linear-Elastic'],
         ['pyramidal', 'elliptic'],
         [1, 3, 4, 6],
       )

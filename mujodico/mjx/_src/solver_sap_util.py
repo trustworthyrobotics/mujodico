@@ -72,6 +72,31 @@ def reciprocal_approx_relu_grad(x, epsilon):
   )
 
 
+def linear_elastic_normal_impulse(
+    vn, phi0, dt, k, contact_smoothing, next_step=True
+):
+  """Unilateral spring impulse γ = δt k relu_ε(-φ)"""
+  tau = jp.where(contact_smoothing > 0, 2.0 * dt, 0.0)
+  time_scale = (dt + tau) if next_step else (tau)
+
+  x1 = -phi0 - time_scale * vn
+  eps1 = jp.sqrt(4 * contact_smoothing * time_scale / (k * dt))
+
+  return dt * k * reciprocal_approx_relu(x1, eps1)
+
+
+def linear_elastic_normal_impulse_grad(
+    vn, phi0, dt, k, contact_smoothing, next_step=True
+):
+  tau = jp.where(contact_smoothing > 0, 2.0 * dt, 0.0)
+  time_scale = (dt + tau) if next_step else (tau)
+
+  x1 = -phi0 - time_scale * vn
+  eps1 = jp.sqrt(4 * contact_smoothing * time_scale / (k * dt))
+
+  return dt * k * reciprocal_approx_relu_grad(x1, eps1) * -time_scale
+
+
 def kelvin_voigt_normal_impulse(
     vn, phi0, dt, k, tau, contact_smoothing, next_step=True
 ):

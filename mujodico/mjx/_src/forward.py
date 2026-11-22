@@ -64,6 +64,7 @@ _SOLVE_FUNC = {
     support.ContactApproxType.LOG_BARRIER: solver_sap.solve,
     support.ContactApproxType.KELVIN_VOIGT: solver_sap.solve,
     support.ContactApproxType.HUNT_CROSSLEY: solver_sap.solve,
+    support.ContactApproxType.LINEAR_ELASTIC: solver_sap.solve,
 }
 
 

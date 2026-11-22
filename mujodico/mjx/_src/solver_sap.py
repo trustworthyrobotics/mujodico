@@ -238,6 +238,34 @@ class SapKelvinVoigtNormalContactConstraint(SapConstraint):
     return solver_sap_util.kelvin_voigt_normal_impulse_grad(vn=vc, **self._params)
 
 
+class SapLinearElasticNormalContactConstraint(SapConstraint):
+  phi0: jax.Array
+  stiffness: jax.Array
+  contact_smoothing: jax.Array
+
+  def __post_init__(self):
+    super().__post_init__()
+    assert self.phi0.shape == self.stiffness.shape
+    assert self.contact_smoothing.ndim == 0
+
+  @property
+  def _params(self):
+    return {
+      'phi0': self.phi0,
+      'dt': self.dt,
+      'k': self.stiffness,
+      'contact_smoothing': self.contact_smoothing,
+    }
+
+  def calc_impulse(self, vc: jax.Array) -> jax.Array:
+    assert vc.shape == self.phi0.shape
+    return solver_sap_util.linear_elastic_normal_impulse(vn=vc, **self._params)
+
+  def calc_impulse_grad(self, vc: jax.Array) -> jax.Array:
+    assert vc.shape == self.phi0.shape
+    return solver_sap_util.linear_elastic_normal_impulse_grad(vn=vc, **self._params)
+
+
 class SapHuntCrossleyNormalContactConstraint(SapConstraint):
   phi0: jax.Array
   stiffness: jax.Array
@@ -371,6 +399,38 @@ class SapKelvinVoigtFrictionalContactConstraint(SapLaggedContactConstraint):
       vn=self.vn0,
       **self._params,
       next_step=False,
+    )
+
+
+class SapLinearElasticFrictionalContactConstraint(SapLaggedContactConstraint):
+  phi0: jax.Array
+  stiffness: jax.Array
+  contact_smoothing: jax.Array
+
+  def __post_init__(self):
+    super().__post_init__()
+    assert self.phi0.ndim == 0
+    assert self.stiffness.ndim == 0
+    assert self.contact_smoothing.ndim == 0
+
+  @property
+  def _params(self):
+    return {
+      'phi0': self.phi0,
+      'dt': self.dt,
+      'k': self.stiffness,
+      'contact_smoothing': self.contact_smoothing,
+    }
+
+  def gamma_n(self, vn: jax.Array) -> jax.Array:
+    return solver_sap_util.linear_elastic_normal_impulse(vn=vn, **self._params)
+
+  def gamma_n_grad(self, vn: jax.Array) -> jax.Array:
+    return solver_sap_util.linear_elastic_normal_impulse_grad(vn=vn, **self._params)
+
+  def gamma_n0(self) -> jax.Array:
+    return solver_sap_util.linear_elastic_normal_impulse(
+        vn=jp.zeros_like(self.phi0), **self._params, next_step=False
     )
 
 
@@ -574,6 +634,16 @@ class Context(PyTreeNode):
           )
         )
 
+      elif contact_approx == support.ContactApproxType.LINEAR_ELASTIC:
+        sap_constraints.append(
+          SapLinearElasticNormalContactConstraint(
+            phi0=d._impl.efc_pos[mask],
+            stiffness=d._impl.efc_k[mask] * _STIFFNESS_SCALE,
+            dt=dt,
+            contact_smoothing=jp.array(support.contact_smoothing(m)),
+          )
+        )
+
       elif contact_approx == support.ContactApproxType.HUNT_CROSSLEY:
         sap_constraints.append(
           SapHuntCrossleyNormalContactConstraint(
@@ -621,6 +691,17 @@ class Context(PyTreeNode):
             vn0=d._impl.efc_J[efc_address] @ d.qvel,
             stiffness=d._impl.efc_k[efc_address] * _STIFFNESS_SCALE,
             dissipation_time_scale=d._impl.efc_b[efc_address] / jp.maximum(d._impl.efc_k[efc_address], 1e-8),
+            friction=d._impl.contact.friction[k][:dim-1],
+            dt=dt,
+            contact_smoothing=jp.array(support.contact_smoothing(m)),
+          )
+        )
+
+      elif contact_approx == support.ContactApproxType.LINEAR_ELASTIC:
+        sap_constraints.append(
+          SapLinearElasticFrictionalContactConstraint(
+            phi0=d._impl.efc_pos[efc_address],
+            stiffness=d._impl.efc_k[efc_address] * _STIFFNESS_SCALE,
             friction=d._impl.contact.friction[k][:dim-1],
             dt=dt,
             contact_smoothing=jp.array(support.contact_smoothing(m)),
