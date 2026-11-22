@@ -17,12 +17,11 @@ _XML = """
   <option iterations="20" tolerance="1e-5" />
 
   <default>
-    <geom condim="3" friction="0.2" />
+    <geom condim="3" friction="0.2" contype="0" conaffinity="0" />
   </default>
 
   <worldbody>
-    <geom name="grid" type="plane" size="0 0 1"
-          contype="0" conaffinity="0" rgba="0.8 0.8 0.8 1" />
+    <geom name="grid" type="plane" size="0 0 1" rgba="0.8 0.8 0.8 1" />
 
     <body name="left_link1" pos="-0.15 0 0">
       <joint name="left_joint1" type="hinge" range="-90 90" />
@@ -30,7 +29,7 @@ _XML = """
 
       <body name="left_link2" pos="0 0.15 0">
         <joint name="left_joint2" type="hinge" range="-100 100" />
-        <geom type="capsule" size="0.03" fromto="0 0.06 0 0 0.15 0" />
+        <geom type="capsule" size="0.03" fromto="0 0.06 0 0 0.15 0" contype="1" />
       </body>
     </body>
 
@@ -40,7 +39,7 @@ _XML = """
 
       <body name="right_link2" pos="0 0.15 0">
         <joint name="right_joint2" type="hinge" range="-100 100" />
-        <geom type="capsule" size="0.03" fromto="0 0.06 0 0 0.15 0" />
+        <geom type="capsule" size="0.03" fromto="0 0.06 0 0 0.15 0" contype="1" />
       </body>
     </body>
 
@@ -49,7 +48,7 @@ _XML = """
       <joint name="object_translate_y" type="slide" axis="0 1 0" damping="1" range="-0.5 0.5" />
       <joint name="object_rotate" type="hinge" damping="0.025" />
 
-      <geom type="sphere" size="0.08" rgba="0 0 1 1" />
+      <geom type="sphere" size="0.08" rgba="0 0 1 1" conaffinity="1" />
       <geom name="angle_indicator" type="sphere" size="0.012" pos="0.05 0 0.05" rgba="0 0 0 1"
             contype="0" conaffinity="0" />
     </body>
