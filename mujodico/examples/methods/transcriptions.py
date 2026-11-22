@@ -100,7 +100,9 @@ class MultipleShootingTranscription:
 
     else:
       model = mjx.put_model(task.model, impl='jax')
-      model = support._with_contact_config(model, smoothing=task.contact_smoothing * 0.001)
+      model = support._with_contact_config(
+          model, smoothing=support.contact_smoothing(task.model) * 0.001
+      )
       lifted_dynamics, force_equality, _, bounds = (
           trajopt.lifted_shooting_transcription(
               model=model,
@@ -157,7 +159,9 @@ class LiftedMultipleShootingTranscription:
 
   def __init__(self, task: Task):
     model = mjx.put_model(task.model, impl='jax')
-    model = support._with_contact_config(model, smoothing=task.contact_smoothing * 0.001)
+    model = support._with_contact_config(
+        model, smoothing=support.contact_smoothing(task.model) * 0.001
+    )
     dynamics, stage_equality, stage_inequality, w_bounds = (
         trajopt.lifted_shooting_transcription(
             model=model,

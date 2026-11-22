@@ -22,14 +22,6 @@ class Task:
   planar_normal: tuple[float, float, float] | None = None
 
   @property
-  def contact_smoothing(self) -> float:
-    return support.contact_smoothing(self.model)
-
-  @property
-  def contact_approx(self):
-    return support.contact_approx(self.model)
-
-  @property
   def nx(self) -> int:
     return self.model.nq + self.model.nv + self.model.na
 
@@ -177,8 +169,8 @@ Task: {self.__class__.__name__}
   diag(R) = {np.diag(self.R)}
   u_lb = {u_lb}
   u_ub = {u_ub}
-  contact_approx = {self.contact_approx.value}
-  contact_smoothing = {self.contact_smoothing}""")
+  contact_approx = {support.contact_approx(self.model).value}
+  contact_smoothing = {support.contact_smoothing(self.model)}""")
 
     from mujodico import mjx
     model = mjx.put_model(self.model, impl='jax')

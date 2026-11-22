@@ -2,6 +2,7 @@ import copy
 import numpy as np
 import jax.numpy as jp
 from mujodico import trajopt
+from mujodico.mjx._src import support
 from mujodico.examples import methods
 from mujodico.examples.tasks import Task
 
@@ -11,7 +12,7 @@ class KnitroLiftedMultipleShooting:
   def __init__(self, task: Task):
     task = copy.copy(task)
     model = copy.copy(task.model)
-    if task.contact_smoothing != 0:
+    if support.contact_smoothing(model) != 0:
       model.numeric('contact_smoothing').data[:] *= 10
     object.__setattr__(task, "model", model)
 
