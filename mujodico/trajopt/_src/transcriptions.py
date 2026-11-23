@@ -216,7 +216,8 @@ def contact_implicit_transcription(
   control; ``z`` contains nonnegative contact force variables.
   Uses Anitescu convex formulation for pyramidal contact.
   Uses Stewart-Trinkle formulation for elliptic contact.
-  Only ``conic`` and ``linear-elastic`` contact approximations are supported.
+  Only ``conic`` and ``linear-elastic`` contact approximations are supported,
+  and the model's ``contact_smoothing`` must be zero.
   With g = ϕ(q) + δt J(q) v⁺, the force complementarity is λ ⊥ g for
   conic contact and λ ⊥ λ + k g for linear-elastic contact. The latter
   is equivalent to the unilateral spring law λ = k max(-g, 0).
@@ -248,6 +249,10 @@ def contact_implicit_transcription(
     raise ValueError(
         'contact_implicit_transcription supports only conic or linear-elastic '
         f'contact approximations; got {contact_approx.value}.'
+    )
+  if support.contact_smoothing(model) != 0:
+    raise ValueError(
+        'contact_implicit_transcription requires contact_smoothing == 0.'
     )
   data = _make_transcription_data(model, planar_normal, reference_state)
 
@@ -312,13 +317,14 @@ def contact_implicit_transcription(
     for z_index, contact in zip(z_indexes, contacts):
       if contact.type == _Contact.Type.FRICTIONLESS:
         # 0 ≤ λₙ ⊥ gₙ (conic) or λₙ + kₙ gₙ (linear-elastic) ≥ 0
-        constraints.append(contact_residual(contact.efc_index, z[z_index])[None])
+        lambdan = z[z_index]
+        constraints.append(contact_residual(contact.efc_index, lambdan)[None])
 
       elif contact.type == _Contact.Type.PYRAMIDAL:
         # 0 ≤ λₙ ⊥ gₙ (conic) or λₙ + kₙ gₙ (linear-elastic) ≥ 0
         indices = jp.arange(contact.efc_index, contact.efc_index + z_dim(contact))
-        force = z[z_index:z_index + z_dim(contact)]
-        constraints.append(contact_residual(indices, force))
+        lambdan = z[z_index:z_index + z_dim(contact)]
+        constraints.append(contact_residual(indices, lambdan))
 
       elif contact.type == _Contact.Type.ELLIPTIC:
         # 0 ≤ λₙ ⊥ gₙ (conic) or λₙ + kₙ gₙ (linear-elastic) ≥ 0
