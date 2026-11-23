@@ -213,6 +213,7 @@ class ContactImplicitTranscription:
 
   def __init__(self, task: Task, *, independent_next_state: bool = True):
     model = mjx.put_model(task.model, impl='jax')
+    model = support._with_contact_config(model, smoothing=0.0)
     contact_approx = support.contact_approx(model)
     if contact_approx not in (
         support.ContactApproxType.CONIC,
