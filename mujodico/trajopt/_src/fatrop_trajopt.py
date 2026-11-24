@@ -9,6 +9,7 @@ import numpy as np
 from mujodico.trajopt._src.stagewise_ocp_model import StagewiseOcpModel
 from mujodico.trajopt._src.types import (
     Bounds,
+    LocalFunction,
     Params,
     StageFunction,
     StateFunction,
@@ -28,6 +29,7 @@ class FatropTrajOpt:
       stage_cost: StageFunction,
       terminal_cost: StateFunction,
       stage_equality_constraint: StageFunction | None = None,
+      stage_equality_constraint_with_next: LocalFunction | None = None,
       stage_inequality_constraint: StageFunction | None = None,
       stage_inequality_bounds: Bounds | None = None,
       terminal_equality_constraint: StateFunction | None = None,
@@ -59,6 +61,7 @@ class FatropTrajOpt:
         stage_cost=stage_cost,
         terminal_cost=terminal_cost,
         stage_equality_constraint=stage_equality_constraint,
+        stage_equality_constraint_with_next=stage_equality_constraint_with_next,
         stage_inequality_constraint=stage_inequality_constraint,
         stage_inequality_bounds=stage_inequality_bounds,
         terminal_equality_constraint=terminal_equality_constraint,
@@ -223,7 +226,10 @@ class _FatropProblem:
       terminal_fn = getattr(m, 'terminal_' + kind + suffix)
 
       def evaluate(u, x, p):
-        stage = stage_fn(x[:-1], u, p)
+        if kind == 'equality':
+          stage = stage_fn(x[:-1], u, p, xs_next=x[1:])
+        else:
+          stage = stage_fn(x[:-1], u, p)
         terminal = terminal_fn(x[-1], p)
         if jacobian:
           jx, ju = stage

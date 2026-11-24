@@ -82,7 +82,7 @@ def solve(m: Model, d: Data) -> Data:
 
   warm_start = not m.opt.disableflags & DisableBit.WARMSTART
 
-  x_init = d.qvel if warm_start else None
+  x_init = d.qvel + dt * d.qacc_warmstart if warm_start else None
   z_init = d._impl.efc_force * dt if warm_start else None
 
   x, z, s = conic.solve(

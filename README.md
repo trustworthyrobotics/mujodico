@@ -72,7 +72,7 @@ A value of κ can be interpreted as applying a force of κ newtons over a distan
 ### Examples
 
 ```sh
-JAX_ENABLE_X64=1 python -m mujodico.examples --method IppasLiftedMultipleShooting --task AllegroBall --tests 10
+python -m mujodico.examples --method IppasLiftedMultipleShooting --task AllegroBall --tests 10
 ```
 
 For more options, see

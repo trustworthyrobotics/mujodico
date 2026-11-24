@@ -535,7 +535,7 @@ def evaluate(
 
   gx, gu = m.objective_gradient(it.x, it.u, params)
   A, B = m.dynamics_jacobian(it.x[:-1], it.u, it.x[1:], params)
-  Ex, Eu = m.stage_equality_jacobian(it.x[:-1], it.u, params)
+  Ex, Eu = m.stage_equality_jacobian(it.x[:-1], it.u, params, xs_next=it.x[1:])
   Gx, Gu = m.stage_inequality_jacobian(it.x[:-1], it.u, params)
   Gf = m.terminal_inequality_jacobian(it.x[-1], params)
   E0 = m.initial_jacobian(it.x[0], params)
@@ -586,7 +586,7 @@ def evaluate(
       stationarity_u=r_u,
       r0=m.initial_residual(it.x[0], params),
       r_f=m.dynamics_residual(it.x[:-1], it.u, it.x[1:], params),
-      r_e=m.stage_equality_residual(it.x[:-1], it.u, params),
+      r_e=m.stage_equality_residual(it.x[:-1], it.u, params, xs_next=it.x[1:]),
       r_g=m.stage_inequality_residual(it.x[:-1], it.u, params) - it.s,
       r_gf=m.terminal_inequality_residual(it.x[-1], params) - it.sf,
   )

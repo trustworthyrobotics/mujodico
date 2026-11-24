@@ -6,7 +6,9 @@ import jax.numpy as jp
 import numpy as np
 
 from mujodico.trajopt._src import manifold
-from mujodico.trajopt._src.types import Bounds, Params, StageFunction, StateFunction
+from mujodico.trajopt._src.types import (
+    Bounds, LocalFunction, Params, StageFunction, StateFunction,
+)
 
 
 class StagewiseOcpModel:
@@ -21,6 +23,10 @@ class StagewiseOcpModel:
   By default dynamics Jacobians hold the next-state chart fixed. Set
   full_dynamics_jacobian=True to differentiate the next-state retraction too
   and solve the resulting implicit linearization.
+
+  A stage_equality_constraint_with_next callback receives the next state as
+  a solver seed. Its derivatives are taken only with respect to the current
+  state and control.
   """
 
   def __init__(
@@ -34,6 +40,7 @@ class StagewiseOcpModel:
       stage_cost: StageFunction,
       terminal_cost: StateFunction,
       stage_equality_constraint: StageFunction | None = None,
+      stage_equality_constraint_with_next: LocalFunction | None = None,
       stage_inequality_constraint: StageFunction | None = None,
       stage_inequality_bounds: Bounds | None = None,
       terminal_equality_constraint: StateFunction | None = None,
@@ -46,6 +53,12 @@ class StagewiseOcpModel:
       full_dynamics_jacobian: bool = False,
       params_trace: Params | None = None,
   ):
+    if (
+        stage_equality_constraint is not None
+        and stage_equality_constraint_with_next is not None
+    ):
+      raise ValueError('Provide only one stage equality constraint callback.')
+
     for name, value, minimum in (('N', N, 0), ('nx', nx, 1), ('nu', nu, 0)):
       if (
           not isinstance(value, Integral)
@@ -83,6 +96,7 @@ class StagewiseOcpModel:
     self._user_stage_cost_fn = stage_cost
     self._user_terminal_cost_fn = terminal_cost
     self._user_stage_eq_fn = stage_equality_constraint
+    self._user_stage_eq_next_fn = stage_equality_constraint_with_next
     self._user_stage_ineq_fn = stage_inequality_constraint
     self._user_terminal_eq_fn = terminal_equality_constraint
     self._user_terminal_ineq_fn = terminal_inequality_constraint
@@ -209,11 +223,13 @@ class StagewiseOcpModel:
     def empty_state(x, p):
       return jp.zeros(0)
 
-    stage_eq = (
-        self._user_stage_eq_fn
-        if self._user_stage_eq_fn is not None
-        else empty_stage
-    )
+    def stage_eq(x, u, xnext, k, p):
+      if self._user_stage_eq_next_fn is not None:
+        return self._user_stage_eq_next_fn(x, u, jax.lax.stop_gradient(xnext), k, p)
+      if self._user_stage_eq_fn is not None:
+        return self._user_stage_eq_fn(x, u, k, p)
+      return empty_stage(x, u, k, p)
+
     user_stage_ineq = (
         self._user_stage_ineq_fn
         if self._user_stage_ineq_fn is not None
@@ -230,7 +246,7 @@ class StagewiseOcpModel:
         else empty_state
     )
 
-    ng = check(stage_eq, (x, u, k, params), None, 'stage equality')
+    ng = check(stage_eq, (x, u, x, k, params), None, 'stage equality')
     user_nh = check(
         user_stage_ineq, (x, u, k, params), None, 'stage inequality'
     )
@@ -279,13 +295,16 @@ class StagewiseOcpModel:
 
     ks = jp.arange(N)
 
-    def batch(fn, shape):
-      def evaluate(xs, us, p):
+    def batch(fn, shape, *, takes_next=False):
+      in_axes = (0, 0, 0, 0, None) if takes_next else (0, 0, 0, None)
+      batched = jax.vmap(fn, in_axes=in_axes)
+
+      def evaluate(xs, us, *args):
         if not N:
           if shape and isinstance(shape[0], tuple):
             return tuple(jp.zeros((0, *block)) for block in shape)
           return jp.zeros((0, *shape))
-        return jax.vmap(fn, in_axes=(0, 0, 0, None))(xs, us, ks, p)
+        return batched(xs, us, *args[:-1], ks, args[-1])
 
       return evaluate
 
@@ -352,7 +371,7 @@ class StagewiseOcpModel:
       value = scale * self._user_stage_cost_fn(x, u, k, p)
       if not self._gauss_newton:
         value += jp.vdot(ld, dynamics_local(x, u, xnext, k, p))
-        value += jp.vdot(le, stage_eq(x, u, k, p))
+        value += jp.vdot(le, stage_eq(x, u, xnext, k, p))
         value += jp.vdot(li, stage_ineq(x, u, k, p))
       return value
 
@@ -405,16 +424,20 @@ class StagewiseOcpModel:
         us,
         xs[1:],
     )
-    for name, fn, size in (
-        ('stage_equality', stage_eq, ng),
-        ('stage_inequality', stage_ineq, nh),
+    for name, fn, size, takes_next in (
+        ('stage_equality', stage_eq, ng, True),
+        ('stage_inequality', stage_ineq, nh, False),
     ):
-      add(name + '_residual', batch(fn, (size,)), xs[:-1], us)
+      args = (xs[:-1], us, xs[1:]) if takes_next else (xs[:-1], us)
+      add(name + '_residual', batch(fn, (size,), takes_next=takes_next), *args)
       add(
           name + '_jacobian',
-          batch(stage_derivative(fn, jax.jacfwd), ((size, tx), (size, nu))),
-          xs[:-1],
-          us,
+          batch(
+              stage_derivative(fn, jax.jacfwd),
+              ((size, tx), (size, nu)),
+              takes_next=takes_next,
+          ),
+          *args,
       )
     for name, fn in (
         ('terminal_equality', terminal_eq),
@@ -540,11 +563,22 @@ class StagewiseOcpModel:
     """
     return self._evaluate('dynamics_jacobian', xs, us, xs_next, params)
 
-  def stage_equality_residual(self, xs, us, params):
-    return self._evaluate('stage_equality_residual', xs, us, params)
+  def _evaluate_stage_equality(self, name, xs, us, xs_next, params):
+    if xs_next is None:
+      if self._user_stage_eq_next_fn is not None:
+        raise ValueError('Pass xs_next to evaluate the next-state stage equality.')
+      xs_next = xs
+    return self._evaluate(name, xs, us, xs_next, params)
 
-  def stage_equality_jacobian(self, xs, us, params):
-    return self._evaluate('stage_equality_jacobian', xs, us, params)
+  def stage_equality_residual(self, xs, us, params, *, xs_next=None):
+    return self._evaluate_stage_equality(
+        'stage_equality_residual', xs, us, xs_next, params
+    )
+
+  def stage_equality_jacobian(self, xs, us, params, *, xs_next=None):
+    return self._evaluate_stage_equality(
+        'stage_equality_jacobian', xs, us, xs_next, params
+    )
 
   def stage_inequality_residual(self, xs, us, params):
     return self._evaluate('stage_inequality_residual', xs, us, params)

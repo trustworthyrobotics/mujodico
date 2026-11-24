@@ -157,7 +157,7 @@ class MultipleShootingTranscription:
 
 class LiftedMultipleShootingTranscription:
 
-  def __init__(self, task: Task):
+  def __init__(self, task: Task, *, mjx_float32: bool = False):
     model = mjx.put_model(task.model, impl='jax')
     model = support._with_contact_config(
         model, smoothing=support.contact_smoothing(task.model) * 0.001
@@ -166,6 +166,7 @@ class LiftedMultipleShootingTranscription:
         trajopt.lifted_shooting_transcription(
             model=model,
             u_bounds=task.u_bounds,
+            mjx_float32=mjx_float32,
             **_contact_frame_options(task),
         )
     )
