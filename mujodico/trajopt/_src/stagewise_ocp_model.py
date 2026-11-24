@@ -24,9 +24,9 @@ class StagewiseOcpModel:
   full_dynamics_jacobian=True to differentiate the next-state retraction too
   and solve the resulting implicit linearization.
 
-  A stage_equality_constraint_with_next callback receives the next state as
-  a solver seed. Its derivatives are taken only with respect to the current
-  state and control.
+  The dynamics_with_next and stage_equality_constraint_with_next callbacks
+  receive the next state as a fixed solver seed. The dynamics defect still
+  uses the next state when differentiating the defect's state difference.
   """
 
   def __init__(
@@ -36,7 +36,8 @@ class StagewiseOcpModel:
       nu: int,
       *,
       initial_state: Callable[[Params], jax.Array],
-      dynamics: StageFunction,
+      dynamics: StageFunction | None = None,
+      dynamics_with_next: LocalFunction | None = None,
       stage_cost: StageFunction,
       terminal_cost: StateFunction,
       stage_equality_constraint: StageFunction | None = None,
@@ -53,6 +54,8 @@ class StagewiseOcpModel:
       full_dynamics_jacobian: bool = False,
       params_trace: Params | None = None,
   ):
+    if (dynamics is None) == (dynamics_with_next is None):
+      raise ValueError('Provide exactly one dynamics callback.')
     if (
         stage_equality_constraint is not None
         and stage_equality_constraint_with_next is not None
@@ -93,6 +96,7 @@ class StagewiseOcpModel:
 
     self._user_initial_state_fn = initial_state
     self._user_dynamics_fn = dynamics
+    self._user_dynamics_next_fn = dynamics_with_next
     self._user_stage_cost_fn = stage_cost
     self._user_terminal_cost_fn = terminal_cost
     self._user_stage_eq_fn = stage_equality_constraint
@@ -211,10 +215,15 @@ class StagewiseOcpModel:
           f' {expected if expected is not None else "a vector"}.'
       )
 
+    def predict(x, u, xnext, k, p):
+      if self._user_dynamics_next_fn is not None:
+        return self._user_dynamics_next_fn(x, u, jax.lax.stop_gradient(xnext), k, p)
+      return self._user_dynamics_fn(x, u, k, p)
+
     check(self._user_initial_state_fn, (params,), (nx,), 'initial_state')
     check(self._user_terminal_cost_fn, (x, params), (), 'terminal_cost')
     if N:
-      check(self._user_dynamics_fn, (x, u, k, params), (nx,), 'dynamics')
+      check(predict, (x, u, x, k, params), (nx,), 'dynamics')
       check(self._user_stage_cost_fn, (x, u, k, params), (), 'stage_cost')
 
     def empty_stage(x, u, k, p):
@@ -324,7 +333,7 @@ class StagewiseOcpModel:
       return jp.concatenate([gx, terminal[None]]), gu
 
     def dynamics_local(x, u, xnext, k, p):
-      return self._state_difference(self._user_dynamics_fn(x, u, k, p), xnext)
+      return self._state_difference(predict(x, u, xnext, k, p), xnext)
 
     def dynamics_residual(x, u, xnext, p):
       if not N:

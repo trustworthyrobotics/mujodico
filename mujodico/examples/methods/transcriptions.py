@@ -88,13 +88,18 @@ class SingleShootingTranscription:
 class MultipleShootingTranscription:
 
   def __init__(
-      self, task: Task, *, have_contact_force_inequality: bool = False
+      self,
+      task: Task,
+      *,
+      have_contact_force_inequality: bool = False,
+      mjx_float32: bool = False,
   ):
 
     self.stage_inequality = None
     if not have_contact_force_inequality:
       dynamics = trajopt.shooting_transcription(
           model=mjx.put_model(task.model, impl='jax'),
+          mjx_float32=mjx_float32,
           **_contact_frame_options(task),
       )
 
@@ -107,19 +112,24 @@ class MultipleShootingTranscription:
           trajopt.lifted_shooting_transcription(
               model=model,
               u_bounds=task.u_bounds,
+              mjx_float32=mjx_float32,
               **_contact_frame_options(task),
           )
       )
       ncf = len(bounds[0]) - task.nu
       positive = jp.asarray(np.flatnonzero(np.isfinite(bounds[0][task.nu :])))
 
-      def predicted_force(x, u):
-        return -force_equality(x, jp.concatenate([u, jp.zeros(ncf)]))
+      def predicted_force(x, u, x_next):
+        return -force_equality(x, jp.concatenate([u, jp.zeros(ncf)]), x_next)
 
-      def dynamics(x, u):
-        return lifted_dynamics(x, jp.concatenate([u, predicted_force(x, u)]))
+      def dynamics(x, u, x_next=None):
+        force = predicted_force(x, u, x_next)
+        return lifted_dynamics(x, jp.concatenate([u, force]))
 
-      self.stage_inequality = lambda x, u: predicted_force(x, u)[positive]
+      def stage_inequality(x, u, x_next=None):
+        return predicted_force(x, u, x_next)[positive]
+
+      self.stage_inequality = stage_inequality
 
     def stage_cost(x, u, params):
       return state_cost(
