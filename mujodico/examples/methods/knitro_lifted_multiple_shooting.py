@@ -43,7 +43,7 @@ class KnitroLiftedMultipleShooting:
         local_equality_constraint=lambda x, w, xnext, k, params: (
             jp.concatenate([
                 xnext - trans.dynamics(x, w),
-                trans.stage_equality(x, w),
+                trans.stage_equality(x, w, xnext),
             ])
         ),
         local_inequality_constraint=lambda x, w, xnext, k, params: (

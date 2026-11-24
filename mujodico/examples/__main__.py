@@ -3,11 +3,15 @@ import csv
 from pathlib import Path
 from absl import app
 from absl import flags
+import jax
 from mujodico.examples.methods import get_method_names, parse_method_name
 from mujodico.examples.tasks import get_task_names, parse_task_name
 from mujodico.examples.tasks.task import state_cost
 from mujodico.examples.tasks.task_playback import TaskPlayback
 from mujodico.examples.visualizer import Visualizer
+
+
+jax.config.update("jax_enable_x64", True)
 
 
 _METHOD = flags.DEFINE_string(

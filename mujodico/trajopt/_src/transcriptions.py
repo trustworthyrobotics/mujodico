@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from dataclasses import dataclass
 from enum import Enum
 import jax
@@ -123,6 +124,7 @@ def lifted_shooting_transcription(
     *,
     planar_normal: ArrayLike | None = None,
     reference_state: ArrayLike | None = None,
+    mjx_float32: bool = False,
 ):
   """Builds dynamics and constraints with contact forces as lifted controls.
 
@@ -143,15 +145,24 @@ def lifted_shooting_transcription(
       the model's default state. Charts remain fixed for the returned functions.
       Reference charts move singularities away from the reference normals;
       they do not guarantee coverage of every future contact normal.
+    mjx_float32: evaluate MJX dynamics and contact forces in float32. Cast
+      predictions back to the caller's dtype before assembling residuals.
 
   Returns:
     dynamics: ``dynamics(x, w)`` returns the next state.
-    stage_equality: constraint ``stage_equality(x, w) = 0``.
+    stage_equality: constraint ``stage_equality(x, w, x_next=None) = 0``.
+      When supplied, ``x_next`` seeds the contact solve with its velocity.
     stage_inequality: constraint ``stage_inequality(x, w) ≥ 0``.
     w_bounds: pair of lower and upper bounds for ``w``.
   """
   model = _disable_control_clipping(model)
-  data = _make_transcription_data(model, planar_normal, reference_state)
+  with jax.enable_x64(False) if mjx_float32 else nullcontext():
+    if mjx_float32:
+      model = jax.tree.map(
+          lambda a: a.astype(jp.float32) if jp.issubdtype(a.dtype, jp.floating) else a,
+          model,
+      )
+    data = _make_transcription_data(model, planar_normal, reference_state)
 
   cf_addresses, contacts = _extract_contact_indices(model, data)
   elliptic_contacts = [c for c in contacts if c.type == _Contact.Type.ELLIPTIC]
@@ -159,9 +170,15 @@ def lifted_shooting_transcription(
   nu = model.nu
   ncf = int(cf_addresses.size)
 
-  def step1(x: jax.Array, u: jax.Array) -> jax.Array:
+  use_next_velocity = support.contact_approx(model) != support.ContactApproxType.MUJOCO
+
+  def step1(x: jax.Array, u: jax.Array, x_next: jax.Array | None) -> jax.Array:
     nq, nv = model.nq, model.nv
     d = data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
+    if use_next_velocity and x_next is not None:
+      d = d.replace(qacc_warmstart=jax.lax.stop_gradient(
+          (x_next[nq:nq+nv] - d.qvel) / model.opt.timestep
+      ))
     d = mjx.forward(model, d)
     return d._impl.efc_force[cf_addresses]
 
@@ -176,11 +193,23 @@ def lifted_shooting_transcription(
 
   def dynamics(x: jax.Array, w: jax.Array) -> jax.Array:
     u, cf = unpack_control(w)
+    if mjx_float32:
+      with jax.enable_x64(False):
+        x_next = step2(x.astype(jp.float32), u.astype(jp.float32), cf.astype(jp.float32))
+      return x_next.astype(x.dtype)
     return step2(x, u, cf)
 
-  def stage_equality(x: jax.Array, w: jax.Array) -> jax.Array:
+  def stage_equality(
+      x: jax.Array, w: jax.Array, x_next: jax.Array | None = None,
+  ) -> jax.Array:
     u, cf = unpack_control(w)
-    return cf - step1(x, u)
+    if mjx_float32:
+      with jax.enable_x64(False):
+        if x_next is not None:
+          x_next = x_next.astype(jp.float32)
+        force = step1(x.astype(jp.float32), u.astype(jp.float32), x_next)
+      return cf - force.astype(cf.dtype)
+    return cf - step1(x, u, x_next)
 
   def stage_inequality(x: jax.Array, w: jax.Array) -> jax.Array:
     del x

@@ -374,7 +374,7 @@ def evaluate_trial(
       'objective': jp.sum(m.objective(it.x, it.u, params)),
       'r0': m.initial_residual(it.x[0], params),
       'r_f': m.dynamics_residual(it.x[:-1], it.u, it.x[1:], params),
-      'r_e': m.stage_equality_residual(it.x[:-1], it.u, params),
+      'r_e': m.stage_equality_residual(it.x[:-1], it.u, params, xs_next=it.x[1:]),
       'r_g': m.stage_inequality_residual(it.x[:-1], it.u, params) - it.s,
       'r_gf': m.terminal_inequality_residual(it.x[-1], params) - it.sf,
   }

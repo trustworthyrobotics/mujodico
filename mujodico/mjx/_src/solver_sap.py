@@ -440,7 +440,7 @@ class Context(PyTreeNode):
 
     warm_start = not m.opt.disableflags & DisableBit.WARMSTART
     qvel_init = (
-      d.qvel
+      d.qvel + m.opt.timestep * d.qacc_warmstart
       if warm_start
       else jax.scipy.linalg.cho_solve(cho_qM, qM_qvel_smooth)
     )

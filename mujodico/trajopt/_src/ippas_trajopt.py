@@ -9,6 +9,7 @@ from mujodico.trajopt._src.ippas import IppasSolver
 from mujodico.trajopt._src.ippas import IppasStatus
 from mujodico.trajopt._src.stagewise_ocp_model import StagewiseOcpModel
 from mujodico.trajopt._src.types import Bounds
+from mujodico.trajopt._src.types import LocalFunction
 from mujodico.trajopt._src.types import Params
 from mujodico.trajopt._src.types import StageFunction
 from mujodico.trajopt._src.types import StateFunction
@@ -32,6 +33,7 @@ class IppasTrajOpt:
       stage_cost: StageFunction,
       terminal_cost: StateFunction,
       stage_equality_constraint: StageFunction | None = None,
+      stage_equality_constraint_with_next: LocalFunction | None = None,
       stage_inequality_constraint: StageFunction | None = None,
       stage_inequality_bounds: Bounds | None = None,
       terminal_inequality_constraint: StateFunction | None = None,
@@ -53,6 +55,7 @@ class IppasTrajOpt:
         stage_cost=stage_cost,
         terminal_cost=terminal_cost,
         stage_equality_constraint=stage_equality_constraint,
+        stage_equality_constraint_with_next=stage_equality_constraint_with_next,
         stage_inequality_constraint=stage_inequality_constraint,
         stage_inequality_bounds=stage_inequality_bounds,
         terminal_inequality_constraint=terminal_inequality_constraint,

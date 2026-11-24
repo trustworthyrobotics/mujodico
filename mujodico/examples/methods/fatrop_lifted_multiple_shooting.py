@@ -30,8 +30,8 @@ class FatropLiftedMultipleShooting:
         dynamics=lambda x, w, k, params: trans.dynamics(x, w),
         stage_cost=lambda x, w, k, params: trans.stage_cost(x, w, params),
         terminal_cost=trans.terminal_cost,
-        stage_equality_constraint=lambda x, w, k, params: (
-            trans.stage_equality(x, w)
+        stage_equality_constraint_with_next=lambda x, w, x_next, k, params: (
+            trans.stage_equality(x, w, x_next)
         ),
         stage_inequality_constraint=lambda x, w, k, params: (
             trans.stage_inequality(x, w)
