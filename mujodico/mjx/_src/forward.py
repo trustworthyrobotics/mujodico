@@ -27,6 +27,7 @@ from mujodico.mjx._src import math
 from mujodico.mjx._src import passive
 from mujodico.mjx._src import scan
 from mujodico.mjx._src import sensor
+from mujodico.mjx._src import small_la
 from mujodico.mjx._src import smooth
 from mujodico.mjx._src import solver
 from mujodico.mjx._src import solver_conic
@@ -556,9 +557,8 @@ def implicit(m: Model, d: Data) -> Data:
     # TODO(robotics-simulation): use smooth.factor_m / solve_m here:
     qm = support.full_m(m, d) if support.is_sparse(m) else d._impl.M
     qm -= m.opt.timestep * qderiv
-    qh, _ = jax.scipy.linalg.cho_factor(qm)
     qfrc = d.qfrc_smooth + d.qfrc_constraint
-    qacc = jax.scipy.linalg.cho_solve((qh, False), qfrc)
+    qacc = small_la.spd_solve(qm, qfrc)
 
   return _advance(m, d, d.act_dot, qacc)
 
