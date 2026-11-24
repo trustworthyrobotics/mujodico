@@ -25,7 +25,9 @@ class FatropMultipleShooting:
         nx=trans.nx,
         nu=trans.nu,
         initial_state=lambda params: params.x_0,
-        dynamics=lambda x, u, k, params: trans.dynamics(x, u),
+        dynamics_with_next=lambda x, u, x_next, k, params: (
+            trans.dynamics(x, u, x_next)
+        ),
         stage_cost=lambda x, u, k, params: trans.stage_cost(x, u, params),
         terminal_cost=trans.terminal_cost,
         stage_inequality_constraint=(

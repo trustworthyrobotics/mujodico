@@ -20,6 +20,24 @@ def _disable_control_clipping(model: mjx.Model) -> mjx.Model:
   })
 
 
+def _float32_model(model: mjx.Model) -> mjx.Model:
+  return jax.tree.map(
+      lambda a: a.astype(jp.float32) if jp.issubdtype(a.dtype, jp.floating) else a,
+      model,
+  )
+
+
+def _seed_next_velocity(
+    model: mjx.Model, data: mjx.Data, x_next: jax.Array | None,
+) -> mjx.Data:
+  if x_next is None or support.contact_approx(model) == support.ContactApproxType.MUJOCO:
+    return data
+  velocity = x_next[model.nq:model.nq + model.nv]
+  return data.replace(qacc_warmstart=jax.lax.stop_gradient(
+      (velocity - data.qvel) / model.opt.timestep
+  ))
+
+
 def _make_transcription_data(
     model: mjx.Model,
     planar_normal: ArrayLike | None,
@@ -75,6 +93,7 @@ def shooting_transcription(
     *,
     planar_normal: ArrayLike | None = None,
     reference_state: ArrayLike | None = None,
+    mjx_float32: bool = False,
 ):
   """Builds a one-step shooting dynamics function with smoothed derivatives.
 
@@ -91,24 +110,42 @@ def shooting_transcription(
       the model's default state. Charts remain fixed for the returned dynamics.
       Reference charts move singularities away from the reference normals;
       they do not guarantee coverage of every future contact normal.
+    mjx_float32: evaluate the MJX steps in float32 and return the next state
+      in the caller's dtype.
 
   Returns:
-    dynamics: ``dynamics(x, u)`` returns the next state.
+    dynamics: ``dynamics(x, u, x_next=None)`` returns the predicted next state.
+      When supplied, ``x_next`` seeds the contact solve with its velocity.
   """
   smooth_model = _disable_control_clipping(model)
-  model = support._with_contact_config(smooth_model, smoothing=0.0)
-  data = _make_transcription_data(model, planar_normal, reference_state)
+  with jax.enable_x64(False) if mjx_float32 else nullcontext():
+    if mjx_float32:
+      smooth_model = _float32_model(smooth_model)
+    model = support._with_contact_config(smooth_model, smoothing=0.0)
+    data = _make_transcription_data(model, planar_normal, reference_state)
 
-  def dynamics(x: jax.Array, u: jax.Array) -> jax.Array:
+  def step(x, u, x_next):
     nq, nv = model.nq, model.nv
     d = data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
+    d = _seed_next_velocity(model, d, x_next)
 
     next_data = mjx.step(model, d)
     xnext = jp.concatenate((next_data.qpos, next_data.qvel, next_data.act))
-
     smooth_data = mjx.step(smooth_model, d)
     xnext_smooth = jp.concatenate((smooth_data.qpos, smooth_data.qvel, smooth_data.act))
+    return xnext, xnext_smooth
 
+  def dynamics(
+      x: jax.Array, u: jax.Array, x_next: jax.Array | None = None,
+  ) -> jax.Array:
+    if mjx_float32:
+      with jax.enable_x64(False):
+        if x_next is not None:
+          x_next = x_next.astype(jp.float32)
+        xnext, xnext_smooth = step(x.astype(jp.float32), u.astype(jp.float32), x_next)
+      xnext, xnext_smooth = xnext.astype(x.dtype), xnext_smooth.astype(x.dtype)
+    else:
+      xnext, xnext_smooth = step(x, u, x_next)
     return (
         jax.lax.stop_gradient(xnext)
         + xnext_smooth
@@ -158,10 +195,7 @@ def lifted_shooting_transcription(
   model = _disable_control_clipping(model)
   with jax.enable_x64(False) if mjx_float32 else nullcontext():
     if mjx_float32:
-      model = jax.tree.map(
-          lambda a: a.astype(jp.float32) if jp.issubdtype(a.dtype, jp.floating) else a,
-          model,
-      )
+      model = _float32_model(model)
     data = _make_transcription_data(model, planar_normal, reference_state)
 
   cf_addresses, contacts = _extract_contact_indices(model, data)
@@ -170,15 +204,10 @@ def lifted_shooting_transcription(
   nu = model.nu
   ncf = int(cf_addresses.size)
 
-  use_next_velocity = support.contact_approx(model) != support.ContactApproxType.MUJOCO
-
   def step1(x: jax.Array, u: jax.Array, x_next: jax.Array | None) -> jax.Array:
     nq, nv = model.nq, model.nv
     d = data.replace(qpos=x[:nq], qvel=x[nq:nq+nv], act=x[nq+nv:], ctrl=u)
-    if use_next_velocity and x_next is not None:
-      d = d.replace(qacc_warmstart=jax.lax.stop_gradient(
-          (x_next[nq:nq+nv] - d.qvel) / model.opt.timestep
-      ))
+    d = _seed_next_velocity(model, d, x_next)
     d = mjx.forward(model, d)
     return d._impl.efc_force[cf_addresses]
 

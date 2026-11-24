@@ -10,7 +10,7 @@ from mujodico.examples.tasks import Task
 
 class IppasMultipleShooting:
 
-  def __init__(self, task: Task, *, gauss_newton: bool = True):
+  def __init__(self, task: Task):
     self.transcription = methods.MultipleShootingTranscription(task)
     trans = self.transcription
 
@@ -19,7 +19,9 @@ class IppasMultipleShooting:
         nx=trans.nx,
         nu=trans.nu,
         initial_state=lambda params: params.x_0,
-        dynamics=lambda x, u, k, params: trans.dynamics(x, u),
+        dynamics_with_next=lambda x, u, x_next, k, params: (
+            trans.dynamics(x, u, x_next)
+        ),
         stage_cost=lambda x, u, k, params: trans.stage_cost(x, u, params),
         terminal_cost=trans.terminal_cost,
         stage_inequality_constraint=(
@@ -29,7 +31,6 @@ class IppasMultipleShooting:
         x_bounds=trans.x_bounds,
         u_bounds=trans.u_bounds,
         quaternion_addrs=task.quaternion_addrs,
-        gauss_newton=gauss_newton,
         params_trace=trans.params,
     )
 
