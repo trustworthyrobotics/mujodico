@@ -110,28 +110,21 @@ class Quadrotor(Task):
     )
 
     if 'us' in traj:
-      us = np.asarray(traj['us'])
       lower, upper = self.u_bounds
-      visualizer.set_plot(
-          'controls',
-          util_uplot.UplotFigure(
-              tuple(
-                  util_uplot.time_series_panel(
-                      ts,
-                      us[:, i],
-                      k,
-                      ylabel=f'{name} thrust (N)',
-                      references=(
-                          util_uplot.ReferenceLine(self.u_ref[i], 'Reference'),
-                          util_uplot.ReferenceLine(lower[i], 'Lower bound', 'red', (2, 3)),
-                          util_uplot.ReferenceLine(upper[i], 'Upper bound', 'red', (2, 3)),
-                      ),
-                      xlabel='Time (sec)' if i == 3 else '',
-                  )
-                  for i, name in enumerate(('Front', 'Left', 'Back', 'Right'))
-              )
+      thrust_panel = util_uplot.time_series_panel(
+          ts,
+          traj['us'],
+          k,
+          ylabel='Rotor thrust (N)',
+          labels=('Front', 'Left', 'Back', 'Right'),
+          colors=('red', 'blue', 'green', 'orange'),
+          references=(
+              util_uplot.ReferenceLine(self.u_ref[0], 'Hover'),
+              util_uplot.ReferenceLine(lower[0], 'Lower bound'),
+              util_uplot.ReferenceLine(upper[0], 'Upper bound'),
           ),
       )
+      visualizer.set_plot('controls', util_uplot.UplotFigure((thrust_panel,)))
 
 
 if __name__ == "__main__":
