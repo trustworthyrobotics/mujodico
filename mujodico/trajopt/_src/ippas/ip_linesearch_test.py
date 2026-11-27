@@ -164,7 +164,7 @@ class IpLinesearchTest(absltest.TestCase):
         float(data.objective),
     )
     fs = g.LineSearchState.create(20, jp.array(0.0), options)
-    step, _, _, _ = jax.jit(
+    step, _, _, _, _ = jax.jit(
         lambda: ip_linesearch.find_acceptable_trial_point(
             m, it, data, direction, jp.array(0.1), p, bounds, fs, options
         )

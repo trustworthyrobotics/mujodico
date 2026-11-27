@@ -377,7 +377,11 @@ class StagewiseOcpModel:
       return self._state_difference(self._user_initial_state_fn(p), x)
 
     def stage_lagrangian(x, u, xnext, k, ld, le, li, scale, p):
-      value = scale * self._user_stage_cost_fn(x, u, k, p)
+      value = jax.lax.cond(
+          scale == 0,
+          lambda: jp.asarray(0.0, x.dtype),
+          lambda: scale * self._user_stage_cost_fn(x, u, k, p),
+      )
       if not self._gauss_newton:
         value += jp.vdot(ld, dynamics_local(x, u, xnext, k, p))
         value += jp.vdot(le, stage_eq(x, u, xnext, k, p))
@@ -385,7 +389,11 @@ class StagewiseOcpModel:
       return value
 
     def terminal_lagrangian(x, le, li, scale, p):
-      value = scale * self._user_terminal_cost_fn(x, p)
+      value = jax.lax.cond(
+          scale == 0,
+          lambda: jp.asarray(0.0, x.dtype),
+          lambda: scale * self._user_terminal_cost_fn(x, p),
+      )
       if not self._gauss_newton:
         value += jp.vdot(le, terminal_eq(x, p))
         value += jp.vdot(li, terminal_ineq(x, p))

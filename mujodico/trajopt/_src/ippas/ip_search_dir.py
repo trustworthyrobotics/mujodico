@@ -1,4 +1,6 @@
 from dataclasses import replace
+from collections.abc import Callable
+from typing import TypeVar
 
 import jax
 import jax.numpy as jp
@@ -6,6 +8,9 @@ import jax.numpy as jp
 from mujodico.trajopt._src.ippas import ip_primal_dual_system as pd
 from mujodico.trajopt._src.ippas.ip_iterate import all_finite, max_abs
 from mujodico.trajopt._src.ippas.options import Options
+
+
+System = TypeVar("System")
 
 
 def compute(
@@ -18,23 +23,6 @@ def compute(
 
   o = options
   delta_c = dual_regularization(system.Eu, mu, o)
-  dual_valid = control_equalities_full_rank(system.Eu, o) | (
-      jp.isfinite(delta_c) & (delta_c > 0)
-  )
-  H = jp.concatenate(
-      (
-          jp.concatenate((system.Hxx[:-1], system.Hxu), axis=-1),
-          jp.concatenate((system.Hxu.swapaxes(-1, -2), system.Huu), axis=-1),
-      ),
-      axis=-2,
-  )
-  mineig = jp.minimum(
-      jp.min(jp.linalg.eigvalsh(H)),
-      jp.min(jp.linalg.eigvalsh(system.Hxx[-1])),
-  )
-  tolerance = (
-      100 * jp.finfo(H.dtype).eps * jp.maximum(1, max_abs(H, system.Hxx[-1]))
-  )
 
   def attempt(delta: jax.Array) -> tuple[pd.IpPrimalDualSystem, jax.Array]:
     shifted = replace(
@@ -63,22 +51,49 @@ def compute(
         solved.dy,
         solved.dyf,
     ))
-    curvature_valid = mineig + delta >= -tolerance
     if o.print_level > 1:
       jax.debug.print(
-          'Newton residual={r:.2e} reg={d:.2e} dual_reg={dc:.2e}',
+          "Newton residual={r:.2e} reg={d:.2e} dual_reg={dc:.2e}",
           r=max_abs(*pd.system_defect(solved).values()),
           d=delta,
           dc=delta_c,
       )
-    return solved, dual_valid & finite & accurate & curvature_valid
+    return solved, finite & accurate
+
+  return regularized_solve((system.Hxx, system.Hxu, system.Huu), last_delta, o, attempt)
+
+
+def regularized_solve(
+    hessian: tuple[jax.Array, jax.Array, jax.Array],
+    last_delta: jax.Array,
+    o: Options,
+    attempt: Callable[[jax.Array], tuple[System, jax.Array]],
+) -> tuple[System, jax.Array, jax.Array]:
+  """Retry an injected structured solve using the common δw schedule."""
+  Hxx, Hxu, Huu = hessian
+  H = jp.concatenate(
+      (
+          jp.concatenate((Hxx[:-1], Hxu), axis=-1),
+          jp.concatenate((Hxu.swapaxes(-1, -2), Huu), axis=-1),
+      ),
+      axis=-2,
+  )
+  mineig = jp.minimum(
+      jp.min(jp.linalg.eigvalsh(H)),
+      jp.min(jp.linalg.eigvalsh(Hxx[-1])),
+  )
+  tolerance = 100 * jp.finfo(H.dtype).eps * jp.maximum(1, max_abs(H, Hxx[-1]))
+
+  def try_shift(delta: jax.Array) -> tuple[System, jax.Array]:
+    solved, good = attempt(delta)
+    return solved, good & (mineig + delta >= -tolerance)
 
   margin = jp.maximum(o.delta_w0, tolerance)
   delta_w = jp.minimum(
       o.delta_w_max,
       jp.where(mineig < -tolerance, -mineig + margin, 0.0),
   )
-  solved, good = attempt(delta_w)
+  solved, good = try_shift(delta_w)
   initial = (solved, good, delta_w)
 
   def next_delta(current: jax.Array) -> jax.Array:
@@ -95,9 +110,7 @@ def compute(
   def cond(carry) -> jax.Array:
     _, good, delta_w = carry
     following = next_delta(delta_w)
-    return (
-        dual_valid
-        & ~good
+    return (~good
         & (delta_w < o.delta_w_max)
         & jp.isfinite(following)
         & (following > delta_w)
@@ -106,7 +119,7 @@ def compute(
   def body(carry):
     _, _, delta_w = carry
     delta_w = next_delta(delta_w)
-    solved, good = attempt(delta_w)
+    solved, good = try_shift(delta_w)
     return solved, good, delta_w
 
   solved, good, delta_w = jax.lax.while_loop(cond, body, initial)

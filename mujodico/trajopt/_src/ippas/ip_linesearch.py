@@ -47,9 +47,16 @@ For SOC, αₜₑₛₜ remains the original maximum primal step.
 After acceptance, augment the filter with the shifted current-point corner
 ((1 − γ_θ) θ₀, φ₀ − γ_φ θ₀), unless the step passes both the f-type
 switch and Armijo test using the same αₜₑₛₜ as acceptance.
+
+Watchdog trials instead use a frozen reference and may be committed
+provisionally without updating the filter. The outer algorithm owns their
+rollback snapshots. Soft restoration uses a common primal/dual step and
+sufficient reduction of the block-average primal-dual residual before handing
+control to elastic ℓ₁ restoration if recovery fails.
 """
 
-from typing import NamedTuple
+from collections.abc import Callable
+from typing import Generic, NamedTuple, TypeVar
 
 import jax
 import jax.numpy as jp
@@ -65,6 +72,11 @@ from mujodico.trajopt._src.ippas.ip_iterate import (
 from mujodico.trajopt._src.ippas.options import Options
 from mujodico.trajopt._src.stagewise_ocp_model import StagewiseOcpModel
 from mujodico.trajopt._src.types import Params
+
+
+Point = TypeVar('Point')
+System = TypeVar('System')
+Bounds = tuple[jax.Array, jax.Array, jax.Array, jax.Array]
 
 
 class LineSearchState(NamedTuple):
@@ -84,11 +96,11 @@ class LineSearchState(NamedTuple):
     )
 
 
-class Search(NamedTuple):
+class Search(NamedTuple, Generic[Point]):
   """A single trial point and its acceptance decision."""
 
   alpha: jax.Array
-  iterate: Iterate
+  iterate: Point
   evaluation: dict[str, jax.Array]
   accepted: jax.Array
 
@@ -417,17 +429,49 @@ def find_acceptable_trial_point(
     bounds: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
     state: LineSearchState,
     options: Options,
-) -> tuple[Search, LineSearchState, jax.Array, jax.Array]:
+    *,
+    skip_first: jax.Array = False,
+) -> 'LineSearchResult':
   """Return the selected trial, filter state, rejection history, and tiny flag.
 
   A valid finite maximum-step tiny trial bypasses progress/filter tests and
   filter augmentation. An invalid tiny trial falls back to normal globalization.
   """
-  max_alpha_primal, max_alpha_dual = maximum_step_lengths(it, direction, mu, bounds, options)
-
   phi0, theta0 = merit(it, vars(data), mu, bounds, options)
-  tiny_direction = detect_tiny_step(it, direction, theta0, options)
+  dphi = directional_derivative(it, data, direction, mu, bounds, options)
+  return search(
+      it,
+      vars(data),
+      direction,
+      state,
+      options,
+      phi0,
+      theta0,
+      dphi,
+      lambda d, ap, ad: candidate(
+          model, it, d, ap, ad, mu, params, bounds, options
+      ),
+      lambda point: evaluate_trial(model, point, params),
+      lambda point, values: merit(point, values, mu, bounds, options),
+      lambda point: ip_iterate.valid(point, bounds, model.quaternion_addrs),
+      lambda d: maximum_step_lengths(it, d, mu, bounds, options),
+      lambda d: pd.iterative_refinement_solve(
+          d, options.linear_ref_tol, options.max_refinement
+      ),
+      detect_tiny_step(it, direction, theta0, options),
+      skip_first,
+  )
 
+
+def directional_derivative(
+    it: Iterate,
+    data: IterateData,
+    direction: pd.IpPrimalDualSystem,
+    mu: jax.Array,
+    bounds: Bounds,
+    options: Options,
+) -> jax.Array:
+  """Barrier-objective directional derivative at the reference point."""
   dphi = (
       jp.sum(data.objective_gradx * direction.dx)
       + jp.sum(data.objective_gradu * direction.du)
@@ -445,30 +489,56 @@ def find_acceptable_trial_point(
         )
     )
 
+  return dphi
+
+
+class LineSearchResult(NamedTuple, Generic[Point]):
+  search: Search[Point]
+  state: LineSearchState
+  filter_rejected: jax.Array
+  tiny_step: jax.Array
+  backtracked: jax.Array
+
+
+def search(
+    it: Point,
+    values: dict[str, jax.Array],
+    direction: System,
+    state: LineSearchState,
+    options: Options,
+    phi0: jax.Array,
+    theta0: jax.Array,
+    dphi: jax.Array,
+    make_candidate: Callable[[System, jax.Array, jax.Array], Point],
+    evaluate: Callable[[Point], dict[str, jax.Array]],
+    merit_value: Callable[
+        [Point, dict[str, jax.Array]], tuple[jax.Array, jax.Array]
+    ],
+    valid: Callable[[Point], jax.Array],
+    limits: Callable[[System], tuple[jax.Array, jax.Array]],
+    refine: Callable[[System], tuple[System, jax.Array]],
+    tiny_direction: bool | jax.Array = False,
+    skip_first: bool | jax.Array = False,
+) -> LineSearchResult[Point]:
+  """Shared filter/SOC search; callbacks are static Python functions under JIT.
+
+  Keep per-search outcome flags outside Search, which describes one trial.
+  skip_first resumes a rolled-back watchdog search at the first reduced step.
+  """
+  max_alpha_primal, max_alpha_dual = limits(direction)
+
   def trial(
-      direction: pd.IpPrimalDualSystem,
+      direction: System,
       alpha_primal: jax.Array,
       alpha_dual: jax.Array,
       alpha_test: jax.Array,
       *,
-      allow_tiny: bool = False,
-  ) -> tuple[Search, jax.Array, jax.Array, jax.Array]:
-    trial_iterate = candidate(
-        model,
-        it,
-        direction,
-        alpha_primal,
-        alpha_dual,
-        mu,
-        params,
-        bounds,
-        options,
-    )
-    evaluation = evaluate_trial(model, trial_iterate, params)
-    phi, theta = merit(trial_iterate, evaluation, mu, bounds, options)
-    iterate_valid = ip_iterate.valid(
-        trial_iterate, bounds, model.quaternion_addrs
-    )
+      allow_tiny: bool | jax.Array = False,
+  ) -> tuple[Search[Point], jax.Array, jax.Array, jax.Array]:
+    trial_iterate = make_candidate(direction, alpha_primal, alpha_dual)
+    evaluation = evaluate(trial_iterate)
+    phi, theta = merit_value(trial_iterate, evaluation)
+    iterate_valid = valid(trial_iterate)
     accepted, rejected_by_filter = acceptable(
         phi=phi,
         theta=theta,
@@ -500,17 +570,25 @@ def find_acceptable_trial_point(
 
   first, theta_first, first_filter_rejected, tiny_step_taken = trial(
       direction,
-      max_alpha_primal,
+      jp.where(
+          skip_first,
+          max_alpha_primal * options.alpha_red_factor,
+          max_alpha_primal,
+      ),
       max_alpha_dual,
-      max_alpha_primal,
-      allow_tiny=True,
+      jp.where(
+          skip_first,
+          max_alpha_primal * options.alpha_red_factor,
+          max_alpha_primal,
+      ),
+      allow_tiny=~jp.asarray(skip_first),
   )
 
   # SOC modifies only constraint RHSs and reuses the Newton factors. A failed
   # correction never replaces the original Newton direction for backtracking.
   soc_initial = (
       first,
-      {name: getattr(data, name) for name in _EQUALITY_CONSTRAINT_FIELDS},
+      {name: values[name] for name in _EQUALITY_CONSTRAINT_FIELDS},
       theta_first,
       jp.asarray(jp.inf),
       jp.asarray(0, jp.int32),
@@ -520,7 +598,8 @@ def find_acceptable_trial_point(
   def soc_cond(carry) -> jax.Array:
     candidate, _, theta, old_theta, count, _ = carry
     return (
-        (theta_first >= theta0)  # if theta_first < theta0, skip SOC
+        (~jp.asarray(skip_first))
+        & (theta_first >= theta0)  # if theta_first < theta0, skip SOC
         & (~candidate.accepted)
         & (count < options.max_soc)
         & (theta < options.kappa_soc * old_theta)
@@ -536,12 +615,8 @@ def find_acceptable_trial_point(
         name: previous.alpha * accumulated[name] + previous.evaluation[name]
         for name in _EQUALITY_CONSTRAINT_FIELDS
     }
-    corrected, accurate = pd.iterative_refinement_solve(
-        direction.replace_rhs(**acc),
-        linear_ref_tol=options.linear_ref_tol,
-        max_refinement=options.max_refinement,
-    )
-    ap_soc, ad_soc = maximum_step_lengths(it, corrected, mu, bounds, options)
+    corrected, accurate = refine(direction.replace_rhs(**acc))
+    ap_soc, ad_soc = limits(corrected)
     candidate, new_theta, rejected_by_filter, _ = trial(
         corrected, ap_soc, ad_soc, max_alpha_primal
     )
@@ -574,7 +649,9 @@ def find_acceptable_trial_point(
   def backtrack_body(carry):
     previous, any_filter_rejection = carry
     alpha = previous.alpha * options.alpha_red_factor
-    candidate, _, rejected_by_filter, _ = trial(direction, alpha, max_alpha_dual, alpha)
+    candidate, _, rejected_by_filter, _ = trial(
+        direction, alpha, max_alpha_dual, alpha
+    )
     return (
         candidate,
         any_filter_rejection | rejected_by_filter,
@@ -591,7 +668,7 @@ def find_acceptable_trial_point(
       None,
   )
 
-  phi, _ = merit(found.iterate, found.evaluation, mu, bounds, options)
+  phi, _ = merit_value(found.iterate, found.evaluation)
 
   alpha_test = jp.where(corrected.accepted, max_alpha_primal, found.alpha)
   augment = (
@@ -610,11 +687,15 @@ def find_acceptable_trial_point(
       state.filter,
   )
 
-  return (
+  backtracked = jp.asarray(skip_first) | (
+      ~corrected.accepted & (found.alpha < max_alpha_primal)
+  )
+  return LineSearchResult(
       found,
       state._replace(filter=updated_filter),
       any_filter_rejection,
       tiny_step_taken,
+      backtracked,
   )
 
 
@@ -642,3 +723,182 @@ def update_filter_rejections(
       filter=jax.lax.cond(reset, ip_filter.reset, lambda f: f, state.filter)
   )
   return state, jp.where(reset, 0, rejections), resets + reset.astype(jp.int32)
+
+
+class WatchdogState(NamedTuple):
+  """A fixed-shape rollback snapshot; derivative factors are recomputed."""
+
+  active: jax.Array
+  shortened: jax.Array
+  trials: jax.Array
+  iterate: Iterate
+  phi: jax.Array
+  theta: jax.Array
+  dphi: jax.Array
+  alpha: jax.Array
+  last_delta: jax.Array
+  acceptable_count: jax.Array
+
+  @staticmethod
+  def create(it: Iterate) -> 'WatchdogState':
+    zero = jp.asarray(0, jp.int32)
+    scalar = jp.asarray(0.0, it.x.dtype)
+    return WatchdogState(
+        jp.asarray(False),
+        zero,
+        zero,
+        it,
+        scalar,
+        scalar,
+        scalar,
+        scalar,
+        scalar,
+        zero,
+    )
+
+  def for_barrier_change(self, changed: jax.Array) -> 'WatchdogState':
+    """Cancel the episode/history when μ changes, retaining the current point."""
+    return self._replace(
+        active=self.active & ~changed,
+        shortened=jp.where(changed, 0, self.shortened),
+    )
+
+
+def primal_dual_error(
+    it: Iterate,
+    data: IterateData,
+    mu: jax.Array,
+    bounds: Bounds,
+    options: Options,
+) -> jax.Array:
+  """FATROP soft-restoration error: sum of mean absolute residual blocks.
+
+  Combine state/control stationarity in one block and stage/terminal slack
+  stationarity in another. Each bound-side complementarity block includes
+  masked zeros on infinite sides, matching FATROP's vector-size convention.
+  """
+
+  def mean(*values):
+    return sum(jp.sum(jp.abs(v)) for v in values) / max(
+        1, sum(v.size for v in values)
+    )
+
+  rs = -it.y - it.z_l + it.z_u + damping(*bounds[:2], mu, options)
+  rsf = -it.yf - it.zf_l + it.zf_u + damping(*bounds[2:], mu, options)
+  cl, cu = ip_iterate.complementarity(it.s, it.z_l, it.z_u, *bounds[:2], mu)
+  cfl, cfu = ip_iterate.complementarity(
+      it.sf, it.zf_l, it.zf_u, *bounds[2:], mu
+  )
+  return (
+      mean(data.stationarity_x, data.stationarity_u)
+      + mean(rs, rsf)
+      + mean(data.r0, data.r_f, data.r_e, data.r_g, data.r_gf)
+      + mean(cl, cfl)
+      + mean(cu, cfu)
+  )
+
+
+def try_soft_resto_step(
+    model: StagewiseOcpModel,
+    it: Iterate,
+    data: IterateData,
+    direction: pd.IpPrimalDualSystem,
+    mu: jax.Array,
+    params: Params,
+    bounds: Bounds,
+    state: LineSearchState,
+    options: Options,
+) -> tuple[Search[Iterate], jax.Array]:
+  """Try a common fraction-to-boundary step before full restoration.
+
+  Return (trial, ordinary_acceptance). A valid finite step passing ordinary
+  acceptance at α_test=0 exits soft restoration. Otherwise sufficient decrease
+  of the FATROP primal-dual error allows a soft continuation.
+  """
+  ap, ad = maximum_step_lengths(it, direction, mu, bounds, options)
+  alpha = jp.minimum(ap, ad)
+  point = candidate(
+      model, it, direction, alpha, alpha, mu, params, bounds, options
+  )
+  _, values = pd.evaluate(model, point, params, mu, bounds, options)
+  phi, theta = merit(point, vars(values), mu, bounds, options)
+  phi0, theta0 = merit(it, vars(data), mu, bounds, options)
+  ordinary, _ = acceptable(
+      phi,
+      theta,
+      phi0,
+      theta0,
+      jp.asarray(0.0, mu.dtype),
+      jp.asarray(0.0, mu.dtype),
+      state,
+      options,
+  )
+  finite = (
+      ip_iterate.valid(point, bounds, model.quaternion_addrs)
+      & ip_iterate.all_finite(values)
+      & jp.isfinite(phi)
+  )
+  decrease = primal_dual_error(
+      point, values, mu, bounds, options
+  ) <= options.soft_rest_pd_error_reduction_factor * primal_dual_error(
+      it, data, mu, bounds, options
+  )
+  enabled = options.soft_rest_pd_error_reduction_factor > 0
+  return (
+      Search(
+          alpha, point, vars(values), finite & enabled & (ordinary | decrease)
+      ),
+      finite & ordinary & enabled,
+  )
+
+
+def watchdog_trial(
+    model: StagewiseOcpModel,
+    it: Iterate,
+    direction: pd.IpPrimalDualSystem,
+    mu: jax.Array,
+    params: Params,
+    bounds: Bounds,
+    state: LineSearchState,
+    watchdog: WatchdogState,
+    options: Options,
+) -> tuple[Search[Iterate], jax.Array, LineSearchState]:
+  """Evaluate a watchdog maximum step against its frozen reference.
+
+  The caller may commit an eligible but unaccepted point provisionally; it
+  must never commit a nonfinite or out-of-domain trial this way.
+  """
+  ap, ad = maximum_step_lengths(it, direction, mu, bounds, options)
+  point = candidate(model, it, direction, ap, ad, mu, params, bounds, options)
+  values = evaluate_trial(model, point, params)
+  phi, theta = merit(point, values, mu, bounds, options)
+  ordinary, _ = acceptable(
+      phi,
+      theta,
+      watchdog.phi,
+      watchdog.theta,
+      watchdog.dphi,
+      watchdog.alpha,
+      state,
+      options,
+  )
+  eligible = (
+      ip_iterate.valid(point, bounds, model.quaternion_addrs)
+      & jp.isfinite(phi)
+      & jp.isfinite(theta)
+  )
+  augment = ordinary & (
+      ~f_type(watchdog.alpha, watchdog.theta, watchdog.dphi, options)
+      | ~armijo(phi, watchdog.phi, watchdog.alpha, watchdog.dphi, options)
+  )
+  updated = state._replace(
+      filter=jax.lax.cond(
+          eligible & augment,
+          lambda f: ip_filter.augment_filter(
+              f, watchdog.theta, watchdog.phi, options
+          ),
+          lambda f: f,
+          state.filter,
+      )
+  )
+  return Search(ap, point, values, eligible & ordinary), eligible, updated

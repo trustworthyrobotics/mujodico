@@ -89,6 +89,23 @@ class Options:
   # Maximum filter resets; −1 is unlimited and zero disables resets.
   max_filter_resets: int = -1
 
+  # Watchdog: zero trigger disables it; trial limit includes rejected trials.
+  watchdog_shortened_iter_trigger: int = 10
+  watchdog_trial_iter_max: int = 3
+
+  # Soft restoration: zero reduction factor disables it. The iteration limit
+  # counts continuations after the initial soft-restoration trial (FATROP).
+  soft_rest_pd_error_reduction_factor: float = 0.9999
+  max_soft_resto_iters: int = 10
+
+  # Full elastic ℓ₁ restoration. All optimization phases share max_iter.
+  restoration_enabled: bool = True
+  resto_penalty_parameter: float = 1000.0
+  # Required fraction of entry infeasibility; zero requires exact feasibility.
+  required_infeasibility_reduction: float = 0.9
+  # Reset finite-side bound duals to one if this magnitude is exceeded.
+  bound_mult_reset_threshold: float = 1000.0
+
   # Second-order corrections (SOC).
   # Maximum SOC trials per search; zero disables SOC.
   max_soc: int = 4
@@ -133,12 +150,15 @@ class Options:
   record_intermediates: bool = False
 
   def __post_init__(self) -> None:
-    positive_counts = ('filter_reset_trigger',)
+    positive_counts = ('filter_reset_trigger', 'watchdog_trial_iter_max')
     nonnegative_reals = (
         'kappa_d',
         'bound_relax_factor',
         'tiny_step_tol',
         'tiny_step_y_tol',
+        'soft_rest_pd_error_reduction_factor',
+        'required_infeasibility_reduction',
+        'bound_mult_reset_threshold',
     )
     # Iterate over the dataclass schema so every field receives validation,
     # including new fields added later. Reject booleans as numeric settings.
@@ -201,3 +221,10 @@ class Options:
       raise ValueError('kappa_sigma must be >= 1.')
     if self.theta_min_fact > self.theta_max_fact:
       raise ValueError('Require theta_min_fact <= theta_max_fact.')
+
+    for name in (
+        'soft_rest_pd_error_reduction_factor',
+        'required_infeasibility_reduction',
+    ):
+      if getattr(self, name) >= 1:
+        raise ValueError(f'{name} must lie in [0, 1).')
