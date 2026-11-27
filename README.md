@@ -83,7 +83,7 @@ python -m mujodico.examples --help
 
 ## Versioning
 
-The `major.minor.micro` portion of the version number matches the version of MuJoCo. Optionally, if we release updates to MuJoDiCo that target the same version of MuJoCo, a `.postN` suffix is added, for example `3.15.0.post2` represents the second update to MuJoDiCo for MuJoCo 3.15.0.
+The `major.minor.micro` portion of the version number matches the version of MuJoCo.
 
 ## License and Disclaimer
 
