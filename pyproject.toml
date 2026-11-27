@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name="mujodico"
-version = "4.0.0"
+version = "4.0.1"
 authors = [
     {name = "Wei-Chen Li", email = "williamrob104@gmail.com"},
 ]
@@ -30,7 +30,7 @@ dependencies = [
     "etils[epath]",
     "jax",
     "jaxlib",
-    "mujoco-core[rendering]>=4.0.0.dev0",
+    "mujoco-core[rendering]>=4.0.1.dev0",
     "scipy",
     "trimesh",
 ]
