@@ -26,11 +26,14 @@ The KKT conditions are
   Eˣₖ xₖ + Eᵘₖ uₖ = -eₖ                            for k = 0,…,T−1
   x₀ = x̂₀
 
-With delta_c > 0, the stage-equality equation becomes
-Eˣₖ xₖ + Eᵘₖ uₖ - delta_c βₖ = -eₖ. Initial and dynamics equations
-remain exact. The parallel elimination uses the local saddle block
-[[Rₖ, (Eᵘₖ)ᵀ], [Eᵘₖ, -delta_c I]]. Matrix changes, including delta_c,
-require clearing _cache; replace_rhs() preserves factors for fixed matrices.
+With scalar delta_c > 0 (or a stagewise diagonal array shaped like e),
+the stage-equality equation becomes
+
+  Eˣₖ xₖ + Eᵘₖ uₖ - delta_c βₖ = -eₖ
+
+Initial and dynamics equations remain exact. The parallel elimination uses the
+local saddle block [[Rₖ, (Eᵘₖ)ᵀ], [Eᵘₖ, -delta_c I]]. Matrix changes, including
+delta_c, require clearing _cache; replace_rhs() preserves factors for fixed matrices.
 """
 
 from dataclasses import dataclass, replace
@@ -144,7 +147,7 @@ class EqualityConstrainedLQR:
       x0: jax.Array,
       delta_c: float | jax.Array = 0.0,
   ) -> 'EqualityConstrainedLQR':
-    assert jp.shape(delta_c) == ()
+    assert jp.shape(delta_c) in ((), e.shape)
     T, nx, nu = N.shape
     assert Q.shape == (T + 1, nx, nx)
     assert N.shape == (T, nx, nu)
@@ -203,10 +206,10 @@ def _build_matrix_cache(prob: EqualityConstrainedLQR) -> _MatrixCache:
   nx = prob.Q.shape[1]
   nc = prob.e.shape[1]
 
-  def boundary_map(Qk, Nk, Rk, Ak, Bk, Exk, Euk):
+  def boundary_map(Qk, Nk, Rk, Ak, Bk, Exk, Euk, shift):
     Mk = jp.block([
         [Rk, Euk.T],
-        [Euk, -prob.delta_c * jp.eye(nc, dtype=Rk.dtype)],
+        [Euk, -jp.diag(shift)],
     ])
     Kk = jp.vstack([
         Nk.T,
@@ -237,6 +240,7 @@ def _build_matrix_cache(prob: EqualityConstrainedLQR) -> _MatrixCache:
       Bk=prob.B,
       Exk=prob.Ex,
       Euk=prob.Eu,
+      shift=jp.broadcast_to(prob.delta_c, prob.e.shape),
   )
 
   def compose_boundary(later, earlier):

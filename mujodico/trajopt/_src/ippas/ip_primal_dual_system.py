@@ -530,10 +530,50 @@ def evaluate(
   Newton solves replace their RHS for SOC or iterative refinement.
   """
 
+  it = iterate
+  gx, gu = model.objective_gradient(it.x, it.u, params)
+  Hxx, Hxu, Huu = model.lagrangian_hessian(
+      it.x,
+      it.u,
+      it.lmbda[0],
+      it.lmbda[1:],
+      it.beta,
+      it.y,
+      jp.zeros(0),
+      it.yf,
+      1.0,
+      params,
+  )
+  return assemble_system(
+      model,
+      it,
+      params,
+      mu,
+      bounds,
+      options,
+      jp.sum(model.objective(it.x, it.u, params)),
+      (gx, gu),
+      (Hxx, Hxu, Huu),
+  )
+
+
+def assemble_system(
+    model: StagewiseOcpModel,
+    iterate: Iterate,
+    params: Params,
+    mu: jax.Array,
+    bounds: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
+    options: Options,
+    objective: jax.Array,
+    gradient: tuple[jax.Array, jax.Array],
+    hessian: tuple[jax.Array, jax.Array, jax.Array],
+) -> tuple[IpPrimalDualSystem, IterateData]:
+  """Assemble constraint derivatives and KKT residuals for supplied cost data."""
   m = model
   it = iterate
 
-  gx, gu = m.objective_gradient(it.x, it.u, params)
+  gx, gu = gradient
+  Hxx, Hxu, Huu = hessian
   A, B = m.dynamics_jacobian(it.x[:-1], it.u, it.x[1:], params)
   Ex, Eu = m.stage_equality_jacobian(it.x[:-1], it.u, params, xs_next=it.x[1:])
   Gx, Gu = m.stage_inequality_jacobian(it.x[:-1], it.u, params)
@@ -555,19 +595,6 @@ def evaluate(
   r_u = gu + _mv(B.swapaxes(-1, -2), it.lmbda[1:])
   r_u += _mv(Eu.swapaxes(-1, -2), it.beta) + _mv(Gu.swapaxes(-1, -2), it.y)
 
-  Hxx, Hxu, Huu = m.lagrangian_hessian(
-      it.x,
-      it.u,
-      it.lmbda[0],
-      it.lmbda[1:],
-      it.beta,
-      it.y,
-      jp.zeros(0),
-      it.yf,
-      1.0,
-      params,
-  )
-
   g_l, g_u, gf_l, gf_u = bounds
 
   # rˢₖ = -yₖ - zˡₖ + zᵘₖ + dₖ
@@ -579,7 +606,7 @@ def evaluate(
   r_cf_l, r_cf_u = complementarity(it.sf, it.zf_l, it.zf_u, gf_l, gf_u, mu)
 
   data = IterateData(
-      objective=jp.sum(m.objective(it.x, it.u, params)),
+      objective=objective,
       objective_gradx=gx,
       objective_gradu=gu,
       stationarity_x=r_x,

@@ -75,7 +75,9 @@ class IpAlgorithmTest(absltest.TestCase):
     self.assertLess(float(r.error), 1e-8)
 
   def test_primal_dual_warm_start(self):
-    solver = IppasSolver(simple_model(u_bounds=(np.array([-1.0]), np.array([1.0]))))
+    solver = IppasSolver(
+        simple_model(u_bounds=(np.array([-1.0]), np.array([1.0])))
+    )
     r = jax.jit(solver.solve)(
         jp.array([0.0, 2.0]),
         IppasInitialGuess(jp.zeros((4, 1)), jp.zeros((3, 1))),
@@ -233,7 +235,9 @@ class IpAlgorithmTest(absltest.TestCase):
     )
     self.assertEqual(int(r.status), IppasStatus.MAX_ITER)
     with self.assertRaisesRegex(ValueError, 'terminal equalities'):
-      IppasSolver(simple_model(terminal_equality_constraint=lambda x, p: x)).solve(
+      IppasSolver(
+          simple_model(terminal_equality_constraint=lambda x, p: x)
+      ).solve(
           jp.array([0.0, 2.0]),
           IppasInitialGuess(jp.zeros((4, 1)), jp.zeros((3, 1))),
       )
@@ -254,7 +258,14 @@ class IpAlgorithmTest(absltest.TestCase):
         ),
         terminal_cost=lambda x, p: jp.array(0.0),
     )
-    s = IppasSolver(m, IppasOptions(max_soc=0))
+    s = IppasSolver(
+        m,
+        IppasOptions(
+            max_soc=0,
+            restoration_enabled=False,
+            soft_rest_pd_error_reduction_factor=0,
+        ),
+    )
     result = jax.jit(s.solve)(
         jp.array([0.0, 0.0]),
         IppasInitialGuess(jp.zeros((2, 1)), jp.zeros((1, 1))),
